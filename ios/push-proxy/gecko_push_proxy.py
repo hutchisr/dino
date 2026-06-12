@@ -25,6 +25,8 @@ import time
 import httpx
 import jwt
 import slixmpp
+from slixmpp.xmlstream.handler import CoroutineCallback
+from slixmpp.xmlstream.matcher import StanzaPath
 
 log = logging.getLogger("gecko-push")
 
@@ -74,30 +76,36 @@ class PushBot(slixmpp.ClientXMPP):
         super().__init__(jid, password)
         self.apns = apns
         self.add_event_handler("session_start", self.on_start)
-        self.add_event_handler("pubsub_publish", self.on_publish)
         self.register_plugin("xep_0030")
         self.register_plugin("xep_0060")
         self.register_plugin("xep_0198")
+        # XEP-0357 sends the push publish as an iq-set to the app server
+        self.register_handler(CoroutineCallback(
+            "xep0357-publish",
+            StanzaPath("iq@type=set/pubsub/publish"),
+            self.on_publish_iq))
 
     async def on_start(self, _event):
         self.send_presence()
         log.info("connected as %s", self.boundjid.full)
 
-    async def on_publish(self, msg):
+    async def on_publish_iq(self, iq):
         try:
-            node = msg["pubsub_event"]["items"]["node"]
-            await self.handle_publish(node, msg)
+            node = iq["pubsub"]["publish"]["node"]
+            log.info("publish for node %s… from %s", (node or "")[:8], iq["from"])
+            iq.reply().send()
+            await self.handle_publish(node, iq)
         except Exception:
             log.exception("failed to handle publish")
 
-    async def handle_publish(self, node: str, msg):
+    async def handle_publish(self, node: str, iq):
         if not TOKEN_RE.match(node or ""):
             log.warning("publish with non-token node %r ignored", (node or "")[:24])
             return
         # XEP-0357 summary form may carry a message count
         count = None
         try:
-            for field in msg.xml.iter("{jabber:x:data}field"):
+            for field in iq.xml.iter("{jabber:x:data}field"):
                 if field.get("var") == "message-count":
                     value = field.find("{jabber:x:data}value")
                     if value is not None and value.text:

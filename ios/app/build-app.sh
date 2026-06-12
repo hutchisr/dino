@@ -25,10 +25,35 @@ LIBS="$(pkg-config --libs --static libsoup-3.0 gee-0.8 gdk-pixbuf-2.0 gioopenssl
 
 rm -rf "$APP" && mkdir -p "$APP"
 
+# On the simulator, entitlements (aps-environment for APNs) live in a
+# __TEXT,__entitlements section embedded at link time; putting them in the
+# ad-hoc code signature makes AMFI refuse to spawn the binary.
+SIM_ENTS=""
+if [ "$TARGET" = "sim-arm64" ]; then
+  cat > "$BUILD/sim-entitlements.plist" <<'EOF2'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>998J34UYP5.me.anemoneya.gecko</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>998J34UYP5</string>
+	<key>aps-environment</key>
+	<string>development</string>
+	<key>get-task-allow</key>
+	<true/>
+</dict>
+</plist>
+EOF2
+  SIM_ENTS="-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker $BUILD/sim-entitlements.plist"
+fi
+
 xcrun -sdk "$SDK" swiftc \
   -target "$TRIPLE" \
   -import-objc-header "$HERE/bridge.h" \
   $(printf -- '-Xcc %s ' $CFLAGS) -Xcc -I"$PREFIX/include" \
+  $SIM_ENTS \
   "$HERE"/Sources/*.swift \
   -L "$PREFIX/lib" -L "$PREFIX/lib/gio/modules" -L "$PREFIX/lib/dino/plugins" \
   -ldinoios -ldino -lxmpp-vala -lqlite -lcrypto-vala \
@@ -38,25 +63,13 @@ xcrun -sdk "$SDK" swiftc \
   -o "$APP/Gecko"
 
 cp "$HERE/Info.plist" "$APP/Info.plist"
-# aps-environment lets the app register with APNs (sandbox); required on
-# the simulator too for remote push delivery
-cat > "$BUILD/sim-entitlements.plist" <<'EOF2'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>aps-environment</key>
-	<string>development</string>
-</dict>
-</plist>
-EOF2
 # app icon sizes from the master image
 if [ -f "$HERE/AppIcon.png" ]; then
   sips -z 120 120 "$HERE/AppIcon.png" --out "$APP/AppIcon60x60@2x.png" >/dev/null
   sips -z 180 180 "$HERE/AppIcon.png" --out "$APP/AppIcon60x60@3x.png" >/dev/null
   sips -z 152 152 "$HERE/AppIcon.png" --out "$APP/AppIcon76x76@2x~ipad.png" >/dev/null
 fi
-codesign --force --sign - --entitlements "$BUILD/sim-entitlements.plist" "$APP"
+codesign --force --sign - "$APP"
 echo "built $APP"
 
 if [ "$TARGET" = "device-arm64" ]; then

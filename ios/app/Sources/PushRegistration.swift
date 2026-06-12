@@ -25,7 +25,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 enum PushRegistration {
     /// The XMPP account acting as the push proxy (see ios/push-proxy).
     static var proxyJid: String {
-        ProcessInfo.processInfo.environment["DINO_PUSH_PROXY_JID"] ?? "geckopush@xmpp.is"
+        // full jid with fixed resource: iq-sets to a bare account jid are
+        // answered by the server itself and never reach the proxy client
+        ProcessInfo.processInfo.environment["DINO_PUSH_PROXY_JID"] ?? "geckopush@xmpp.is/proxy"
     }
 
     static private(set) var deviceToken: String?

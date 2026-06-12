@@ -31,10 +31,15 @@ Verified end-to-end in the iOS Simulator (arm64) against real servers
 
 Known gaps / not done:
 
-* Push notifications (deliberately skipped for now): iOS suspends the app
-  in the background and the TCP stream dies. Needs XEP-0357 + a push proxy
-  + a Notification Service Extension. Until then, messages only arrive
-  while the app is foregrounded (history catches up via MAM on reconnect).
+* Push notifications work via XEP-0357 + the bundled proxy
+  (ios/push-proxy): content-free "New message" banners wake the user;
+  opening the app reconnects (fast resume path) and syncs via MAM.
+  Notable pitfalls encoded in the implementation: the publish arrives as
+  an iq-set (not a pubsub message event), and the push service must be a
+  full jid with a fixed resource — iq-sets to a bare account jid are
+  answered by the server itself and never reach a client bot. On the
+  simulator, entitlements must live in a __TEXT,__entitlements section
+  (link-time), not the ad-hoc signature.
 * Calls (`plugin-rtp`/`plugin-ice`): not ported. GStreamer publishes
   official iOS binaries, so this is feasible but is its own project.
 * JID stringprep uses a casefold fallback (`-Dicu=disabled`); full
