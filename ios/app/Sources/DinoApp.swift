@@ -71,7 +71,8 @@ struct AccountSetupView: View {
                 .disabled(submitting || jid.isEmpty || password.isEmpty)
             }
         }
-        .navigationTitle("Dino")
+        .navigationTitle("Log In")
+        .navigationBarTitleDisplayMode(.inline)
         .onChange(of: model.lastError) { error in
             if error != nil { submitting = false }
         }
