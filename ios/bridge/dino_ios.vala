@@ -176,6 +176,25 @@ public void add_account(string jid_str, string password) {
     });
 }
 
+public void sign_out() {
+    Idle.add(() => {
+        var accounts = app.db.get_accounts();
+        if (accounts.is_empty) {
+            emit("{\"type\":\"signed_out\"}");
+            return Source.REMOVE;
+        }
+        foreach (Account a in accounts) {
+            a.enabled = false;
+            app.stream_interactor.disconnect_account.begin(a, (_, res) => {
+                app.stream_interactor.disconnect_account.end(res);
+                a.remove();
+                emit("{\"type\":\"signed_out\"}");
+            });
+        }
+        return Source.REMOVE;
+    });
+}
+
 public void request_state() {
     Idle.add(() => {
         var b = new StringBuilder("{\"type\":\"accounts\",\"list\":[");

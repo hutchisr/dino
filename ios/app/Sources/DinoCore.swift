@@ -18,6 +18,7 @@ final class DinoCore {
     }
 
     func addAccount(jid: String, password: String) { dino_ios_add_account(jid, password) }
+    func signOut() { dino_ios_sign_out() }
     func requestState() { dino_ios_request_state() }
     func startConversation(jid: String) { dino_ios_start_conversation(jid) }
     func requestMessages(conversation: Int32, count: Int32 = 50) { dino_ios_request_messages(conversation, count) }

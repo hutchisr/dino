@@ -43,6 +43,7 @@ struct AccountSetupView: View {
     @EnvironmentObject var model: AppModel
     @State private var jid = ""
     @State private var password = ""
+    @State private var submitting = false
 
     var body: some View {
         Form {
@@ -52,13 +53,26 @@ struct AccountSetupView: View {
                     .autocorrectionDisabled()
                     .keyboardType(.emailAddress)
                 SecureField("Password", text: $password)
-                Button("Sign in") {
+                Button {
+                    submitting = true
                     model.addAccount(jid: jid, password: password)
+                } label: {
+                    if submitting {
+                        HStack {
+                            ProgressView()
+                            Text("Signing in…").padding(.leading, 8)
+                        }
+                    } else {
+                        Text("Sign in")
+                    }
                 }
-                .disabled(jid.isEmpty || password.isEmpty)
+                .disabled(submitting || jid.isEmpty || password.isEmpty)
             }
         }
         .navigationTitle("Dino")
+        .onChange(of: model.lastError) { error in
+            if error != nil { submitting = false }
+        }
     }
 }
 
@@ -106,6 +120,15 @@ struct ConversationListView: View {
                 showNew = true
             } label: {
                 Image(systemName: "square.and.pencil")
+            }
+            Menu {
+                Button(role: .destructive) {
+                    model.signOut()
+                } label: {
+                    Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
             }
         }
         .alert("New conversation", isPresented: $showNew) {

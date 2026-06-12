@@ -52,6 +52,10 @@ final class AppModel: ObservableObject {
         DinoCore.shared.startConversation(jid: jid)
     }
 
+    func signOut() {
+        DinoCore.shared.signOut()
+    }
+
     func openConversation(_ id: Int32) {
         DinoCore.shared.requestMessages(conversation: id)
     }
@@ -78,6 +82,12 @@ final class AppModel: ObservableObject {
                 }
             }
         case "account_added":
+            DinoCore.shared.requestState()
+        case "signed_out":
+            accounts = []
+            conversations = []
+            messages = [:]
+            navigation = []
             DinoCore.shared.requestState()
         case "connection":
             if let jid = e["account"] as? String, let state = e["state"] as? String {
@@ -139,6 +149,11 @@ final class AppModel: ObservableObject {
         let env = ProcessInfo.processInfo.environment
         if let auto = env["DINO_AUTOLOGIN"], let sep = auto.lastIndex(of: ":") {
             addAccount(jid: String(auto[..<sep]), password: String(auto[auto.index(after: sep)...]))
+        }
+        if env["DINO_AUTOSIGNOUT"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                self?.signOut()
+            }
         }
     }
 
