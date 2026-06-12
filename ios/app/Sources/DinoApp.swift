@@ -81,6 +81,7 @@ struct AccountSetupView: View {
 struct ConversationListView: View {
     @EnvironmentObject var model: AppModel
     @State private var showContacts = false
+    @State private var showAccountSettings = false
     @State private var showJoinMuc = false
     @State private var mucJid = ""
     @State private var mucNick = ""
@@ -139,6 +140,11 @@ struct ConversationListView: View {
                 } label: {
                     Label("Join channel", systemImage: "person.2")
                 }
+                Button {
+                    showAccountSettings = true
+                } label: {
+                    Label("Account", systemImage: "person.crop.circle")
+                }
                 Button(role: .destructive) {
                     model.signOut()
                 } label: {
@@ -150,6 +156,10 @@ struct ConversationListView: View {
         }
         .sheet(isPresented: $showContacts) {
             ContactsView(isPresented: $showContacts)
+                .environmentObject(model)
+        }
+        .sheet(isPresented: $showAccountSettings) {
+            AccountSettingsView(isPresented: $showAccountSettings)
                 .environmentObject(model)
         }
         .alert("Join channel", isPresented: $showJoinMuc) {

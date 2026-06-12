@@ -87,6 +87,10 @@ final class AppModel: ObservableObject {
     @Published var chatStates: [Int32: String] = [:]    // conversation id -> XEP-0085 state
     @Published var occupants: [Int32: [(nick: String, isSelf: Bool)]] = [:]
     @Published var viewerRequest: String?   // used by UI automation to open the image viewer
+    @Published var accountAlias: String = ""
+    @Published var omemoDeviceId: Int = 0
+    @Published var omemoFingerprint: String = ""
+    @Published var passwordChanged = false
 
     private var pendingChatJid: String?
     private var requestedAvatars = Set<String>()
@@ -113,6 +117,30 @@ final class AppModel: ObservableObject {
 
     func signOut() {
         DinoCore.shared.signOut()
+    }
+
+    func setAvatar(path: String) {
+        DinoCore.shared.setAvatar(path: path)
+        // re-request our own avatar once published
+        if let jid = accounts.first?.id {
+            requestedAvatars.remove(jid)
+            avatars[jid] = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                DinoCore.shared.requestAvatar(jid: jid)
+            }
+        }
+    }
+
+    func setAlias(_ alias: String) {
+        DinoCore.shared.setAlias(alias)
+    }
+
+    func changePassword(_ pw: String) {
+        DinoCore.shared.changePassword(pw)
+    }
+
+    func requestAccountDetails() {
+        DinoCore.shared.requestAccountDetails()
     }
 
     func requestState() {
@@ -218,6 +246,12 @@ final class AppModel: ObservableObject {
             }
         case "account_added":
             DinoCore.shared.requestState()
+        case "account_details":
+            accountAlias = e["alias"] as? String ?? ""
+            omemoDeviceId = e["omemo_device_id"] as? Int ?? 0
+            omemoFingerprint = e["omemo_fingerprint"] as? String ?? ""
+        case "password_changed":
+            passwordChanged = true
         case "signed_out":
             accounts = []
             conversations = []

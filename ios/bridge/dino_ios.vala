@@ -32,6 +32,9 @@ public class Application : GLib.Application, Dino.Application {
 
 private static Application? app = null;
 private static EventCb? event_cb = null;
+#if WITH_OMEMO
+private static Dino.Plugins.Omemo.Plugin? omemo_plugin = null;
+#endif
 
 private static void emit(string json) {
     if (event_cb != null) event_cb(json);
@@ -87,7 +90,7 @@ public void start(owned EventCb cb) {
 
         message("gecko: application created");
 #if WITH_OMEMO
-        var omemo_plugin = new Dino.Plugins.Omemo.Plugin();
+        omemo_plugin = new Dino.Plugins.Omemo.Plugin();
         omemo_plugin.registered(app);
         message("gecko: omemo registered");
 #endif
@@ -466,6 +469,78 @@ public void respond_subscription(string jid_str, bool approve) {
 // Disables the account and disconnects, but keeps it in the database so a
 // later sign-in reuses the same account id (conversations and the OMEMO
 // device identity survive). Deleting accounts would re-key OMEMO each time.
+public void set_avatar(string path) {
+    string p = path;
+    Idle.add(() => {
+        var account = first_enabled_account();
+        if (account == null) return Source.REMOVE;
+        app.stream_interactor.get_module(Dino.AvatarManager.IDENTITY).publish(account, p);
+        return Source.REMOVE;
+    });
+}
+
+public void set_alias(string alias) {
+    string a = alias;
+    Idle.add(() => {
+        var account = first_enabled_account();
+        if (account == null) return Source.REMOVE;
+        account.alias = a;
+        push_account_details();
+        return Source.REMOVE;
+    });
+}
+
+public void change_password(string new_password) {
+    string pw = new_password;
+    Idle.add(() => {
+        var account = first_enabled_account();
+        if (account == null) return Source.REMOVE;
+        var register = app.stream_interactor.get_module(Dino.Register.IDENTITY);
+        register.change_password.begin(account, pw, (_, res) => {
+            string? condition = register.change_password.end(res);
+            if (condition == null) {
+                account.password = pw;
+                emit("{\"type\":\"password_changed\"}");
+            } else {
+                emit(@"{\"type\":\"error\",\"message\":\"Password change failed: $(esc(condition))\"}");
+            }
+        });
+        return Source.REMOVE;
+    });
+}
+
+private static void push_account_details() {
+    var account = first_enabled_account();
+    if (account == null) return;
+    int device_id = 0;
+    string fingerprint = "";
+#if WITH_OMEMO
+    if (omemo_plugin != null) {
+        var row = omemo_plugin.db.identity.row_with(omemo_plugin.db.identity.account_id, account.id).inner;
+        if (row != null) {
+            device_id = ((!)row)[omemo_plugin.db.identity.device_id];
+            uint8[] key = Base64.decode(((!)row)[omemo_plugin.db.identity.identity_key_public_base64]);
+            var b = new StringBuilder();
+            // skip the djb type prefix byte, group hex in blocks of 8
+            for (int i = 1; i < key.length; i++) {
+                b.append_printf("%02x", key[i]);
+                if (i % 4 == 0 && i != key.length - 1) b.append_c(' ');
+            }
+            fingerprint = b.str;
+        }
+    }
+#endif
+    emit("{\"type\":\"account_details\",\"jid\":\"%s\",\"alias\":\"%s\",\"omemo_device_id\":%d,\"omemo_fingerprint\":\"%s\"}".printf(
+        esc(account.bare_jid.to_string()), esc(account.alias ?? ""), device_id, fingerprint));
+}
+
+public void request_account_details() {
+    Idle.add(() => {
+        push_account_details();
+        return Source.REMOVE;
+    });
+}
+
 public void sign_out() {
     Idle.add(() => {
         bool any = false;
