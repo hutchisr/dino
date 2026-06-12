@@ -457,9 +457,19 @@ struct ChatView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 }
+                .onAppear {
+                    // wait a tick so the lazy rows exist before scrolling
+                    DispatchQueue.main.async {
+                        if let last = model.messages[conversationId]?.last {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    }
+                }
                 .onChange(of: model.messages[conversationId]?.count ?? 0) { _ in
-                    if let last = model.messages[conversationId]?.last {
-                        proxy.scrollTo(last.id, anchor: .bottom)
+                    DispatchQueue.main.async {
+                        if let last = model.messages[conversationId]?.last {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
                     }
                 }
             }
