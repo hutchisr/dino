@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import SwiftUI
 
 struct XmppAccount: Identifiable {
@@ -34,11 +35,26 @@ struct RosterContact: Identifiable {
 
 struct ChatMessage: Identifiable, Equatable {
     let id: Int32    // content item id
+    let content: String  // "text" or "file"
     let direction: String
     let from: String
     let body: String
     let time: Date
     let encryption: String
+    var fileName: String = ""
+    var mime: String = ""
+    var size: Int = 0
+    var fileState: String = ""
+    var path: String = ""
+
+    var isFile: Bool { content == "file" }
+    var isImage: Bool {
+        if mime.hasPrefix("image/") { return true }
+        // iOS has no shared-mime-info database, so GIO often reports
+        // application/octet-stream; fall back to the file extension.
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "gif", "webp", "heic", "bmp"].contains(ext)
+    }
 }
 
 @MainActor
@@ -95,6 +111,14 @@ final class AppModel: ObservableObject {
 
     func setTyping(_ id: Int32, _ typing: Bool) {
         DinoCore.shared.setTyping(id, typing)
+    }
+
+    func sendFile(_ id: Int32, path: String) {
+        DinoCore.shared.sendFile(id, path: path)
+    }
+
+    func downloadFile(_ id: Int32, item: Int32) {
+        DinoCore.shared.downloadFile(id, item: item)
     }
 
     func ensureAvatar(for jid: String) {
@@ -224,11 +248,13 @@ final class AppModel: ObservableObject {
         case "message", "item":
             if let m = Self.decodeMessage(e), let cid = e["conversation"] as? Int {
                 var list = messages[Int32(cid)] ?? []
-                if !list.contains(m) {
+                if let i = list.firstIndex(where: { $0.id == m.id }) {
+                    list[i] = m
+                } else {
                     list.append(m)
                     list.sort { $0.time < $1.time }
-                    messages[Int32(cid)] = list
                 }
+                messages[Int32(cid)] = list
             }
         case "error", "fatal":
             lastError = e["message"] as? String
@@ -238,14 +264,23 @@ final class AppModel: ObservableObject {
     }
 
     private static func decodeMessage(_ d: [String: Any]) -> ChatMessage? {
-        guard let id = d["item"] as? Int, let body = d["body"] as? String else { return nil }
+        guard let id = d["item"] as? Int else { return nil }
+        let content = d["content"] as? String ?? "text"
+        if content != "text" && content != "file" { return nil }
+        if content == "text" && d["body"] == nil { return nil }
         return ChatMessage(
             id: Int32(id),
+            content: content,
             direction: d["direction"] as? String ?? "in",
             from: d["from"] as? String ?? "",
-            body: body,
+            body: d["body"] as? String ?? "",
             time: Date(timeIntervalSince1970: TimeInterval(d["time"] as? Int ?? 0)),
-            encryption: d["encryption"] as? String ?? "NONE")
+            encryption: d["encryption"] as? String ?? "NONE",
+            fileName: d["file_name"] as? String ?? "",
+            mime: d["mime"] as? String ?? "",
+            size: d["size"] as? Int ?? 0,
+            fileState: d["file_state"] as? String ?? "",
+            path: d["path"] as? String ?? "")
     }
 
     // Environment-driven automation used by the build scripts to exercise the
@@ -283,6 +318,21 @@ final class AppModel: ObservableObject {
             if let text = env["DINO_AUTOSEND"] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                     self.send(conv.id, text)
+                }
+            }
+            if env["DINO_AUTOSENDFILE"] != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                    let renderer = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 160))
+                    let image = renderer.image { ctx in
+                        UIColor.systemTeal.setFill()
+                        ctx.fill(CGRect(x: 0, y: 0, width: 240, height: 160))
+                        ("Dino iOS file test" as NSString).draw(
+                            at: CGPoint(x: 20, y: 70),
+                            withAttributes: [.font: UIFont.boldSystemFont(ofSize: 20), .foregroundColor: UIColor.white])
+                    }
+                    let url = FileManager.default.temporaryDirectory.appendingPathComponent("dino-ios-test.png")
+                    try? image.pngData()?.write(to: url)
+                    self.sendFile(conv.id, path: url.path)
                 }
             }
         }

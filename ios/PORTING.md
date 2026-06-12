@@ -108,16 +108,16 @@ All desktop-neutral (defaults unchanged; GTK Dino still builds):
 
 ## Next steps
 
-1. File transfer UI (download/preview, file picker for upload) — the
-   http-files plugin logic is already linked.
-2. MUC: join/leave UI, occupant list; the core MucManager already syncs
+1. MUC: join/leave UI, occupant list; the core MucManager already syncs
    bookmarks.
-3. Message corrections and reactions (services already running).
-4. Push notifications (XEP-0357 + proxy + NSE) — the big one.
-5. iOS-native trust store via a custom `GTlsDatabase`.
-6. Device build + signing; CI for the cross-compile.
+2. Message corrections and reactions (services already running).
+3. Push notifications (XEP-0357 + proxy + NSE) — the big one.
+4. iOS-native trust store via a custom `GTlsDatabase`.
+5. Device build + signing; CI for the cross-compile.
 
 Already done beyond the basics: contact management (roster, presence,
 subscription requests), sign in/out with stable OMEMO identity, avatars,
-conversation previews/unread counts/read markers (XEP-0333), and typing
-notifications (XEP-0085).
+conversation previews/unread counts/read markers (XEP-0333), typing
+notifications (XEP-0085), and file transfers (HTTP upload via libsoup,
+OMEMO-encrypted aesgcm files, inline image previews, tap-to-download;
+note: GIO mime sniffing is extension-based on iOS — no shared-mime-info).

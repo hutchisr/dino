@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PhotosUI
 
 @main
 struct DinoApp: App {
@@ -351,6 +352,8 @@ struct ChatView: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
     @State private var draft = ""
+    @State private var photoItem: PhotosPickerItem?
+    @State private var showFileImporter = false
 
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
@@ -362,7 +365,7 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: 6) {
                         ForEach(model.messages[conversationId] ?? []) { msg in
-                            MessageBubble(msg: msg)
+                            MessageBubble(conversationId: conversationId, msg: msg)
                                 .id(msg.id)
                         }
                     }
@@ -387,6 +390,18 @@ struct ChatView: View {
             }
             Divider()
             HStack {
+                Menu {
+                    PhotosPicker(selection: $photoItem, matching: .images) {
+                        Label("Photo", systemImage: "photo")
+                    }
+                    Button {
+                        showFileImporter = true
+                    } label: {
+                        Label("File", systemImage: "doc")
+                    }
+                } label: {
+                    Image(systemName: "plus.circle").font(.title3)
+                }
                 TextField("Message", text: $draft, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: draft) { value in
@@ -401,6 +416,28 @@ struct ChatView: View {
                 .disabled(draft.isEmpty)
             }
             .padding(10)
+        }
+        .onChange(of: photoItem) { item in
+            guard let item else { return }
+            photoItem = nil
+            Task {
+                guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+                let name = (item.itemIdentifier ?? UUID().uuidString).replacingOccurrences(of: "/", with: "_")
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("photo-\(name).jpg")
+                try? data.write(to: url)
+                model.sendFile(conversationId, path: url.path)
+            }
+        }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
+            if case .success(let url) = result {
+                let scoped = url.startAccessingSecurityScopedResource()
+                let dest = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                try? FileManager.default.removeItem(at: dest)
+                if (try? FileManager.default.copyItem(at: url, to: dest)) != nil {
+                    model.sendFile(conversationId, path: dest.path)
+                }
+                if scoped { url.stopAccessingSecurityScopedResource() }
+            }
         }
         .navigationTitle(conversation?.name ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
@@ -424,13 +461,19 @@ struct ChatView: View {
 }
 
 struct MessageBubble: View {
+    @EnvironmentObject var model: AppModel
+    let conversationId: Int32
     let msg: ChatMessage
 
     var body: some View {
         HStack {
             if msg.direction == "out" { Spacer(minLength: 40) }
             VStack(alignment: .leading, spacing: 2) {
-                Text(msg.body)
+                if msg.isFile {
+                    FileContent(conversationId: conversationId, msg: msg)
+                } else {
+                    Text(msg.body)
+                }
                 HStack(spacing: 4) {
                     if msg.encryption == "OMEMO" {
                         Image(systemName: "lock.fill").font(.system(size: 8))
@@ -444,6 +487,54 @@ struct MessageBubble: View {
             .background(msg.direction == "out" ? Color.accentColor.opacity(0.2) : Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 12))
             if msg.direction != "out" { Spacer(minLength: 40) }
+        }
+    }
+}
+
+struct FileContent: View {
+    @EnvironmentObject var model: AppModel
+    let conversationId: Int32
+    let msg: ChatMessage
+
+    private var sizeLabel: String {
+        msg.size > 0 ? ByteCountFormatter.string(fromByteCount: Int64(msg.size), countStyle: .file) : ""
+    }
+
+    var body: some View {
+        if msg.fileState == "complete", msg.isImage, !msg.path.isEmpty,
+           let image = UIImage(contentsOfFile: msg.path) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 220, maxHeight: 280)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        } else {
+            HStack(spacing: 8) {
+                switch msg.fileState {
+                case "in_progress":
+                    ProgressView().controlSize(.small)
+                case "failed":
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.red)
+                case "complete":
+                    Image(systemName: "doc.fill").foregroundStyle(.secondary)
+                default:
+                    Image(systemName: "arrow.down.circle").font(.title3)
+                }
+                VStack(alignment: .leading) {
+                    Text(msg.fileName.isEmpty ? "File" : msg.fileName).lineLimit(1)
+                    HStack(spacing: 4) {
+                        if !sizeLabel.isEmpty { Text(sizeLabel) }
+                        if msg.fileState == "failed" { Text("failed") }
+                        if msg.fileState == "in_progress" { Text(msg.direction == "out" ? "uploading…" : "downloading…") }
+                    }
+                    .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .onTapGesture {
+                if msg.fileState == "not_started" || msg.fileState == "failed" {
+                    model.downloadFile(conversationId, item: msg.id)
+                }
+            }
         }
     }
 }

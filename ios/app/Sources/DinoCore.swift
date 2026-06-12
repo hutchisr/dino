@@ -24,6 +24,8 @@ final class DinoCore {
     func blurConversation(_ id: Int32) { dino_ios_blur_conversation(id) }
     func setTyping(_ id: Int32, _ typing: Bool) { dino_ios_set_typing(id, typing ? 1 : 0) }
     func requestAvatar(jid: String) { dino_ios_request_avatar(jid) }
+    func sendFile(_ id: Int32, path: String) { dino_ios_send_file(id, path) }
+    func downloadFile(_ id: Int32, item: Int32) { dino_ios_download_file(id, item) }
     func addContact(jid: String, alias: String?) { dino_ios_add_contact(jid, alias) }
     func removeContact(jid: String) { dino_ios_remove_contact(jid) }
     func respondSubscription(jid: String, approve: Bool) { dino_ios_respond_subscription(jid, approve ? 1 : 0) }

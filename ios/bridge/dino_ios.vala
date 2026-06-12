@@ -102,6 +102,12 @@ public void start(owned EventCb cb) {
         });
         si.get_module(Dino.ContentItemStore.IDENTITY).new_item.connect((item, conversation) => {
             emit(content_item_json("message", item, conversation));
+            var fi = item as Dino.FileItem;
+            if (fi != null) {
+                fi.file_transfer.notify["state"].connect(() => {
+                    emit(content_item_json("message", fi, conversation));
+                });
+            }
             push_conversations();
         });
         si.get_module(Dino.CounterpartInteractionManager.IDENTITY).received_state.connect((conversation, state) => {
@@ -129,15 +135,37 @@ public void start(owned EventCb cb) {
     });
 }
 
+private static string file_state_name(FileTransfer.State s) {
+    switch (s) {
+        case FileTransfer.State.COMPLETE: return "complete";
+        case FileTransfer.State.IN_PROGRESS: return "in_progress";
+        case FileTransfer.State.FAILED: return "failed";
+        default: return "not_started";
+    }
+}
+
 private static string content_item_json(string type, Dino.ContentItem item, Conversation conversation) {
     var mi = item as Dino.MessageItem;
     if (mi != null) {
         Message m = mi.message;
         string direction = m.direction == Message.DIRECTION_SENT ? "out" : "in";
-        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"direction\":\"%s\",\"from\":\"%s\",\"body\":\"%s\",\"time\":%lld,\"encryption\":\"%s\"}".printf(
+        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"text\",\"direction\":\"%s\",\"from\":\"%s\",\"body\":\"%s\",\"time\":%lld,\"encryption\":\"%s\"}".printf(
             type, conversation.id, item.id, direction, esc(m.from.to_string()), esc(m.body), m.time.to_unix(), enc_name(m.encryption));
     }
-    return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"kind\":\"%s\",\"time\":%lld}".printf(
+    var fi = item as Dino.FileItem;
+    if (fi != null) {
+        FileTransfer ft = fi.file_transfer;
+        string direction = ft.direction == FileTransfer.DIRECTION_SENT ? "out" : "in";
+        string path = "";
+        if (ft.state == FileTransfer.State.COMPLETE) {
+            File? f = ft.get_file();
+            if (f != null && f.get_path() != null) path = f.get_path();
+        }
+        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"file\",\"direction\":\"%s\",\"from\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"file_name\":\"%s\",\"mime\":\"%s\",\"size\":%lld,\"file_state\":\"%s\",\"path\":\"%s\"}".printf(
+            type, conversation.id, item.id, direction, esc(ft.from != null ? ft.from.to_string() : ""), item.time.to_unix(), enc_name(ft.encryption),
+            esc(ft.file_name), esc(ft.mime_type ?? ""), ft.size, file_state_name(ft.state), esc(path));
+    }
+    return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"%s\",\"time\":%lld}".printf(
         type, conversation.id, item.id, esc(item.type_), item.time.to_unix());
 }
 
@@ -396,6 +424,45 @@ public void send_text(int conversation_id, string body) {
             return Source.REMOVE;
         }
         Dino.send_message(c, text, 0, null, new Gee.ArrayList<Xmpp.Xep.MessageMarkup.Span>());
+        return Source.REMOVE;
+    });
+}
+
+public void send_file(int conversation_id, string path) {
+    int cid = conversation_id;
+    string p = path;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) {
+            emit("{\"type\":\"error\",\"message\":\"Unknown conversation\"}");
+            return Source.REMOVE;
+        }
+        var fm = app.stream_interactor.get_module(Dino.FileManager.IDENTITY);
+        fm.is_upload_available.begin(c, (_, res) => {
+            if (!fm.is_upload_available.end(res)) {
+                emit("{\"type\":\"error\",\"message\":\"File upload is not available on this server\"}");
+                return;
+            }
+            fm.send_file.begin(File.new_for_path(p), c);
+        });
+        return Source.REMOVE;
+    });
+}
+
+public void download_file(int conversation_id, int item_id) {
+    int cid = conversation_id;
+    int iid = item_id;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        var item = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).get_item_by_id(c, iid);
+        var fi = item as Dino.FileItem;
+        if (fi == null) return Source.REMOVE;
+        // re-emit the item when the transfer state changes so the UI updates
+        fi.file_transfer.notify["state"].connect(() => {
+            emit(content_item_json("message", fi, c));
+        });
+        app.stream_interactor.get_module(Dino.FileManager.IDENTITY).download_file.begin(fi.file_transfer);
         return Source.REMOVE;
     });
 }
