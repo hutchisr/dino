@@ -404,6 +404,7 @@ struct ChatView: View {
     @State private var showOccupants = false
     @State private var editing: ChatMessage?
     @State private var replyingTo: ChatMessage?
+    @State private var isAtBottom = true
     @State private var viewerItem: ImageViewerItem?
 
     private static func dayLabel(_ date: Date) -> String {
@@ -456,6 +457,29 @@ struct ChatView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
+                    Color.clear
+                        .frame(height: 1)
+                        .onAppear { isAtBottom = true }
+                        .onDisappear { isAtBottom = false }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if !isAtBottom {
+                        Button {
+                            if let last = model.messages[conversationId]?.last {
+                                withAnimation {
+                                    proxy.scrollTo(last.id, anchor: .bottom)
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 16, weight: .semibold))
+                                .padding(10)
+                                .background(Circle().fill(.thinMaterial))
+                                .overlay(Circle().stroke(Color(.separator), lineWidth: 0.5))
+                        }
+                        .padding(.trailing, 14)
+                        .padding(.bottom, 10)
+                    }
                 }
                 .onAppear {
                     // wait a tick so the lazy rows exist before scrolling
