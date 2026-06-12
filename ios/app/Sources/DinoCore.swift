@@ -19,6 +19,10 @@ final class DinoCore {
 
     func addAccount(jid: String, password: String) { dino_ios_add_account(jid, password) }
     func signOut() { dino_ios_sign_out() }
+    func requestRoster() { dino_ios_request_roster() }
+    func addContact(jid: String, alias: String?) { dino_ios_add_contact(jid, alias) }
+    func removeContact(jid: String) { dino_ios_remove_contact(jid) }
+    func respondSubscription(jid: String, approve: Bool) { dino_ios_respond_subscription(jid, approve ? 1 : 0) }
     func requestState() { dino_ios_request_state() }
     func startConversation(jid: String) { dino_ios_start_conversation(jid) }
     func requestMessages(conversation: Int32, count: Int32 = 50) { dino_ios_request_messages(conversation, count) }

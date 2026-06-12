@@ -78,8 +78,7 @@ struct AccountSetupView: View {
 
 struct ConversationListView: View {
     @EnvironmentObject var model: AppModel
-    @State private var showNew = false
-    @State private var newJid = ""
+    @State private var showContacts = false
 
     var body: some View {
         List {
@@ -92,6 +91,13 @@ struct ConversationListView: View {
                         Text(account.id).font(.caption)
                         Spacer()
                         Text(account.state.lowercased()).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if !model.subscriptionRequests.isEmpty {
+                Section("Contact requests") {
+                    ForEach(model.subscriptionRequests, id: \.self) { jid in
+                        SubscriptionRequestRow(jid: jid)
                     }
                 }
             }
@@ -117,7 +123,8 @@ struct ConversationListView: View {
         }
         .toolbar {
             Button {
-                showNew = true
+                model.requestState()
+                showContacts = true
             } label: {
                 Image(systemName: "square.and.pencil")
             }
@@ -131,14 +138,118 @@ struct ConversationListView: View {
                 Image(systemName: "ellipsis.circle")
             }
         }
-        .alert("New conversation", isPresented: $showNew) {
-            TextField("JID", text: $newJid)
-                .textInputAutocapitalization(.never)
-            Button("Start") {
-                model.startConversation(jid: newJid)
-                newJid = ""
+        .sheet(isPresented: $showContacts) {
+            ContactsView(isPresented: $showContacts)
+                .environmentObject(model)
+        }
+    }
+}
+
+struct SubscriptionRequestRow: View {
+    @EnvironmentObject var model: AppModel
+    let jid: String
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading) {
+                Text(jid)
+                Text("wants to add you").font(.caption).foregroundStyle(.secondary)
             }
-            Button("Cancel", role: .cancel) {}
+            Spacer()
+            Button {
+                model.respondSubscription(jid: jid, approve: true)
+            } label: {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title2)
+            }
+            .buttonStyle(.plain)
+            Button {
+                model.respondSubscription(jid: jid, approve: false)
+            } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.red).font(.title2)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+struct ContactsView: View {
+    @EnvironmentObject var model: AppModel
+    @Binding var isPresented: Bool
+    @State private var showAdd = false
+    @State private var newJid = ""
+    @State private var newAlias = ""
+    @State private var search = ""
+
+    private var filtered: [RosterContact] {
+        if search.isEmpty { return model.roster }
+        return model.roster.filter {
+            $0.displayName.localizedCaseInsensitiveContains(search) ||
+            $0.id.localizedCaseInsensitiveContains(search)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if model.roster.isEmpty {
+                    Text("No contacts yet. Add one with the + button.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(filtered) { contact in
+                    Button {
+                        isPresented = false
+                        model.openChat(with: contact.id)
+                    } label: {
+                        HStack {
+                            Circle()
+                                .fill(contact.online ? .green : Color(.systemGray4))
+                                .frame(width: 10, height: 10)
+                            VStack(alignment: .leading) {
+                                Text(contact.displayName)
+                                HStack(spacing: 4) {
+                                    Text(contact.id)
+                                    if contact.subscription == "both" {
+                                        Image(systemName: "arrow.left.arrow.right").font(.system(size: 8))
+                                    }
+                                }
+                                .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .onDelete { offsets in
+                    for i in offsets { model.removeContact(jid: filtered[i].id) }
+                }
+            }
+            .searchable(text: $search, prompt: "Search contacts")
+            .navigationTitle("Contacts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { isPresented = false }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showAdd = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+            .alert("Add contact", isPresented: $showAdd) {
+                TextField("user@example.org", text: $newJid)
+                    .textInputAutocapitalization(.never)
+                TextField("Name (optional)", text: $newAlias)
+                Button("Add") {
+                    model.addContact(jid: newJid, alias: newAlias.isEmpty ? nil : newAlias)
+                    newJid = ""
+                    newAlias = ""
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("A presence subscription request will be sent.")
+            }
         }
     }
 }

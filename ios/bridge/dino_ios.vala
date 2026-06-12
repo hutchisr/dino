@@ -106,6 +106,13 @@ public void start(owned EventCb cb) {
         si.get_module(Dino.ConversationManager.IDENTITY).conversation_activated.connect((conversation) => {
             push_conversations();
         });
+        si.get_module(Dino.RosterManager.IDENTITY).updated_roster_item.connect(() => push_roster());
+        si.get_module(Dino.RosterManager.IDENTITY).removed_roster_item.connect(() => push_roster());
+        si.get_module(Dino.PresenceManager.IDENTITY).show_received.connect(() => push_roster());
+        si.get_module(Dino.PresenceManager.IDENTITY).received_offline_presence.connect(() => push_roster());
+        si.get_module(Dino.PresenceManager.IDENTITY).received_subscription_request.connect((jid, account) => {
+            emit(@"{\"type\":\"subscription_request\",\"account\":\"$(esc(account.bare_jid.to_string()))\",\"jid\":\"$(esc(jid.bare_jid.to_string()))\"}");
+        });
 
         emit("{\"type\":\"ready\"}");
 
@@ -176,6 +183,86 @@ public void add_account(string jid_str, string password) {
     });
 }
 
+private static void push_roster() {
+    var b = new StringBuilder("{\"type\":\"roster\",\"list\":[");
+    bool first = true;
+    foreach (Account a in app.db.get_accounts()) {
+        if (!a.enabled) continue;
+        var presence = app.stream_interactor.get_module(Dino.PresenceManager.IDENTITY);
+        foreach (Xmpp.Roster.Item item in app.stream_interactor.get_module(Dino.RosterManager.IDENTITY).get_roster(a)) {
+            if (item.jid == null) continue;
+            if (!first) b.append_c(',');
+            first = false;
+            string? show = presence.get_last_show(item.jid, a);
+            b.append("{\"account\":\"%s\",\"jid\":\"%s\",\"name\":\"%s\",\"subscription\":\"%s\",\"show\":\"%s\"}".printf(
+                esc(a.bare_jid.to_string()), esc(item.jid.to_string()), esc(item.name ?? ""),
+                esc(item.subscription ?? ""), esc(show ?? "offline")));
+        }
+    }
+    b.append("]}");
+    emit(b.str);
+}
+
+public void request_roster() {
+    Idle.add(() => {
+        push_roster();
+        return Source.REMOVE;
+    });
+}
+
+public void add_contact(string jid_str, string? alias) {
+    string j = jid_str;
+    string? a = alias == null || alias == "" ? null : alias;
+    Idle.add(() => {
+        try {
+            var accounts = app.db.get_accounts();
+            if (accounts.is_empty) return Source.REMOVE;
+            var jid = new Xmpp.Jid(j).bare_jid;
+            app.stream_interactor.get_module(Dino.RosterManager.IDENTITY).add_jid(accounts[0], jid, a);
+            app.stream_interactor.get_module(Dino.PresenceManager.IDENTITY).request_subscription(accounts[0], jid);
+        } catch (Error e) {
+            emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
+        }
+        return Source.REMOVE;
+    });
+}
+
+public void remove_contact(string jid_str) {
+    string j = jid_str;
+    Idle.add(() => {
+        try {
+            var accounts = app.db.get_accounts();
+            if (accounts.is_empty) return Source.REMOVE;
+            app.stream_interactor.get_module(Dino.RosterManager.IDENTITY).remove_jid(accounts[0], new Xmpp.Jid(j).bare_jid);
+        } catch (Error e) {
+            emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
+        }
+        return Source.REMOVE;
+    });
+}
+
+public void respond_subscription(string jid_str, bool approve) {
+    string j = jid_str;
+    bool ok = approve;
+    Idle.add(() => {
+        try {
+            var accounts = app.db.get_accounts();
+            if (accounts.is_empty) return Source.REMOVE;
+            var jid = new Xmpp.Jid(j).bare_jid;
+            var presence = app.stream_interactor.get_module(Dino.PresenceManager.IDENTITY);
+            if (ok) {
+                presence.approve_subscription(accounts[0], jid);
+                presence.request_subscription(accounts[0], jid);
+            } else {
+                presence.deny_subscription(accounts[0], jid);
+            }
+        } catch (Error e) {
+            emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
+        }
+        return Source.REMOVE;
+    });
+}
+
 public void sign_out() {
     Idle.add(() => {
         var accounts = app.db.get_accounts();
@@ -209,6 +296,7 @@ public void request_state() {
         b.append("]}");
         emit(b.str);
         push_conversations();
+        push_roster();
         return Source.REMOVE;
     });
 }

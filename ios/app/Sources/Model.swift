@@ -14,6 +14,17 @@ struct XmppConversation: Identifiable {
     var encryption: String
 }
 
+struct RosterContact: Identifiable {
+    let id: String   // bare jid
+    let account: String
+    var name: String
+    var subscription: String
+    var show: String
+
+    var displayName: String { name.isEmpty ? id : name }
+    var online: Bool { show != "offline" }
+}
+
 struct ChatMessage: Identifiable, Equatable {
     let id: Int32    // content item id
     let direction: String
@@ -31,6 +42,10 @@ final class AppModel: ObservableObject {
     @Published var messages: [Int32: [ChatMessage]] = [:]
     @Published var lastError: String?
     @Published var navigation: [Int32] = []
+    @Published var roster: [RosterContact] = []
+    @Published var subscriptionRequests: [String] = []
+
+    private var pendingChatJid: String?
 
     private var booted = false
 
@@ -54,6 +69,34 @@ final class AppModel: ObservableObject {
 
     func signOut() {
         DinoCore.shared.signOut()
+    }
+
+    func requestState() {
+        DinoCore.shared.requestState()
+    }
+
+    /// Start (or open) a chat with a contact and navigate into it once the
+    /// conversation id arrives with the next conversations push.
+    func openChat(with jid: String) {
+        if let existing = conversations.first(where: { $0.jid == jid }) {
+            navigation = [existing.id]
+        } else {
+            pendingChatJid = jid
+            startConversation(jid: jid)
+        }
+    }
+
+    func addContact(jid: String, alias: String?) {
+        DinoCore.shared.addContact(jid: jid, alias: alias)
+    }
+
+    func removeContact(jid: String) {
+        DinoCore.shared.removeContact(jid: jid)
+    }
+
+    func respondSubscription(jid: String, approve: Bool) {
+        DinoCore.shared.respondSubscription(jid: jid, approve: approve)
+        subscriptionRequests.removeAll { $0 == jid }
     }
 
     func openConversation(_ id: Int32) {
@@ -88,6 +131,8 @@ final class AppModel: ObservableObject {
             conversations = []
             messages = [:]
             navigation = []
+            roster = []
+            subscriptionRequests = []
             DinoCore.shared.requestState()
         case "connection":
             if let jid = e["account"] as? String, let state = e["state"] as? String {
@@ -109,6 +154,26 @@ final class AppModel: ObservableObject {
                         jid: jid, name: c["name"] as? String ?? jid,
                         encryption: c["encryption"] as? String ?? "NONE")
                 }
+                if let pending = pendingChatJid,
+                   let conv = conversations.first(where: { $0.jid == pending }) {
+                    pendingChatJid = nil
+                    navigation = [conv.id]
+                }
+            }
+        case "roster":
+            if let list = e["list"] as? [[String: Any]] {
+                roster = list.compactMap { r in
+                    guard let jid = r["jid"] as? String else { return nil }
+                    return RosterContact(
+                        id: jid, account: r["account"] as? String ?? "",
+                        name: r["name"] as? String ?? "",
+                        subscription: r["subscription"] as? String ?? "",
+                        show: r["show"] as? String ?? "offline")
+                }.sorted { ($0.online ? 0 : 1, $0.displayName.lowercased()) < ($1.online ? 0 : 1, $1.displayName.lowercased()) }
+            }
+        case "subscription_request":
+            if let jid = e["jid"] as? String, !subscriptionRequests.contains(jid) {
+                subscriptionRequests.append(jid)
             }
         case "history":
             if let cid = e["conversation"] as? Int, let items = e["items"] as? [[String: Any]] {
@@ -153,6 +218,11 @@ final class AppModel: ObservableObject {
         if env["DINO_AUTOSIGNOUT"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
                 self?.signOut()
+            }
+        }
+        if let jid = env["DINO_AUTOADDCONTACT"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+                self?.addContact(jid: jid, alias: nil)
             }
         }
     }
