@@ -312,7 +312,7 @@ private static string conversation_json(Conversation c) {
     foreach (Dino.ContentItem item in latest) {
         var mi = item as Dino.MessageItem;
         if (mi != null) {
-            preview = mi.message.body ?? "";
+            preview = display_body(mi.message);
             preview_direction = mi.message.direction == Message.DIRECTION_SENT ? "out" : "in";
         } else {
             preview = "[file]";

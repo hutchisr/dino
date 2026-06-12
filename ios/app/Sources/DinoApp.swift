@@ -95,25 +95,6 @@ struct ConversationListView: View {
 
     var body: some View {
         List {
-            if let account = model.accounts.first {
-                Section {
-                    HStack {
-                        Circle()
-                            .fill(account.state == "CONNECTED" ? .green : .orange)
-                            .frame(width: 10, height: 10)
-                        Text(account.id).font(.caption)
-                        Spacer()
-                        Text(account.state.lowercased()).font(.caption2).foregroundStyle(.secondary)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            model.signOut()
-                        } label: {
-                            Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
-                        }
-                    }
-                }
-            }
             if !model.subscriptionRequests.isEmpty {
                 Section("Contact requests") {
                     ForEach(model.subscriptionRequests, id: \.self) { jid in
@@ -132,6 +113,25 @@ struct ConversationListView: View {
                         } label: {
                             Label(conv.isGroupchat ? "Leave" : "Close",
                                   systemImage: conv.isGroupchat ? "rectangle.portrait.and.arrow.right" : "xmark")
+                        }
+                    }
+                }
+            }
+            if let account = model.accounts.first {
+                Section {
+                    HStack {
+                        Circle()
+                            .fill(account.state == "CONNECTED" ? .green : .orange)
+                            .frame(width: 10, height: 10)
+                        Text(account.id).font(.caption)
+                        Spacer()
+                        Text(account.state.lowercased()).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            model.signOut()
+                        } label: {
+                            Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                         }
                     }
                 }
