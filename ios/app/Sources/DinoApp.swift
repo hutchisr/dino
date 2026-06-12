@@ -528,7 +528,7 @@ struct ChatView: View {
                         } label: {
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(Color.primary)
                                 .frame(width: 44, height: 44)
                         }
                         .glassEffect(.regular.interactive(), in: .circle)
