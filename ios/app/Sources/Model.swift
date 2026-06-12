@@ -50,6 +50,7 @@ struct ChatMessage: Identifiable, Equatable {
     let content: String  // "text" or "file"
     let direction: String
     let from: String
+    var fromDisplay: String = ""
     let body: String
     let time: Date
     let encryption: String
@@ -353,6 +354,7 @@ final class AppModel: ObservableObject {
             content: content,
             direction: d["direction"] as? String ?? "in",
             from: d["from"] as? String ?? "",
+            fromDisplay: d["from_display"] as? String ?? "",
             body: d["body"] as? String ?? "",
             time: Date(timeIntervalSince1970: TimeInterval(d["time"] as? Int ?? 0)),
             encryption: d["encryption"] as? String ?? "NONE",
@@ -390,6 +392,12 @@ final class AppModel: ObservableObject {
         if let jid = env["DINO_AUTOADDCONTACT"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
                 self?.addContact(jid: jid, alias: nil)
+            }
+        }
+        if let jid = env["DINO_AUTOOPEN"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                guard let self, let conv = self.conversations.first(where: { $0.jid == jid }) else { return }
+                self.navigation = [conv.id]
             }
         }
         if let jid = env["DINO_AUTOJOINMUC"] {

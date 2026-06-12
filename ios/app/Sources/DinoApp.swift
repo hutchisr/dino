@@ -180,6 +180,13 @@ struct ConversationListView: View {
     }
 }
 
+func jidColor(_ jid: String) -> Color {
+    let palette: [Color] = [.blue, .teal, .green, .orange, .pink, .purple, .indigo, .red]
+    var hash = 5381
+    for b in jid.utf8 { hash = ((hash << 5) &+ hash) &+ Int(b) }
+    return palette[abs(hash) % palette.count]
+}
+
 struct AvatarView: View {
     @EnvironmentObject var model: AppModel
     let jid: String
@@ -192,8 +199,7 @@ struct AvatarView: View {
     }
 
     private var fallbackColor: Color {
-        let palette: [Color] = [.blue, .teal, .green, .orange, .pink, .purple, .indigo, .red]
-        return palette[abs(jid.hashValue) % palette.count]
+        jidColor(jid)
     }
 
     var body: some View {
@@ -419,8 +425,10 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: 6) {
                         let msgs = model.messages[conversationId] ?? []
+                        let isGroup = conversation?.isGroupchat == true
                         ForEach(Array(msgs.enumerated()), id: \.element.id) { index, msg in
-                            if index == 0 || !Calendar.current.isDate(msg.time, inSameDayAs: msgs[index - 1].time) {
+                            let newDay = index == 0 || !Calendar.current.isDate(msg.time, inSameDayAs: msgs[index - 1].time)
+                            if newDay {
                                 Text(Self.dayLabel(msg.time))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
@@ -429,7 +437,11 @@ struct ChatView: View {
                                     .background(Capsule().fill(Color(.secondarySystemBackground)))
                                     .padding(.vertical, 6)
                             }
-                            MessageBubble(conversationId: conversationId, msg: msg, onEdit: { m in
+                            MessageBubble(conversationId: conversationId, msg: msg,
+                                          inGroupchat: isGroup,
+                                          showSender: isGroup && msg.direction == "in" &&
+                                              (newDay || index == 0 || msgs[index - 1].from != msg.from),
+                                          onEdit: { m in
                                 replyingTo = nil
                                 editing = m
                                 draft = m.body
@@ -598,6 +610,8 @@ struct MessageBubble: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
     let msg: ChatMessage
+    var inGroupchat: Bool = false
+    var showSender: Bool = false
     var onEdit: ((ChatMessage) -> Void)? = nil
     var onReply: ((ChatMessage) -> Void)? = nil
     var onImageTap: ((String) -> Void)? = nil
@@ -628,9 +642,23 @@ struct MessageBubble: View {
     }
 
     var body: some View {
-        HStack {
+        HStack(alignment: .top, spacing: 8) {
             if msg.direction == "out" { Spacer(minLength: 40) }
+            if inGroupchat && msg.direction == "in" {
+                if showSender {
+                    AvatarView(jid: msg.from, name: msg.fromDisplay, isGroup: false, size: 30)
+                        .padding(.top, showSender ? 16 : 0)
+                } else {
+                    Color.clear.frame(width: 30, height: 1)
+                }
+            }
             VStack(alignment: msg.direction == "out" ? .trailing : .leading, spacing: 2) {
+                if showSender {
+                    Text(msg.fromDisplay.isEmpty ? (msg.from.components(separatedBy: "/").last ?? msg.from) : msg.fromDisplay)
+                        .font(.caption.bold())
+                        .foregroundStyle(jidColor(msg.from))
+                        .padding(.leading, 4)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     if let quote = msg.quote {
                         HStack(spacing: 6) {

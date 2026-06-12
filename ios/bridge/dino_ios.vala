@@ -248,8 +248,9 @@ private static string content_item_json(string type, Dino.ContentItem item, Conv
         string direction = m.direction == Message.DIRECTION_SENT ? "out" : "in";
         bool editable = direction == "out" &&
             app.stream_interactor.get_module(Dino.MessageCorrection.IDENTITY).is_own_correction_allowed(conversation, m);
-        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"text\",\"direction\":\"%s\",\"from\":\"%s\",\"body\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"editable\":%s,\"marked\":\"%s\",\"quote\":%s,\"reactions\":%s}".printf(
-            type, conversation.id, item.id, direction, esc(m.from.to_string()), esc(display_body(m)), m.time.to_unix(), enc_name(m.encryption),
+        string from_display = Dino.get_participant_display_name(app.stream_interactor, conversation, m.from);
+        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"text\",\"direction\":\"%s\",\"from\":\"%s\",\"from_display\":\"%s\",\"body\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"editable\":%s,\"marked\":\"%s\",\"quote\":%s,\"reactions\":%s}".printf(
+            type, conversation.id, item.id, direction, esc(m.from.to_string()), esc(from_display), esc(display_body(m)), m.time.to_unix(), enc_name(m.encryption),
             editable ? "true" : "false", marked_name(m.marked), quote_json(m, conversation), reactions_json(item, conversation));
     }
     var fi = item as Dino.FileItem;
@@ -261,8 +262,10 @@ private static string content_item_json(string type, Dino.ContentItem item, Conv
             File? f = ft.get_file();
             if (f != null && f.get_path() != null) path = f.get_path();
         }
-        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"file\",\"direction\":\"%s\",\"from\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"file_name\":\"%s\",\"mime\":\"%s\",\"size\":%lld,\"file_state\":\"%s\",\"path\":\"%s\",\"reactions\":%s}".printf(
-            type, conversation.id, item.id, direction, esc(ft.from != null ? ft.from.to_string() : ""), item.time.to_unix(), enc_name(ft.encryption),
+        string ft_from = ft.from != null ? ft.from.to_string() : "";
+        string ft_from_display = ft.from != null ? Dino.get_participant_display_name(app.stream_interactor, conversation, ft.from) : "";
+        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"file\",\"direction\":\"%s\",\"from\":\"%s\",\"from_display\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"file_name\":\"%s\",\"mime\":\"%s\",\"size\":%lld,\"file_state\":\"%s\",\"path\":\"%s\",\"reactions\":%s}".printf(
+            type, conversation.id, item.id, direction, esc(ft_from), esc(ft_from_display), item.time.to_unix(), enc_name(ft.encryption),
             esc(ft.file_name), esc(ft.mime_type ?? ""), ft.size, file_state_name(ft.state), esc(path), reactions_json(item, conversation));
     }
     return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"%s\",\"time\":%lld}".printf(
@@ -324,7 +327,9 @@ private static string conversation_json(Conversation c) {
 private static void push_avatar(Account account, Xmpp.Jid jid) {
     File? file = app.stream_interactor.get_module(Dino.AvatarManager.IDENTITY).get_avatar_file(account, jid);
     if (file != null && file.get_path() != null) {
-        emit(@"{\"type\":\"avatar\",\"jid\":\"$(esc(jid.bare_jid.to_string()))\",\"path\":\"$(esc(file.get_path()))\"}");
+        // keyed by the jid as requested: bare for contacts/rooms, full for
+        // MUC occupants
+        emit(@"{\"type\":\"avatar\",\"jid\":\"$(esc(jid.to_string()))\",\"path\":\"$(esc(file.get_path()))\"}");
     }
 }
 
@@ -857,7 +862,7 @@ public void request_avatar(string jid_str) {
         try {
             var account = first_enabled_account();
             if (account == null) return Source.REMOVE;
-            push_avatar(account, new Xmpp.Jid(j).bare_jid);
+            push_avatar(account, new Xmpp.Jid(j));
         } catch (Error e) { }
         return Source.REMOVE;
     });
