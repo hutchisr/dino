@@ -37,10 +37,6 @@ Known gaps / not done:
   while the app is foregrounded (history catches up via MAM on reconnect).
 * Calls (`plugin-rtp`/`plugin-ice`): not ported. GStreamer publishes
   official iOS binaries, so this is feasible but is its own project.
-* TLS trust uses a CA bundle copied from the build host instead of the iOS
-  trust store (would need a Security.framework-backed `GTlsDatabase`).
-* Real-device (`device-arm64`) build is untested; needs signing and a
-  review of the `pipe2`/`dup3` notes in `compat/ios-compat.h`.
 * JID stringprep uses a casefold fallback (`-Dicu=disabled`); full
   ICU-based stringprep/IDNA would require cross-compiling ICU.
 * OpenPGP plugin: not ported (GPGME on iOS is impractical).

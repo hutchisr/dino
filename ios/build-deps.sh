@@ -41,12 +41,14 @@ case "$TARGET" in
     TRIPLE="arm64-apple-ios${MIN_IOS}-simulator"
     SUBSYSTEM=ios-simulator
     OPENSSL_TARGET=iossimulator-arm64-xcrun
+    OPENSSL_MIN_FLAG="-mios-simulator-version-min=$MIN_IOS"
     ;;
   device-arm64)
     SDK=iphoneos
     TRIPLE="arm64-apple-ios${MIN_IOS}"
     SUBSYSTEM=ios
     OPENSSL_TARGET=ios64-xcrun
+    OPENSSL_MIN_FLAG="-mios-version-min=$MIN_IOS"
     ;;
   *) echo "unknown target $TARGET" >&2; exit 1 ;;
 esac
@@ -95,6 +97,18 @@ pkg_config_libdir = ['$PREFIX/lib/pkgconfig', '$PREFIX/share/pkgconfig']
 EOF
 echo "wrote $CROSS"
 
+# sqlite comes from the iOS SDK (libsqlite3.tbd); give pkg-config something
+# to find.
+mkdir -p "$PREFIX/lib/pkgconfig"
+SQLITE_VER_DETECTED="$(grep -m1 '#define SQLITE_VERSION ' "$SDKPATH/usr/include/sqlite3.h" | sed 's/.*"\(.*\)".*/\1/')"
+cat > "$PREFIX/lib/pkgconfig/sqlite3.pc" <<EOF2
+Name: SQLite
+Description: SQLite from the iOS SDK (libsqlite3.tbd + sqlite3.h)
+Version: ${SQLITE_VER_DETECTED:-3.43.0}
+Libs: -lsqlite3
+Cflags:
+EOF2
+
 fetch() { # fetch <url> <dirname>
   local url="$1" dir="$2"
   if [ ! -d "$DEPS/$dir" ]; then
@@ -128,6 +142,7 @@ build_glib() {
 build_gee() {
   fetch "https://download.gnome.org/sources/libgee/$GEE_VER/libgee-$GEE_VER.$GEE_PATCH.tar.xz" "libgee"
   cd "$DEPS/libgee"
+  make distclean >/dev/null 2>&1 || true
   PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig" \
   CC="$CLANG -target $TRIPLE -isysroot $SDKPATH" \
   VALAC="$VALAC" \
@@ -150,8 +165,9 @@ build_pixbuf() {
 build_openssl() {
   fetch "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VER/openssl-$OPENSSL_VER.tar.gz" "openssl"
   cd "$DEPS/openssl"
+  make distclean >/dev/null 2>&1 || true
   ./Configure "$OPENSSL_TARGET" no-shared no-tests no-apps no-docs \
-    -mios-simulator-version-min=$MIN_IOS --prefix="$PREFIX" --libdir=lib
+    "$OPENSSL_MIN_FLAG" --prefix="$PREFIX" --libdir=lib
   make -j "$NCPU" build_libs
   make install_dev
   cd -
@@ -167,6 +183,7 @@ build_glib_networking() {
 autotools_build() { # autotools_build <srcdir> [extra configure args...]
   local src="$1"; shift
   cd "$src"
+  make distclean >/dev/null 2>&1 || true
   PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig" \
   CC="$CLANG -target $TRIPLE -isysroot $SDKPATH -include $ROOT/compat/ios-compat.h" \
   CXX="$CLANGXX -target $TRIPLE -isysroot $SDKPATH" \
@@ -228,7 +245,7 @@ build_soup() {
 }
 
 if [ $# -eq 0 ]; then
-  set -- glib gee pixbuf openssl glib_networking gpgerror gcrypt omemo_c srtp psl soup
+  set -- glib gee pixbuf openssl glib_networking gpgerror gcrypt protobuf_c omemo_c srtp psl soup
 fi
 for dep in "$@"; do
   echo "=== building $dep ($TARGET) ==="

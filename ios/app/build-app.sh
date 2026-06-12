@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 # Build Dino.app (SwiftUI shell + full libdino core) for the iOS Simulator
-# and optionally install + launch it.
-# Usage: ./build-app.sh [run]
+# or a device, and optionally install + launch it in the Simulator.
+# Usage: ./build-app.sh [run] [sim-arm64|device-arm64]
 set -euo pipefail
 
-TARGET=sim-arm64
+ACTION="${1:-build}"
+TARGET="${2:-sim-arm64}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$HERE")"
 PREFIX="$ROOT/prefix/$TARGET"
-BUILD="$HERE/build"
+BUILD="$HERE/build-$TARGET"
 APP="$BUILD/DinoPoc.app"
 MIN_IOS=16.0
-TRIPLE="arm64-apple-ios${MIN_IOS}-simulator"
-SDKPATH="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+case "$TARGET" in
+  sim-arm64)    SDK=iphonesimulator; TRIPLE="arm64-apple-ios${MIN_IOS}-simulator" ;;
+  device-arm64) SDK=iphoneos;        TRIPLE="arm64-apple-ios${MIN_IOS}" ;;
+  *) echo "unknown target $TARGET" >&2; exit 1 ;;
+esac
+SDKPATH="$(xcrun --sdk "$SDK" --show-sdk-path)"
 
 export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig:$PREFIX/lib/gio/modules/pkgconfig"
 CFLAGS="$(pkg-config --cflags gio-2.0 gee-0.8 gdk-pixbuf-2.0)"
@@ -20,7 +25,7 @@ LIBS="$(pkg-config --libs --static libsoup-3.0 gee-0.8 gdk-pixbuf-2.0 gioopenssl
 
 rm -rf "$APP" && mkdir -p "$APP"
 
-xcrun -sdk iphonesimulator swiftc \
+xcrun -sdk "$SDK" swiftc \
   -target "$TRIPLE" \
   -import-objc-header "$HERE/bridge.h" \
   $(printf -- '-Xcc %s ' $CFLAGS) -Xcc -I"$PREFIX/include" \
@@ -36,7 +41,16 @@ cp "$HERE/Info.plist" "$APP/Info.plist"
 codesign --force --sign - "$APP"
 echo "built $APP"
 
-if [ "${1:-}" = "run" ]; then
+if [ "$TARGET" = "device-arm64" ]; then
+  # package as an .ipa for (re-)signing and device installation
+  rm -rf "$BUILD/Payload" "$BUILD/DinoPoc.ipa"
+  mkdir -p "$BUILD/Payload"
+  cp -R "$APP" "$BUILD/Payload/"
+  (cd "$BUILD" && zip -qry DinoPoc.ipa Payload)
+  echo "built $BUILD/DinoPoc.ipa"
+fi
+
+if [ "$ACTION" = "run" ] && [ "$TARGET" = "sim-arm64" ]; then
   xcrun simctl boot "iPhone 17" 2>/dev/null || true
   open -a Simulator
   xcrun simctl install booted "$APP"
