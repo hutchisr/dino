@@ -108,8 +108,7 @@ All desktop-neutral (defaults unchanged; GTK Dino still builds):
 
 ## Next steps
 
-1. Message corrections and reactions (services already running).
-2. Push notifications (XEP-0357 + proxy + NSE) — the big one.
+1. Push notifications (XEP-0357 + proxy + NSE) — the big one.
 3. iOS-native trust store via a custom `GTlsDatabase`.
 4. Device build + signing; CI for the cross-compile.
 
@@ -119,5 +118,7 @@ conversation previews/unread counts/read markers (XEP-0333), typing
 notifications (XEP-0085), and file transfers (HTTP upload via libsoup,
 OMEMO-encrypted aesgcm files, inline image previews, tap-to-download;
 note: GIO mime sniffing is extension-based on iOS — no shared-mime-info),
-and MUC management (join/create channels with bookmarks, leave/close via
-swipe, participant list).
+MUC management (join/create channels with bookmarks, leave/close via
+swipe, participant list), emoji reactions (XEP-0444, long-press or tap
+chips), and message corrections (XEP-0308, long-press own message to
+edit).

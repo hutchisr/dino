@@ -119,6 +119,15 @@ public void start(owned EventCb cb) {
         si.get_module(Dino.ConversationManager.IDENTITY).conversation_activated.connect((conversation) => {
             push_conversations();
         });
+        si.get_module(Dino.MessageCorrection.IDENTITY).received_correction.connect((item) => {
+            re_emit_item(item.id);
+        });
+        si.get_module(Dino.Reactions.IDENTITY).reaction_added.connect((account, item_id, jid, reaction) => {
+            re_emit_item_delayed(item_id);
+        });
+        si.get_module(Dino.Reactions.IDENTITY).reaction_removed.connect((account, item_id, jid, reaction) => {
+            re_emit_item_delayed(item_id);
+        });
         si.get_module(Dino.RosterManager.IDENTITY).updated_roster_item.connect(() => push_roster());
         si.get_module(Dino.RosterManager.IDENTITY).removed_roster_item.connect(() => push_roster());
         si.get_module(Dino.PresenceManager.IDENTITY).show_received.connect(() => push_roster());
@@ -144,13 +153,34 @@ private static string file_state_name(FileTransfer.State s) {
     }
 }
 
+private static string reactions_json(Dino.ContentItem item, Conversation conversation) {
+    var b = new StringBuilder("[");
+    var reactions = app.stream_interactor.get_module(Dino.Reactions.IDENTITY).get_item_reactions(conversation, item);
+    bool first = true;
+    foreach (var ru in reactions) {
+        if (ru.jids.size == 0) continue;
+        if (!first) b.append_c(',');
+        first = false;
+        bool me = false;
+        foreach (Xmpp.Jid jid in ru.jids) {
+            if (jid.equals_bare(conversation.account.bare_jid)) { me = true; break; }
+        }
+        b.append("{\"emoji\":\"%s\",\"count\":%d,\"me\":%s}".printf(esc(ru.reaction), ru.jids.size, me ? "true" : "false"));
+    }
+    b.append_c(']');
+    return b.str;
+}
+
 private static string content_item_json(string type, Dino.ContentItem item, Conversation conversation) {
     var mi = item as Dino.MessageItem;
     if (mi != null) {
         Message m = mi.message;
         string direction = m.direction == Message.DIRECTION_SENT ? "out" : "in";
-        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"text\",\"direction\":\"%s\",\"from\":\"%s\",\"body\":\"%s\",\"time\":%lld,\"encryption\":\"%s\"}".printf(
-            type, conversation.id, item.id, direction, esc(m.from.to_string()), esc(m.body), m.time.to_unix(), enc_name(m.encryption));
+        bool editable = direction == "out" &&
+            app.stream_interactor.get_module(Dino.MessageCorrection.IDENTITY).is_own_correction_allowed(conversation, m);
+        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"text\",\"direction\":\"%s\",\"from\":\"%s\",\"body\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"editable\":%s,\"reactions\":%s}".printf(
+            type, conversation.id, item.id, direction, esc(m.from.to_string()), esc(m.body), m.time.to_unix(), enc_name(m.encryption),
+            editable ? "true" : "false", reactions_json(item, conversation));
     }
     var fi = item as Dino.FileItem;
     if (fi != null) {
@@ -161,9 +191,9 @@ private static string content_item_json(string type, Dino.ContentItem item, Conv
             File? f = ft.get_file();
             if (f != null && f.get_path() != null) path = f.get_path();
         }
-        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"file\",\"direction\":\"%s\",\"from\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"file_name\":\"%s\",\"mime\":\"%s\",\"size\":%lld,\"file_state\":\"%s\",\"path\":\"%s\"}".printf(
+        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"file\",\"direction\":\"%s\",\"from\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"file_name\":\"%s\",\"mime\":\"%s\",\"size\":%lld,\"file_state\":\"%s\",\"path\":\"%s\",\"reactions\":%s}".printf(
             type, conversation.id, item.id, direction, esc(ft.from != null ? ft.from.to_string() : ""), item.time.to_unix(), enc_name(ft.encryption),
-            esc(ft.file_name), esc(ft.mime_type ?? ""), ft.size, file_state_name(ft.state), esc(path));
+            esc(ft.file_name), esc(ft.mime_type ?? ""), ft.size, file_state_name(ft.state), esc(path), reactions_json(item, conversation));
     }
     return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"%s\",\"time\":%lld}".printf(
         type, conversation.id, item.id, esc(item.type_), item.time.to_unix());
@@ -216,6 +246,37 @@ private static Account? first_enabled_account() {
         if (a.enabled) return a;
     }
     return null;
+}
+
+// Re-emits a content item shortly after a change; the small delay lets
+// libdino's async send/persist paths finish before the state is re-read.
+private static void re_emit_item_delayed(int item_id) {
+    Timeout.add(400, () => {
+        re_emit_item(item_id);
+        return Source.REMOVE;
+    });
+    // reaction/correction persistence completes after the stanza send, which
+    // can take a network round-trip; emit again once that has settled
+    Timeout.add(2000, () => {
+        re_emit_item(item_id);
+        return Source.REMOVE;
+    });
+    Timeout.add(5000, () => {
+        re_emit_item(item_id);
+        return Source.REMOVE;
+    });
+}
+
+// Re-emits a content item given only its id by probing the active
+// conversations (used from signals that don't carry the conversation).
+private static void re_emit_item(int item_id) {
+    foreach (Conversation c in app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY).get_active_conversations()) {
+        var item = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).get_item_by_id(c, item_id);
+        if (item != null) {
+            emit(content_item_json("message", item, c));
+            return;
+        }
+    }
 }
 
 private static Conversation? conversation_by_id(int id) {
@@ -424,6 +485,43 @@ public void send_text(int conversation_id, string body) {
             return Source.REMOVE;
         }
         Dino.send_message(c, text, 0, null, new Gee.ArrayList<Xmpp.Xep.MessageMarkup.Span>());
+        return Source.REMOVE;
+    });
+}
+
+public void set_reaction(int conversation_id, int item_id, string emoji, bool add) {
+    int cid = conversation_id;
+    int iid = item_id;
+    string e = emoji;
+    bool a = add;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        var item = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).get_item_by_id(c, iid);
+        if (item == null) return Source.REMOVE;
+        var reactions = app.stream_interactor.get_module(Dino.Reactions.IDENTITY);
+        if (a) reactions.add_reaction(c, item, e);
+        else reactions.remove_reaction(c, item, e);
+        re_emit_item_delayed(iid);
+        return Source.REMOVE;
+    });
+}
+
+public void correct_message(int conversation_id, int item_id, string body) {
+    int cid = conversation_id;
+    int iid = item_id;
+    string text = body;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        var mi = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).get_item_by_id(c, iid) as Dino.MessageItem;
+        if (mi == null) return Source.REMOVE;
+        if (!app.stream_interactor.get_module(Dino.MessageCorrection.IDENTITY).is_own_correction_allowed(c, mi.message)) {
+            emit("{\"type\":\"error\",\"message\":\"This message can no longer be edited\"}");
+            return Source.REMOVE;
+        }
+        Dino.send_message(c, text, 0, mi.message, new Gee.ArrayList<Xmpp.Xep.MessageMarkup.Span>());
+        re_emit_item_delayed(iid);
         return Source.REMOVE;
     });
 }

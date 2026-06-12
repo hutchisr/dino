@@ -33,6 +33,12 @@ struct RosterContact: Identifiable {
     var online: Bool { show != "offline" }
 }
 
+struct Reaction: Equatable {
+    let emoji: String
+    let count: Int
+    let me: Bool
+}
+
 struct ChatMessage: Identifiable, Equatable {
     let id: Int32    // content item id
     let content: String  // "text" or "file"
@@ -46,6 +52,8 @@ struct ChatMessage: Identifiable, Equatable {
     var size: Int = 0
     var fileState: String = ""
     var path: String = ""
+    var editable: Bool = false
+    var reactions: [Reaction] = []
 
     var isFile: Bool { content == "file" }
     var isImage: Bool {
@@ -133,6 +141,14 @@ final class AppModel: ObservableObject {
 
     func requestOccupants(_ id: Int32) {
         DinoCore.shared.requestOccupants(id)
+    }
+
+    func setReaction(_ id: Int32, item: Int32, emoji: String, add: Bool) {
+        DinoCore.shared.setReaction(id, item: item, emoji: emoji, add: add)
+    }
+
+    func correctMessage(_ id: Int32, item: Int32, body: String) {
+        DinoCore.shared.correctMessage(id, item: item, body: body)
     }
 
     func ensureAvatar(for jid: String) {
@@ -301,7 +317,12 @@ final class AppModel: ObservableObject {
             mime: d["mime"] as? String ?? "",
             size: d["size"] as? Int ?? 0,
             fileState: d["file_state"] as? String ?? "",
-            path: d["path"] as? String ?? "")
+            path: d["path"] as? String ?? "",
+            editable: d["editable"] as? Bool ?? false,
+            reactions: (d["reactions"] as? [[String: Any]] ?? []).compactMap { r in
+                guard let emoji = r["emoji"] as? String else { return nil }
+                return Reaction(emoji: emoji, count: r["count"] as? Int ?? 1, me: r["me"] as? Bool ?? false)
+            })
     }
 
     // Environment-driven automation used by the build scripts to exercise the
@@ -350,6 +371,18 @@ final class AppModel: ObservableObject {
             if let text = env["DINO_AUTOSEND"] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                     self.send(conv.id, text)
+                }
+            }
+            if let emoji = env["DINO_AUTOREACT"] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                    guard let last = self.messages[conv.id]?.last else { return }
+                    self.setReaction(conv.id, item: last.id, emoji: emoji, add: true)
+                }
+            }
+            if let text = env["DINO_AUTOCORRECT"] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                    guard let last = self.messages[conv.id]?.last(where: { $0.editable }) else { return }
+                    self.correctMessage(conv.id, item: last.id, body: text)
                 }
             }
             if env["DINO_AUTOSENDFILE"] != nil {

@@ -383,6 +383,7 @@ struct ChatView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var showFileImporter = false
     @State private var showOccupants = false
+    @State private var editing: ChatMessage?
 
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
@@ -394,8 +395,11 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: 6) {
                         ForEach(model.messages[conversationId] ?? []) { msg in
-                            MessageBubble(conversationId: conversationId, msg: msg)
-                                .id(msg.id)
+                            MessageBubble(conversationId: conversationId, msg: msg) { m in
+                                editing = m
+                                draft = m.body
+                            }
+                            .id(msg.id)
                         }
                     }
                     .padding(.horizontal, 12)
@@ -418,6 +422,21 @@ struct ChatView: View {
                 }
             }
             Divider()
+            if editing != nil {
+                HStack {
+                    Image(systemName: "pencil").font(.caption)
+                    Text("Editing message").font(.caption)
+                    Spacer()
+                    Button {
+                        editing = nil
+                        draft = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+            }
             HStack {
                 Menu {
                     PhotosPicker(selection: $photoItem, matching: .images) {
@@ -434,13 +453,20 @@ struct ChatView: View {
                 TextField("Message", text: $draft, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: draft) { value in
-                        model.setTyping(conversationId, !value.isEmpty)
+                        if editing == nil {
+                            model.setTyping(conversationId, !value.isEmpty)
+                        }
                     }
                 Button {
-                    model.send(conversationId, draft)
+                    if let editing {
+                        model.correctMessage(conversationId, item: editing.id, body: draft)
+                        self.editing = nil
+                    } else {
+                        model.send(conversationId, draft)
+                    }
                     draft = ""
                 } label: {
-                    Image(systemName: "paperplane.fill")
+                    Image(systemName: editing != nil ? "checkmark.circle.fill" : "paperplane.fill")
                 }
                 .disabled(draft.isEmpty)
             }
@@ -505,28 +531,70 @@ struct MessageBubble: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
     let msg: ChatMessage
+    var onEdit: ((ChatMessage) -> Void)? = nil
+
+    private static let quickEmojis = ["👍", "❤️", "😂", "😮", "😢"]
 
     var body: some View {
         HStack {
             if msg.direction == "out" { Spacer(minLength: 40) }
-            VStack(alignment: .leading, spacing: 2) {
-                if msg.isFile {
-                    FileContent(conversationId: conversationId, msg: msg)
-                } else {
-                    Text(msg.body)
-                }
-                HStack(spacing: 4) {
-                    if msg.encryption == "OMEMO" {
-                        Image(systemName: "lock.fill").font(.system(size: 8))
+            VStack(alignment: msg.direction == "out" ? .trailing : .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 2) {
+                    if msg.isFile {
+                        FileContent(conversationId: conversationId, msg: msg)
+                    } else {
+                        Text(msg.body)
                     }
-                    Text(msg.time, style: .time).font(.system(size: 9))
+                    HStack(spacing: 4) {
+                        if msg.encryption == "OMEMO" {
+                            Image(systemName: "lock.fill").font(.system(size: 8))
+                        }
+                        Text(msg.time, style: .time).font(.system(size: 9))
+                    }
+                    .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(msg.direction == "out" ? Color.accentColor.opacity(0.2) : Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .contextMenu {
+                    ForEach(Self.quickEmojis, id: \.self) { emoji in
+                        Button {
+                            let mine = msg.reactions.first { $0.emoji == emoji }?.me ?? false
+                            model.setReaction(conversationId, item: msg.id, emoji: emoji, add: !mine)
+                        } label: {
+                            Text(emoji)
+                        }
+                    }
+                    if msg.editable, let onEdit {
+                        Divider()
+                        Button {
+                            onEdit(msg)
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                    }
+                }
+                if !msg.reactions.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(msg.reactions, id: \.emoji) { r in
+                            Button {
+                                model.setReaction(conversationId, item: msg.id, emoji: r.emoji, add: !r.me)
+                            } label: {
+                                Text("\(r.emoji) \(r.count)")
+                                    .font(.caption)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(
+                                        Capsule().fill(r.me ? Color.accentColor.opacity(0.3) : Color(.secondarySystemBackground)))
+                                    .overlay(
+                                        Capsule().stroke(r.me ? Color.accentColor : .clear, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(msg.direction == "out" ? Color.accentColor.opacity(0.2) : Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
             if msg.direction != "out" { Spacer(minLength: 40) }
         }
     }
