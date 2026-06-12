@@ -12,6 +12,13 @@ struct XmppConversation: Identifiable {
     let jid: String
     var name: String
     var encryption: String
+    var kind: String = "chat"
+    var unread: Int = 0
+    var preview: String = ""
+    var previewDirection: String = ""
+    var time: Date = Date(timeIntervalSince1970: 0)
+
+    var isGroupchat: Bool { kind == "groupchat" }
 }
 
 struct RosterContact: Identifiable {
@@ -44,8 +51,11 @@ final class AppModel: ObservableObject {
     @Published var navigation: [Int32] = []
     @Published var roster: [RosterContact] = []
     @Published var subscriptionRequests: [String] = []
+    @Published var avatars: [String: String] = [:]      // bare jid -> file path
+    @Published var chatStates: [Int32: String] = [:]    // conversation id -> XEP-0085 state
 
     private var pendingChatJid: String?
+    private var requestedAvatars = Set<String>()
 
     private var booted = false
 
@@ -73,6 +83,25 @@ final class AppModel: ObservableObject {
 
     func requestState() {
         DinoCore.shared.requestState()
+    }
+
+    func focusConversation(_ id: Int32) {
+        DinoCore.shared.focusConversation(id)
+    }
+
+    func blurConversation(_ id: Int32) {
+        DinoCore.shared.blurConversation(id)
+    }
+
+    func setTyping(_ id: Int32, _ typing: Bool) {
+        DinoCore.shared.setTyping(id, typing)
+    }
+
+    func ensureAvatar(for jid: String) {
+        if avatars[jid] == nil && !requestedAvatars.contains(jid) {
+            requestedAvatars.insert(jid)
+            DinoCore.shared.requestAvatar(jid: jid)
+        }
     }
 
     /// Start (or open) a chat with a contact and navigate into it once the
@@ -152,13 +181,26 @@ final class AppModel: ObservableObject {
                     return XmppConversation(
                         id: Int32(id), account: c["account"] as? String ?? "",
                         jid: jid, name: c["name"] as? String ?? jid,
-                        encryption: c["encryption"] as? String ?? "NONE")
-                }
+                        encryption: c["encryption"] as? String ?? "NONE",
+                        kind: c["kind"] as? String ?? "chat",
+                        unread: c["unread"] as? Int ?? 0,
+                        preview: c["preview"] as? String ?? "",
+                        previewDirection: c["preview_direction"] as? String ?? "",
+                        time: Date(timeIntervalSince1970: TimeInterval(c["time"] as? Int ?? 0)))
+                }.sorted { $0.time > $1.time }
                 if let pending = pendingChatJid,
                    let conv = conversations.first(where: { $0.jid == pending }) {
                     pendingChatJid = nil
                     navigation = [conv.id]
                 }
+            }
+        case "chat_state":
+            if let cid = e["conversation"] as? Int, let state = e["state"] as? String {
+                chatStates[Int32(cid)] = state
+            }
+        case "avatar":
+            if let jid = e["jid"] as? String, let path = e["path"] as? String {
+                avatars[jid] = path
             }
         case "roster":
             if let list = e["list"] as? [[String: Any]] {

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct DinoApp: App {
@@ -104,15 +105,7 @@ struct ConversationListView: View {
             Section("Conversations") {
                 ForEach(model.conversations) { conv in
                     NavigationLink(value: conv.id) {
-                        VStack(alignment: .leading) {
-                            HStack {
-                                Text(conv.name)
-                                if conv.encryption == "OMEMO" {
-                                    Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.green)
-                                }
-                            }
-                            Text(conv.jid).font(.caption).foregroundStyle(.secondary)
-                        }
+                        ConversationRow(conv: conv)
                     }
                 }
             }
@@ -141,6 +134,102 @@ struct ConversationListView: View {
         .sheet(isPresented: $showContacts) {
             ContactsView(isPresented: $showContacts)
                 .environmentObject(model)
+        }
+    }
+}
+
+struct AvatarView: View {
+    @EnvironmentObject var model: AppModel
+    let jid: String
+    let name: String
+    let isGroup: Bool
+    var size: CGFloat = 44
+
+    private var initial: String {
+        String((name.isEmpty ? jid : name).prefix(1)).uppercased()
+    }
+
+    private var fallbackColor: Color {
+        let palette: [Color] = [.blue, .teal, .green, .orange, .pink, .purple, .indigo, .red]
+        return palette[abs(jid.hashValue) % palette.count]
+    }
+
+    var body: some View {
+        Group {
+            if let path = model.avatars[jid],
+               let image = UIImage(contentsOfFile: path) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    fallbackColor.opacity(0.85)
+                    if isGroup {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: size * 0.4))
+                            .foregroundStyle(.white)
+                    } else {
+                        Text(initial)
+                            .font(.system(size: size * 0.45, weight: .medium))
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .onAppear { model.ensureAvatar(for: jid) }
+    }
+}
+
+struct ConversationRow: View {
+    @EnvironmentObject var model: AppModel
+    let conv: XmppConversation
+
+    private var timeLabel: String {
+        if conv.time.timeIntervalSince1970 == 0 { return "" }
+        let cal = Calendar.current
+        let fmt = DateFormatter()
+        if cal.isDateInToday(conv.time) {
+            fmt.timeStyle = .short
+            fmt.dateStyle = .none
+        } else {
+            fmt.dateStyle = .short
+            fmt.timeStyle = .none
+        }
+        return fmt.string(from: conv.time)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            AvatarView(jid: conv.jid, name: conv.name, isGroup: conv.isGroupchat)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(conv.name)
+                        .fontWeight(conv.unread > 0 ? .semibold : .regular)
+                        .lineLimit(1)
+                    if conv.encryption == "OMEMO" {
+                        Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.green)
+                    }
+                    Spacer()
+                    Text(timeLabel).font(.caption2).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text((conv.previewDirection == "out" && !conv.preview.isEmpty ? "You: " : "") + conv.preview)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                    if conv.unread > 0 {
+                        Text("\(conv.unread)")
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.accentColor))
+                    }
+                }
+            }
         }
     }
 }
@@ -201,9 +290,13 @@ struct ContactsView: View {
                         model.openChat(with: contact.id)
                     } label: {
                         HStack {
-                            Circle()
-                                .fill(contact.online ? .green : Color(.systemGray4))
-                                .frame(width: 10, height: 10)
+                            AvatarView(jid: contact.id, name: contact.displayName, isGroup: false, size: 36)
+                                .overlay(alignment: .bottomTrailing) {
+                                    Circle()
+                                        .fill(contact.online ? .green : Color(.systemGray4))
+                                        .frame(width: 10, height: 10)
+                                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
+                                }
                             VStack(alignment: .leading) {
                                 Text(contact.displayName)
                                 HStack(spacing: 4) {
@@ -282,10 +375,23 @@ struct ChatView: View {
                     }
                 }
             }
+            if model.chatStates[conversationId] == "composing" {
+                HStack {
+                    Text("typing…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 2)
+                    Spacer()
+                }
+            }
             Divider()
             HStack {
                 TextField("Message", text: $draft, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
+                    .onChange(of: draft) { value in
+                        model.setTyping(conversationId, !value.isEmpty)
+                    }
                 Button {
                     model.send(conversationId, draft)
                     draft = ""
@@ -307,7 +413,13 @@ struct ChatView: View {
                     .foregroundStyle(conversation?.encryption == "OMEMO" ? .green : .secondary)
             }
         }
-        .onAppear { model.openConversation(conversationId) }
+        .onAppear {
+            model.openConversation(conversationId)
+            model.focusConversation(conversationId)
+        }
+        .onDisappear {
+            model.blurConversation(conversationId)
+        }
     }
 }
 

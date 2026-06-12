@@ -102,6 +102,13 @@ public void start(owned EventCb cb) {
         });
         si.get_module(Dino.ContentItemStore.IDENTITY).new_item.connect((item, conversation) => {
             emit(content_item_json("message", item, conversation));
+            push_conversations();
+        });
+        si.get_module(Dino.CounterpartInteractionManager.IDENTITY).received_state.connect((conversation, state) => {
+            emit(@"{\"type\":\"chat_state\",\"conversation\":$(conversation.id),\"state\":\"$(esc(state))\"}");
+        });
+        si.get_module(Dino.AvatarManager.IDENTITY).received_avatar.connect((jid, account) => {
+            push_avatar(account, jid);
         });
         si.get_module(Dino.ConversationManager.IDENTITY).conversation_activated.connect((conversation) => {
             push_conversations();
@@ -136,8 +143,31 @@ private static string content_item_json(string type, Dino.ContentItem item, Conv
 
 private static string conversation_json(Conversation c) {
     string name = Dino.get_conversation_display_name(app.stream_interactor, c, null);
-    return "{\"id\":%d,\"account\":\"%s\",\"jid\":\"%s\",\"name\":\"%s\",\"encryption\":\"%s\"}".printf(
-        c.id, esc(c.account.bare_jid.to_string()), esc(c.counterpart.to_string()), esc(name), enc_name(c.encryption));
+    int unread = app.stream_interactor.get_module(Dino.ChatInteraction.IDENTITY).get_num_unread(c);
+    string preview = "";
+    string preview_direction = "";
+    var latest = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).get_n_latest(c, 1);
+    foreach (Dino.ContentItem item in latest) {
+        var mi = item as Dino.MessageItem;
+        if (mi != null) {
+            preview = mi.message.body ?? "";
+            preview_direction = mi.message.direction == Message.DIRECTION_SENT ? "out" : "in";
+        } else {
+            preview = "[file]";
+        }
+    }
+    long last_time = c.last_active != null ? (long) c.last_active.to_unix() : 0;
+    string kind = c.type_ == Conversation.Type.GROUPCHAT ? "groupchat" : "chat";
+    return "{\"id\":%d,\"account\":\"%s\",\"jid\":\"%s\",\"name\":\"%s\",\"encryption\":\"%s\",\"kind\":\"%s\",\"unread\":%d,\"preview\":\"%s\",\"preview_direction\":\"%s\",\"time\":%ld}".printf(
+        c.id, esc(c.account.bare_jid.to_string()), esc(c.counterpart.to_string()), esc(name), enc_name(c.encryption),
+        kind, unread, esc(preview), preview_direction, last_time);
+}
+
+private static void push_avatar(Account account, Xmpp.Jid jid) {
+    File? file = app.stream_interactor.get_module(Dino.AvatarManager.IDENTITY).get_avatar_file(account, jid);
+    if (file != null && file.get_path() != null) {
+        emit(@"{\"type\":\"avatar\",\"jid\":\"$(esc(jid.bare_jid.to_string()))\",\"path\":\"$(esc(file.get_path()))\"}");
+    }
 }
 
 private static void push_conversations() {
@@ -366,6 +396,56 @@ public void send_text(int conversation_id, string body) {
             return Source.REMOVE;
         }
         Dino.send_message(c, text, 0, null, new Gee.ArrayList<Xmpp.Xep.MessageMarkup.Span>());
+        return Source.REMOVE;
+    });
+}
+
+// Marks the conversation as the focused one: read markers are sent and the
+// unread count resets, mirroring desktop window-focus semantics.
+public void focus_conversation(int conversation_id) {
+    int cid = conversation_id;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        var chat = app.stream_interactor.get_module(Dino.ChatInteraction.IDENTITY);
+        chat.on_conversation_selected(c);
+        chat.on_window_focus_in(c);
+        push_conversations();
+        return Source.REMOVE;
+    });
+}
+
+public void blur_conversation(int conversation_id) {
+    int cid = conversation_id;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        app.stream_interactor.get_module(Dino.ChatInteraction.IDENTITY).on_window_focus_out(c);
+        return Source.REMOVE;
+    });
+}
+
+public void set_typing(int conversation_id, bool typing) {
+    int cid = conversation_id;
+    bool t = typing;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        var chat = app.stream_interactor.get_module(Dino.ChatInteraction.IDENTITY);
+        if (t) chat.on_message_entered(c);
+        else chat.on_message_cleared(c);
+        return Source.REMOVE;
+    });
+}
+
+public void request_avatar(string jid_str) {
+    string j = jid_str;
+    Idle.add(() => {
+        try {
+            var account = first_enabled_account();
+            if (account == null) return Source.REMOVE;
+            push_avatar(account, new Xmpp.Jid(j).bare_jid);
+        } catch (Error e) { }
         return Source.REMOVE;
     });
 }

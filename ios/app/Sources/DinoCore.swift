@@ -20,6 +20,10 @@ final class DinoCore {
     func addAccount(jid: String, password: String) { dino_ios_add_account(jid, password) }
     func signOut() { dino_ios_sign_out() }
     func requestRoster() { dino_ios_request_roster() }
+    func focusConversation(_ id: Int32) { dino_ios_focus_conversation(id) }
+    func blurConversation(_ id: Int32) { dino_ios_blur_conversation(id) }
+    func setTyping(_ id: Int32, _ typing: Bool) { dino_ios_set_typing(id, typing ? 1 : 0) }
+    func requestAvatar(jid: String) { dino_ios_request_avatar(jid) }
     func addContact(jid: String, alias: String?) { dino_ios_add_contact(jid, alias) }
     func removeContact(jid: String) { dino_ios_remove_contact(jid) }
     func respondSubscription(jid: String, approve: Bool) { dino_ios_respond_subscription(jid, approve ? 1 : 0) }
