@@ -98,6 +98,13 @@ struct ConversationListView: View {
                         Spacer()
                         Text(account.state.lowercased()).font(.caption2).foregroundStyle(.secondary)
                     }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            model.signOut()
+                        } label: {
+                            Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                    }
                 }
             }
             if !model.subscriptionRequests.isEmpty {
@@ -144,11 +151,6 @@ struct ConversationListView: View {
                     showAccountSettings = true
                 } label: {
                     Label("Account", systemImage: "person.crop.circle")
-                }
-                Button(role: .destructive) {
-                    model.signOut()
-                } label: {
-                    Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
