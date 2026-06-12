@@ -5,19 +5,42 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>DinoPoc</string>
+	<string>Gecko</string>
 	<key>CFBundleIdentifier</key>
 	<string>im.dino.ios.poc</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Dino PoC</string>
+	<string>Gecko</string>
+	<key>CFBundleDisplayName</key>
+	<string>Gecko</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon60x60</string>
+			</array>
+		</dict>
+	</dict>
+	<key>CFBundleIcons~ipad</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon60x60</string>
+				<string>AppIcon76x76</string>
+			</array>
+		</dict>
+	</dict>
 	<key>MinimumOSVersion</key>
 	<string>16.0</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

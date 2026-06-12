@@ -10,7 +10,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$HERE")"
 PREFIX="$ROOT/prefix/$TARGET"
 BUILD="$HERE/build-$TARGET"
-APP="$BUILD/DinoPoc.app"
+APP="$BUILD/Gecko.app"
 MIN_IOS=16.0
 case "$TARGET" in
   sim-arm64)    SDK=iphonesimulator; TRIPLE="arm64-apple-ios${MIN_IOS}-simulator" ;;
@@ -35,19 +35,25 @@ xcrun -sdk "$SDK" swiftc \
   -Xlinker -force_load -Xlinker "$PREFIX/lib/dino/plugins/omemo.a" \
   -Xlinker -force_load -Xlinker "$PREFIX/lib/dino/plugins/http-files.a" \
   $LIBS \
-  -o "$APP/DinoPoc"
+  -o "$APP/Gecko"
 
 cp "$HERE/Info.plist" "$APP/Info.plist"
+# app icon sizes from the master image
+if [ -f "$HERE/AppIcon.png" ]; then
+  sips -z 120 120 "$HERE/AppIcon.png" --out "$APP/AppIcon60x60@2x.png" >/dev/null
+  sips -z 180 180 "$HERE/AppIcon.png" --out "$APP/AppIcon60x60@3x.png" >/dev/null
+  sips -z 152 152 "$HERE/AppIcon.png" --out "$APP/AppIcon76x76@2x~ipad.png" >/dev/null
+fi
 codesign --force --sign - "$APP"
 echo "built $APP"
 
 if [ "$TARGET" = "device-arm64" ]; then
   # package as an .ipa for (re-)signing and device installation
-  rm -rf "$BUILD/Payload" "$BUILD/DinoPoc.ipa"
+  rm -rf "$BUILD/Payload" "$BUILD/Gecko.ipa"
   mkdir -p "$BUILD/Payload"
   cp -R "$APP" "$BUILD/Payload/"
-  (cd "$BUILD" && zip -qry DinoPoc.ipa Payload)
-  echo "built $BUILD/DinoPoc.ipa"
+  (cd "$BUILD" && zip -qry Gecko.ipa Payload)
+  echo "built $BUILD/Gecko.ipa"
 fi
 
 if [ "$ACTION" = "run" ] && [ "$TARGET" = "sim-arm64" ]; then
