@@ -180,6 +180,11 @@ struct ConversationListView: View {
     }
 }
 
+struct ChatBottomDistanceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 func jidColor(_ jid: String) -> Color {
     let palette: [Color] = [.blue, .teal, .green, .orange, .pink, .purple, .indigo, .red]
     var hash = 5381
@@ -422,6 +427,7 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            GeometryReader { outer in
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 6) {
@@ -457,10 +463,14 @@ struct ChatView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    Color.clear
-                        .frame(height: 1)
-                        .onAppear { isAtBottom = true }
-                        .onDisappear { isAtBottom = false }
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: ChatBottomDistanceKey.self,
+                                               value: g.frame(in: .named("chatScroll")).maxY)
+                    })
+                }
+                .coordinateSpace(name: "chatScroll")
+                .onPreferenceChange(ChatBottomDistanceKey.self) { contentMaxY in
+                    isAtBottom = contentMaxY <= outer.size.height + 60
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if !isAtBottom {
@@ -496,6 +506,7 @@ struct ChatView: View {
                         }
                     }
                 }
+            }
             }
             if model.chatStates[conversationId] == "composing" {
                 HStack {
