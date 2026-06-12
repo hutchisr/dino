@@ -384,6 +384,7 @@ struct ChatView: View {
     @State private var showFileImporter = false
     @State private var showOccupants = false
     @State private var editing: ChatMessage?
+    @State private var viewerItem: ImageViewerItem?
 
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
@@ -395,10 +396,12 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: 6) {
                         ForEach(model.messages[conversationId] ?? []) { msg in
-                            MessageBubble(conversationId: conversationId, msg: msg) { m in
+                            MessageBubble(conversationId: conversationId, msg: msg, onEdit: { m in
                                 editing = m
                                 draft = m.body
-                            }
+                            }, onImageTap: { path in
+                                viewerItem = ImageViewerItem(id: path)
+                            })
                             .id(msg.id)
                         }
                     }
@@ -517,6 +520,15 @@ struct ChatView: View {
             OccupantsView(conversationId: conversationId, isPresented: $showOccupants)
                 .environmentObject(model)
         }
+        .fullScreenCover(item: $viewerItem) { item in
+            ImageViewer(path: item.path)
+        }
+        .onChange(of: model.viewerRequest) { path in
+            if let path {
+                viewerItem = ImageViewerItem(id: path)
+                model.viewerRequest = nil
+            }
+        }
         .onAppear {
             model.openConversation(conversationId)
             model.focusConversation(conversationId)
@@ -532,6 +544,7 @@ struct MessageBubble: View {
     let conversationId: Int32
     let msg: ChatMessage
     var onEdit: ((ChatMessage) -> Void)? = nil
+    var onImageTap: ((String) -> Void)? = nil
 
     private static let quickEmojis = ["👍", "❤️", "😂", "😮", "😢"]
 
@@ -541,7 +554,7 @@ struct MessageBubble: View {
             VStack(alignment: msg.direction == "out" ? .trailing : .leading, spacing: 2) {
                 VStack(alignment: .leading, spacing: 2) {
                     if msg.isFile {
-                        FileContent(conversationId: conversationId, msg: msg)
+                        FileContent(conversationId: conversationId, msg: msg, onImageTap: onImageTap)
                     } else {
                         Text(msg.body)
                     }
@@ -635,6 +648,7 @@ struct FileContent: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
     let msg: ChatMessage
+    var onImageTap: ((String) -> Void)? = nil
 
     private var sizeLabel: String {
         msg.size > 0 ? ByteCountFormatter.string(fromByteCount: Int64(msg.size), countStyle: .file) : ""
@@ -648,6 +662,9 @@ struct FileContent: View {
                 .scaledToFit()
                 .frame(maxWidth: 220, maxHeight: 280)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .onTapGesture {
+                    onImageTap?(msg.path)
+                }
         } else {
             HStack(spacing: 8) {
                 switch msg.fileState {

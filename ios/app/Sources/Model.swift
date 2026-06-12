@@ -78,6 +78,7 @@ final class AppModel: ObservableObject {
     @Published var avatars: [String: String] = [:]      // bare jid -> file path
     @Published var chatStates: [Int32: String] = [:]    // conversation id -> XEP-0085 state
     @Published var occupants: [Int32: [(nick: String, isSelf: Bool)]] = [:]
+    @Published var viewerRequest: String?   // used by UI automation to open the image viewer
 
     private var pendingChatJid: String?
     private var requestedAvatars = Set<String>()
@@ -383,6 +384,13 @@ final class AppModel: ObservableObject {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
                     guard let last = self.messages[conv.id]?.last(where: { $0.editable }) else { return }
                     self.correctMessage(conv.id, item: last.id, body: text)
+                }
+            }
+            if env["DINO_AUTOVIEWIMAGE"] != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                    if let img = self.messages[conv.id]?.last(where: { $0.isImage && $0.fileState == "complete" && !$0.path.isEmpty }) {
+                        self.viewerRequest = img.path
+                    }
                 }
             }
             if env["DINO_AUTOSENDFILE"] != nil {
