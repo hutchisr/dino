@@ -31,6 +31,21 @@ venv/bin/python gecko_push_proxy.py
 `APNS_SANDBOX=1` for development-signed builds (sideloaded with a dev
 certificate, or the iOS Simulator); `0` for App Store / TestFlight builds.
 
+## Docker / Kubernetes
+
+```sh
+docker build -t gecko-push-proxy .
+docker run -d --restart unless-stopped \
+  -v /path/to/AuthKey_XXXXXXXXXX.p8:/secrets/apns.p8:ro \
+  -e XMPP_JID='geckopush@example.org/proxy' -e XMPP_PASSWORD=... \
+  -e APNS_KEY_PATH=/secrets/apns.p8 -e APNS_KEY_ID=... -e APNS_TEAM_ID=... \
+  gecko-push-proxy
+```
+
+For Kubernetes see `k8s.yaml` (Deployment with a single replica — the bot
+binds a fixed XMPP resource, so never scale it up — plus the secret recipe
+in its header comment).
+
 The client picks the proxy's JID from the `DINO_PUSH_PROXY_JID` environment
 variable (Simulator runs) or the default in `PushRegistration.swift`.
 

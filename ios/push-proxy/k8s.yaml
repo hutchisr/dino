@@ -1,0 +1,57 @@
+# Gecko push proxy deployment.
+#
+# Create the secret first (never commit these values):
+#   kubectl create secret generic gecko-push \
+#     --from-literal=XMPP_JID='geckopush@xmpp.is/proxy' \
+#     --from-literal=XMPP_PASSWORD='...' \
+#     --from-literal=APNS_KEY_ID='8U3HL43JZ8' \
+#     --from-literal=APNS_TEAM_ID='998J34UYP5' \
+#     --from-file=apns.p8=AuthKey_8U3HL43JZ8.p8
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gecko-push-proxy
+  labels:
+    app: gecko-push-proxy
+spec:
+  replicas: 1   # exactly one: the bot binds a fixed XMPP resource
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gecko-push-proxy
+  template:
+    metadata:
+      labels:
+        app: gecko-push-proxy
+    spec:
+      containers:
+        - name: proxy
+          image: gecko-push-proxy:latest   # replace with your registry path
+          envFrom:
+            - secretRef:
+                name: gecko-push
+          env:
+            - name: APNS_KEY_PATH
+              value: /secrets/apns.p8
+            - name: APNS_TOPIC
+              value: me.anemoneya.gecko
+            - name: APNS_SANDBOX
+              value: "1"   # set to "0" for App Store / TestFlight builds
+          volumeMounts:
+            - name: apns-key
+              mountPath: /secrets
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 48Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: apns-key
+          secret:
+            secretName: gecko-push
+            items:
+              - key: apns.p8
+                path: apns.p8
