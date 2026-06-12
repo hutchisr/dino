@@ -428,6 +428,74 @@ public void send_text(int conversation_id, string body) {
     });
 }
 
+public void join_muc(string jid_str, string? nick) {
+    string j = jid_str;
+    string? n = nick == null || nick == "" ? null : nick;
+    Idle.add(() => {
+        try {
+            var account = first_enabled_account();
+            if (account == null) return Source.REMOVE;
+            var jid = new Xmpp.Jid(j).bare_jid;
+            var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
+            muc.join.begin(account, jid, n, null, false, null, (_, res) => {
+                var result = muc.join.end(res);
+                if (result == null) {
+                    emit("{\"type\":\"error\",\"message\":\"Could not join: not connected\"}");
+                } else if (result.nick == null) {
+                    emit(@"{\"type\":\"error\",\"message\":\"Could not join $(esc(j))\"}");
+                } else {
+                    push_conversations();
+                }
+            });
+        } catch (Error e) {
+            emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
+        }
+        return Source.REMOVE;
+    });
+}
+
+// Closes a conversation; for group chats this also leaves the room
+// (removing the autojoin bookmark, like desktop Dino).
+public void close_conversation(int conversation_id) {
+    int cid = conversation_id;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        if (c.type_ == Conversation.Type.GROUPCHAT) {
+            app.stream_interactor.get_module(Dino.MucManager.IDENTITY).part(c.account, c.counterpart);
+        }
+        app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY).close_conversation(c);
+        push_conversations();
+        return Source.REMOVE;
+    });
+}
+
+public void request_occupants(int conversation_id) {
+    int cid = conversation_id;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
+        var occupants = muc.get_occupants(c.counterpart, c.account);
+        Xmpp.Jid? own = muc.get_own_jid(c.counterpart, c.account);
+        var b = new StringBuilder();
+        b.append_printf("{\"type\":\"occupants\",\"conversation\":%d,\"list\":[", cid);
+        bool first = true;
+        if (occupants != null) {
+            foreach (Xmpp.Jid occupant in occupants) {
+                if (occupant.resourcepart == null) continue;
+                if (!first) b.append_c(',');
+                first = false;
+                bool is_self = own != null && own.equals(occupant);
+                b.append("{\"nick\":\"%s\",\"self\":%s}".printf(esc(occupant.resourcepart), is_self ? "true" : "false"));
+            }
+        }
+        b.append("]}");
+        emit(b.str);
+        return Source.REMOVE;
+    });
+}
+
 public void send_file(int conversation_id, string path) {
     int cid = conversation_id;
     string p = path;

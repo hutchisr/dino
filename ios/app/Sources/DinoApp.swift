@@ -81,6 +81,9 @@ struct AccountSetupView: View {
 struct ConversationListView: View {
     @EnvironmentObject var model: AppModel
     @State private var showContacts = false
+    @State private var showJoinMuc = false
+    @State private var mucJid = ""
+    @State private var mucNick = ""
 
     var body: some View {
         List {
@@ -108,10 +111,18 @@ struct ConversationListView: View {
                     NavigationLink(value: conv.id) {
                         ConversationRow(conv: conv)
                     }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            model.closeConversation(conv.id)
+                        } label: {
+                            Label(conv.isGroupchat ? "Leave" : "Close",
+                                  systemImage: conv.isGroupchat ? "rectangle.portrait.and.arrow.right" : "xmark")
+                        }
+                    }
                 }
             }
         }
-        .navigationTitle("Dino")
+        .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Int32.self) { id in
             ChatView(conversationId: id)
         }
@@ -123,6 +134,11 @@ struct ConversationListView: View {
                 Image(systemName: "square.and.pencil")
             }
             Menu {
+                Button {
+                    showJoinMuc = true
+                } label: {
+                    Label("Join channel", systemImage: "person.2")
+                }
                 Button(role: .destructive) {
                     model.signOut()
                 } label: {
@@ -135,6 +151,18 @@ struct ConversationListView: View {
         .sheet(isPresented: $showContacts) {
             ContactsView(isPresented: $showContacts)
                 .environmentObject(model)
+        }
+        .alert("Join channel", isPresented: $showJoinMuc) {
+            TextField("room@conference.example.org", text: $mucJid)
+                .textInputAutocapitalization(.never)
+            TextField("Nickname (optional)", text: $mucNick)
+                .textInputAutocapitalization(.never)
+            Button("Join") {
+                model.joinMuc(jid: mucJid, nick: mucNick.isEmpty ? nil : mucNick)
+                mucJid = ""
+                mucNick = ""
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 }
@@ -354,6 +382,7 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var photoItem: PhotosPickerItem?
     @State private var showFileImporter = false
+    @State private var showOccupants = false
 
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
@@ -442,6 +471,14 @@ struct ChatView: View {
         .navigationTitle(conversation?.name ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if conversation?.isGroupchat == true {
+                Button {
+                    model.requestOccupants(conversationId)
+                    showOccupants = true
+                } label: {
+                    Image(systemName: "person.2")
+                }
+            }
             Button {
                 let omemoOn = conversation?.encryption == "OMEMO"
                 model.setEncryption(conversationId, omemo: !omemoOn)
@@ -449,6 +486,10 @@ struct ChatView: View {
                 Image(systemName: conversation?.encryption == "OMEMO" ? "lock.fill" : "lock.open")
                     .foregroundStyle(conversation?.encryption == "OMEMO" ? .green : .secondary)
             }
+        }
+        .sheet(isPresented: $showOccupants) {
+            OccupantsView(conversationId: conversationId, isPresented: $showOccupants)
+                .environmentObject(model)
         }
         .onAppear {
             model.openConversation(conversationId)
@@ -487,6 +528,37 @@ struct MessageBubble: View {
             .background(msg.direction == "out" ? Color.accentColor.opacity(0.2) : Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 12))
             if msg.direction != "out" { Spacer(minLength: 40) }
+        }
+    }
+}
+
+struct OccupantsView: View {
+    @EnvironmentObject var model: AppModel
+    let conversationId: Int32
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        NavigationStack {
+            List {
+                let list = model.occupants[conversationId] ?? []
+                if list.isEmpty {
+                    Text("No participants visible.").foregroundStyle(.secondary)
+                }
+                ForEach(list, id: \.nick) { occupant in
+                    HStack {
+                        AvatarView(jid: occupant.nick, name: occupant.nick, isGroup: false, size: 32)
+                        Text(occupant.nick)
+                        if occupant.isSelf {
+                            Text("you").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Participants (\((model.occupants[conversationId] ?? []).count))")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                Button("Close") { isPresented = false }
+            }
         }
     }
 }

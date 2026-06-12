@@ -69,6 +69,7 @@ final class AppModel: ObservableObject {
     @Published var subscriptionRequests: [String] = []
     @Published var avatars: [String: String] = [:]      // bare jid -> file path
     @Published var chatStates: [Int32: String] = [:]    // conversation id -> XEP-0085 state
+    @Published var occupants: [Int32: [(nick: String, isSelf: Bool)]] = [:]
 
     private var pendingChatJid: String?
     private var requestedAvatars = Set<String>()
@@ -119,6 +120,19 @@ final class AppModel: ObservableObject {
 
     func downloadFile(_ id: Int32, item: Int32) {
         DinoCore.shared.downloadFile(id, item: item)
+    }
+
+    func joinMuc(jid: String, nick: String?) {
+        DinoCore.shared.joinMuc(jid: jid, nick: nick)
+    }
+
+    func closeConversation(_ id: Int32) {
+        DinoCore.shared.closeConversation(id)
+        if navigation.contains(id) { navigation = [] }
+    }
+
+    func requestOccupants(_ id: Int32) {
+        DinoCore.shared.requestOccupants(id)
     }
 
     func ensureAvatar(for jid: String) {
@@ -222,6 +236,13 @@ final class AppModel: ObservableObject {
             if let cid = e["conversation"] as? Int, let state = e["state"] as? String {
                 chatStates[Int32(cid)] = state
             }
+        case "occupants":
+            if let cid = e["conversation"] as? Int, let list = e["list"] as? [[String: Any]] {
+                occupants[Int32(cid)] = list.compactMap { o in
+                    guard let nick = o["nick"] as? String else { return nil }
+                    return (nick: nick, isSelf: o["self"] as? Bool ?? false)
+                }.sorted { $0.nick.lowercased() < $1.nick.lowercased() }
+            }
         case "avatar":
             if let jid = e["jid"] as? String, let path = e["path"] as? String {
                 avatars[jid] = path
@@ -300,6 +321,17 @@ final class AppModel: ObservableObject {
         if let jid = env["DINO_AUTOADDCONTACT"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
                 self?.addContact(jid: jid, alias: nil)
+            }
+        }
+        if let jid = env["DINO_AUTOJOINMUC"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+                self?.joinMuc(jid: jid, nick: nil)
+            }
+        }
+        if let jid = env["DINO_AUTOCLOSE"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                guard let self, let conv = self.conversations.first(where: { $0.jid == jid }) else { return }
+                self.closeConversation(conv.id)
             }
         }
     }

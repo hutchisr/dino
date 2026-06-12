@@ -26,6 +26,9 @@ final class DinoCore {
     func requestAvatar(jid: String) { dino_ios_request_avatar(jid) }
     func sendFile(_ id: Int32, path: String) { dino_ios_send_file(id, path) }
     func downloadFile(_ id: Int32, item: Int32) { dino_ios_download_file(id, item) }
+    func joinMuc(jid: String, nick: String?) { dino_ios_join_muc(jid, nick) }
+    func closeConversation(_ id: Int32) { dino_ios_close_conversation(id) }
+    func requestOccupants(_ id: Int32) { dino_ios_request_occupants(id) }
     func addContact(jid: String, alias: String?) { dino_ios_add_contact(jid, alias) }
     func removeContact(jid: String) { dino_ios_remove_contact(jid) }
     func respondSubscription(jid: String, approve: Bool) { dino_ios_respond_subscription(jid, approve ? 1 : 0) }
