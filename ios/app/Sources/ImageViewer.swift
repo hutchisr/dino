@@ -9,7 +9,6 @@ struct ImageViewerItem: Identifiable {
 struct ImageViewer: View {
     let path: String
     @Environment(\.dismiss) private var dismiss
-    @State private var saved = false
 
     private var image: UIImage? { UIImage(contentsOfFile: path) }
 
@@ -17,7 +16,7 @@ struct ImageViewer: View {
         NavigationStack {
             Group {
                 if let image {
-                    ZoomableImageView(image: image)
+                    ZoomableImageView(image: image, onSwipeDismiss: { dismiss() })
                         .ignoresSafeArea()
                         .background(Color.black)
                 } else {
@@ -33,19 +32,10 @@ struct ImageViewer: View {
                         Image(systemName: "xmark")
                     }
                 }
-                ToolbarItemGroup(placement: .primaryAction) {
+                ToolbarItem(placement: .primaryAction) {
                     ShareLink(item: URL(fileURLWithPath: path)) {
                         Image(systemName: "square.and.arrow.up")
                     }
-                    Button {
-                        if let image {
-                            UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-                            saved = true
-                        }
-                    } label: {
-                        Image(systemName: saved ? "checkmark" : "square.and.arrow.down")
-                    }
-                    .disabled(saved)
                 }
             }
             .toolbarBackground(.black.opacity(0.6), for: .navigationBar)
@@ -59,20 +49,23 @@ struct ImageViewer: View {
 /// view works regardless of when SwiftUI sizes it.
 struct ZoomableImageView: UIViewRepresentable {
     let image: UIImage
+    var onSwipeDismiss: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> ImageScrollView {
-        ImageScrollView(image: image)
+        ImageScrollView(image: image, onSwipeDismiss: onSwipeDismiss)
     }
 
     func updateUIView(_ view: ImageScrollView, context: Context) {}
 }
 
-final class ImageScrollView: UIScrollView, UIScrollViewDelegate {
+final class ImageScrollView: UIScrollView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     private let imageView: UIImageView
     private var lastLaidOutSize: CGSize = .zero
+    private let onSwipeDismiss: (() -> Void)?
 
-    init(image: UIImage) {
+    init(image: UIImage, onSwipeDismiss: (() -> Void)? = nil) {
         imageView = UIImageView(image: image)
+        self.onSwipeDismiss = onSwipeDismiss
         super.init(frame: .zero)
         delegate = self
         maximumZoomScale = 6
@@ -90,6 +83,22 @@ final class ImageScrollView: UIScrollView, UIScrollViewDelegate {
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
         imageView.addGestureRecognizer(doubleTap)
+
+        let swipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeDismiss(_:)))
+        swipeUp.direction = .up
+        swipeUp.delegate = self
+        addGestureRecognizer(swipeUp)
+    }
+
+    @objc private func handleSwipeDismiss(_ gesture: UISwipeGestureRecognizer) {
+        if zoomScale <= 1.01 {
+            onSwipeDismiss?()
+        }
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
     }
 
     required init?(coder: NSCoder) { fatalError() }
