@@ -84,10 +84,10 @@ final class ImageScrollView: UIScrollView, UIScrollViewDelegate, UIGestureRecogn
         doubleTap.numberOfTapsRequired = 2
         imageView.addGestureRecognizer(doubleTap)
 
-        let swipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeDismiss(_:)))
-        swipeUp.direction = .up
-        swipeUp.delegate = self
-        addGestureRecognizer(swipeUp)
+        let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeDismiss(_:)))
+        swipeDown.direction = .down
+        swipeDown.delegate = self
+        addGestureRecognizer(swipeDown)
     }
 
     @objc private func handleSwipeDismiss(_ gesture: UISwipeGestureRecognizer) {
