@@ -38,13 +38,25 @@ xcrun -sdk "$SDK" swiftc \
   -o "$APP/Gecko"
 
 cp "$HERE/Info.plist" "$APP/Info.plist"
+# aps-environment lets the app register with APNs (sandbox); required on
+# the simulator too for remote push delivery
+cat > "$BUILD/sim-entitlements.plist" <<'EOF2'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>
+EOF2
 # app icon sizes from the master image
 if [ -f "$HERE/AppIcon.png" ]; then
   sips -z 120 120 "$HERE/AppIcon.png" --out "$APP/AppIcon60x60@2x.png" >/dev/null
   sips -z 180 180 "$HERE/AppIcon.png" --out "$APP/AppIcon60x60@3x.png" >/dev/null
   sips -z 152 152 "$HERE/AppIcon.png" --out "$APP/AppIcon76x76@2x~ipad.png" >/dev/null
 fi
-codesign --force --sign - "$APP"
+codesign --force --sign - --entitlements "$BUILD/sim-entitlements.plist" "$APP"
 echo "built $APP"
 
 if [ "$TARGET" = "device-arm64" ]; then

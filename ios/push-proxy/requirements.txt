@@ -1,0 +1,4 @@
+slixmpp>=1.8
+httpx[http2]>=0.27
+PyJWT>=2.8
+cryptography>=42

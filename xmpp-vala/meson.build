@@ -114,6 +114,7 @@ sources = files(
     'src/module/xep/0333_chat_markers.vala',
     'src/module/xep/0334_message_processing_hints.vala',
     'src/module/xep/0353_jingle_message_initiation.vala',
+    'src/module/xep/0357_push_notifications.vala',
     'src/module/xep/0359_unique_stable_stanza_ids.vala',
     'src/module/xep/0363_http_file_upload.vala',
     'src/module/xep/0367_message_attaching.vala',

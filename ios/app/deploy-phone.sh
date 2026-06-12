@@ -47,15 +47,23 @@ udid = sys.argv[1]
 home = os.path.expanduser("~")
 paths = glob.glob(f"{home}/Library/MobileDevice/Provisioning Profiles/*.mobileprovision") + \
         glob.glob(f"{home}/Library/Developer/Xcode/UserData/Provisioning Profiles/*.mobileprovision")
+candidates = []
 for p in paths:
     raw = subprocess.run(["security", "cms", "-D", "-i", p], capture_output=True).stdout
     try:
         pl = plistlib.loads(raw)
     except Exception:
         continue
-    if udid in pl.get("ProvisionedDevices", []):
-        print(p)
-        break
+    if udid not in pl.get("ProvisionedDevices", []):
+        continue
+    ents = pl.get("Entitlements", {})
+    appid = ents.get("application-identifier", "")
+    has_push = "aps-environment" in ents
+    explicit = not appid.endswith("*")
+    candidates.append(((has_push, explicit), p))
+if candidates:
+    candidates.sort(reverse=True)
+    print(candidates[0][1])
 EOF
 )
 fi
@@ -92,6 +100,8 @@ cat > "$STAGE/entitlements.plist" <<EOF
 	<string>$TEAM_ID</string>
 	<key>get-task-allow</key>
 	<true/>
+	<key>aps-environment</key>
+	<string>development</string>
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$TEAM_ID.$BUNDLE_ID</string>

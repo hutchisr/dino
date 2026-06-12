@@ -268,7 +268,11 @@ final class AppModel: ObservableObject {
                 } else {
                     accounts.append(XmppAccount(id: jid, state: state))
                 }
-                if state == "CONNECTED" { runConnectedAutomation() }
+                if state == "CONNECTED" {
+                    PushRegistration.start()
+                    PushRegistration.enableOnServer()
+                    runConnectedAutomation()
+                }
             }
         case "connection_error":
             lastError = "Connection error (\(e["source"] as? String ?? "?"))"
@@ -292,6 +296,8 @@ final class AppModel: ObservableObject {
                     navigation = [conv.id]
                 }
             }
+        case "push_state":
+            NSLog("gecko-push: server push enabled=%@", String(describing: e["enabled"]))
         case "chat_state":
             if let cid = e["conversation"] as? Int, let state = e["state"] as? String {
                 chatStates[Int32(cid)] = state

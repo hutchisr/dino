@@ -115,6 +115,9 @@ public void start(owned EventCb cb) {
 #endif
 
         var si = app.stream_interactor;
+        si.module_manager.initialize_account_modules.connect((account, list) => {
+            list.add(new Xmpp.Xep.PushNotifications.Module());
+        });
         string? log_xmpp = Environment.get_variable("DINO_LOG_XMPP");
         if (log_xmpp != null) si.connection_manager.log_options = log_xmpp;
         si.connection_manager.connection_state_changed.connect((account, state) => {
@@ -590,6 +593,34 @@ private static void push_account_details() {
 #endif
     emit("{\"type\":\"account_details\",\"jid\":\"%s\",\"alias\":\"%s\",\"omemo_device_id\":%d,\"omemo_fingerprint\":\"%s\"}".printf(
         esc(account.bare_jid.to_string()), esc(account.alias ?? ""), device_id, fingerprint));
+}
+
+// Enables XEP-0357 push notifications on the user's server, pointing at
+// the push proxy. The node carries the APNs device token, so the proxy
+// needs no registration state.
+public void enable_push(string push_jid, string node) {
+    string j = push_jid;
+    string n = node;
+    Idle.add(() => {
+        var account = first_enabled_account();
+        if (account == null) return Source.REMOVE;
+        var stream = app.stream_interactor.get_stream(account);
+        if (stream == null) {
+            emit("{\"type\":\"push_state\",\"enabled\":false,\"reason\":\"not connected\"}");
+            return Source.REMOVE;
+        }
+        try {
+            var jid = new Xmpp.Jid(j);
+            var module = stream.get_module(Xmpp.Xep.PushNotifications.Module.IDENTITY);
+            module.enable.begin(stream, jid, n, (_, res) => {
+                bool ok = module.enable.end(res);
+                emit(@"{\"type\":\"push_state\",\"enabled\":$(ok ? "true" : "false")}");
+            });
+        } catch (Error e) {
+            emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
+        }
+        return Source.REMOVE;
+    });
 }
 
 // Called when the app returns to the foreground: iOS freezes the process
