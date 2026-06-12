@@ -10,6 +10,13 @@ final class DinoCore {
     private init() {}
 
     func start() {
+        // GLib's XDG dirs default to $HOME/.local/... — the container root is
+        // not writable on a real device, so point them at Library/Caches.
+        let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].path
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].path
+        setenv("XDG_DATA_HOME", library + "/xdg-data", 1)
+        setenv("XDG_CONFIG_HOME", library + "/xdg-config", 1)
+        setenv("XDG_CACHE_HOME", caches + "/xdg-cache", 1)
         dino_ios_init_glib_tls()
         dino_ios_start(eventTrampoline, Unmanaged.passRetained(self).toOpaque(), releaseContext)
     }

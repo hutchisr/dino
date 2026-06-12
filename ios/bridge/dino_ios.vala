@@ -22,7 +22,9 @@ public class Application : GLib.Application, Dino.Application {
 
     public Application() throws Error {
         Object(application_id: "im.dino.ios", flags: ApplicationFlags.NON_UNIQUE);
+        message("gecko: gapplication constructed; storage=%s home=%s", Dino.Application.get_storage_dir(), Environment.get_home_dir());
         init();
+        message("gecko: dino init complete");
     }
 
     public void handle_uri(string jid, string query, Gee.Map<string, string> options) { }
@@ -75,6 +77,7 @@ private static string esc(string? s) {
 public void start(owned EventCb cb) {
     event_cb = (owned) cb;
     new Thread<bool>("dino-main", () => {
+        message("gecko: creating application");
         try {
             app = new Application();
         } catch (Error e) {
@@ -82,13 +85,16 @@ public void start(owned EventCb cb) {
             return false;
         }
 
+        message("gecko: application created");
 #if WITH_OMEMO
         var omemo_plugin = new Dino.Plugins.Omemo.Plugin();
         omemo_plugin.registered(app);
+        message("gecko: omemo registered");
 #endif
 #if WITH_HTTP_FILES
         var http_files_plugin = new Dino.Plugins.HttpFiles.Plugin();
         http_files_plugin.registered(app);
+        message("gecko: http-files registered");
 #endif
 
         var si = app.stream_interactor;
@@ -142,6 +148,7 @@ public void start(owned EventCb cb) {
             emit(@"{\"type\":\"subscription_request\",\"account\":\"$(esc(account.bare_jid.to_string()))\",\"jid\":\"$(esc(jid.bare_jid.to_string()))\"}");
         });
 
+        message("gecko: ready");
         emit("{\"type\":\"ready\"}");
 
         app.hold();
