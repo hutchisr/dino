@@ -39,6 +39,12 @@ struct Reaction: Equatable {
     let me: Bool
 }
 
+struct QuoteRef: Equatable {
+    let item: Int32
+    let from: String
+    let body: String
+}
+
 struct ChatMessage: Identifiable, Equatable {
     let id: Int32    // content item id
     let content: String  // "text" or "file"
@@ -54,6 +60,8 @@ struct ChatMessage: Identifiable, Equatable {
     var path: String = ""
     var editable: Bool = false
     var reactions: [Reaction] = []
+    var marked: String = "none"
+    var quote: QuoteRef? = nil
 
     var isFile: Bool { content == "file" }
     var isImage: Bool {
@@ -187,8 +195,8 @@ final class AppModel: ObservableObject {
         DinoCore.shared.requestMessages(conversation: id)
     }
 
-    func send(_ id: Int32, _ body: String) {
-        DinoCore.shared.sendText(conversation: id, body: body)
+    func send(_ id: Int32, _ body: String, replyTo: Int32 = 0) {
+        DinoCore.shared.sendText(conversation: id, body: body, replyTo: replyTo)
     }
 
     func setEncryption(_ id: Int32, omemo: Bool) {
@@ -323,6 +331,11 @@ final class AppModel: ObservableObject {
             reactions: (d["reactions"] as? [[String: Any]] ?? []).compactMap { r in
                 guard let emoji = r["emoji"] as? String else { return nil }
                 return Reaction(emoji: emoji, count: r["count"] as? Int ?? 1, me: r["me"] as? Bool ?? false)
+            },
+            marked: d["marked"] as? String ?? "none",
+            quote: (d["quote"] as? [String: Any]).flatMap { q in
+                guard let item = q["item"] as? Int else { return nil }
+                return QuoteRef(item: Int32(item), from: q["from"] as? String ?? "", body: q["body"] as? String ?? "")
             })
     }
 
@@ -372,6 +385,12 @@ final class AppModel: ObservableObject {
             if let text = env["DINO_AUTOSEND"] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                     self.send(conv.id, text)
+                }
+            }
+            if let text = env["DINO_AUTOREPLY"] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                    guard let last = self.messages[conv.id]?.last else { return }
+                    self.send(conv.id, text, replyTo: last.id)
                 }
             }
             if let emoji = env["DINO_AUTOREACT"] {

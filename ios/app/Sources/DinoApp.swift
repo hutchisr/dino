@@ -384,7 +384,17 @@ struct ChatView: View {
     @State private var showFileImporter = false
     @State private var showOccupants = false
     @State private var editing: ChatMessage?
+    @State private var replyingTo: ChatMessage?
     @State private var viewerItem: ImageViewerItem?
+
+    private static func dayLabel(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "Today" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        let fmt = DateFormatter()
+        fmt.dateStyle = .medium
+        return fmt.string(from: date)
+    }
 
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
@@ -395,10 +405,24 @@ struct ChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 6) {
-                        ForEach(model.messages[conversationId] ?? []) { msg in
+                        let msgs = model.messages[conversationId] ?? []
+                        ForEach(Array(msgs.enumerated()), id: \.element.id) { index, msg in
+                            if index == 0 || !Calendar.current.isDate(msg.time, inSameDayAs: msgs[index - 1].time) {
+                                Text(Self.dayLabel(msg.time))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 3)
+                                    .background(Capsule().fill(Color(.secondarySystemBackground)))
+                                    .padding(.vertical, 6)
+                            }
                             MessageBubble(conversationId: conversationId, msg: msg, onEdit: { m in
+                                replyingTo = nil
                                 editing = m
                                 draft = m.body
+                            }, onReply: { m in
+                                editing = nil
+                                replyingTo = m
                             }, onImageTap: { path in
                                 viewerItem = ImageViewerItem(id: path)
                             })
@@ -440,6 +464,27 @@ struct ChatView: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 6)
             }
+            if let replyingTo {
+                HStack {
+                    Image(systemName: "arrowshape.turn.up.left").font(.caption)
+                    VStack(alignment: .leading) {
+                        Text("Replying to \(replyingTo.from.components(separatedBy: "/").first ?? replyingTo.from)")
+                            .font(.caption.bold())
+                        Text(replyingTo.isFile ? replyingTo.fileName : replyingTo.body)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        self.replyingTo = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+            }
             HStack {
                 Menu {
                     PhotosPicker(selection: $photoItem, matching: .images) {
@@ -465,7 +510,8 @@ struct ChatView: View {
                         model.correctMessage(conversationId, item: editing.id, body: draft)
                         self.editing = nil
                     } else {
-                        model.send(conversationId, draft)
+                        model.send(conversationId, draft, replyTo: replyingTo?.id ?? 0)
+                        replyingTo = nil
                     }
                     draft = ""
                 } label: {
@@ -544,15 +590,55 @@ struct MessageBubble: View {
     let conversationId: Int32
     let msg: ChatMessage
     var onEdit: ((ChatMessage) -> Void)? = nil
+    var onReply: ((ChatMessage) -> Void)? = nil
     var onImageTap: ((String) -> Void)? = nil
 
     private static let quickEmojis = ["👍", "❤️", "😂", "😮", "😢"]
+
+    @ViewBuilder
+    private var markIcon: some View {
+        switch msg.marked {
+        case "sending", "unsent":
+            Image(systemName: "clock").font(.system(size: 8))
+        case "sent":
+            Image(systemName: "checkmark").font(.system(size: 8))
+        case "received", "acknowledged":
+            Image(systemName: "checkmark").font(.system(size: 8)).foregroundStyle(.secondary)
+        case "read":
+            HStack(spacing: -3) {
+                Image(systemName: "checkmark")
+                Image(systemName: "checkmark")
+            }
+            .font(.system(size: 8))
+            .foregroundStyle(Color.accentColor)
+        case "error", "wontsend":
+            Image(systemName: "exclamationmark.circle").font(.system(size: 9)).foregroundStyle(.red)
+        default:
+            EmptyView()
+        }
+    }
 
     var body: some View {
         HStack {
             if msg.direction == "out" { Spacer(minLength: 40) }
             VStack(alignment: msg.direction == "out" ? .trailing : .leading, spacing: 2) {
                 VStack(alignment: .leading, spacing: 2) {
+                    if let quote = msg.quote {
+                        HStack(spacing: 6) {
+                            RoundedRectangle(cornerRadius: 1)
+                                .fill(Color.accentColor)
+                                .frame(width: 3)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(quote.from.components(separatedBy: "/").first ?? quote.from)
+                                    .font(.caption2.bold())
+                                Text(quote.body)
+                                    .font(.caption2)
+                                    .lineLimit(2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.bottom, 2)
+                    }
                     if msg.isFile {
                         FileContent(conversationId: conversationId, msg: msg, onImageTap: onImageTap)
                     } else {
@@ -563,6 +649,9 @@ struct MessageBubble: View {
                             Image(systemName: "lock.fill").font(.system(size: 8))
                         }
                         Text(msg.time, style: .time).font(.system(size: 9))
+                        if msg.direction == "out" {
+                            markIcon
+                        }
                     }
                     .foregroundStyle(.secondary)
                 }
@@ -579,8 +668,15 @@ struct MessageBubble: View {
                             Text(emoji)
                         }
                     }
+                    Divider()
+                    if let onReply {
+                        Button {
+                            onReply(msg)
+                        } label: {
+                            Label("Reply", systemImage: "arrowshape.turn.up.left")
+                        }
+                    }
                     if msg.editable, let onEdit {
-                        Divider()
                         Button {
                             onEdit(msg)
                         } label: {

@@ -108,6 +108,12 @@ public void start(owned EventCb cb) {
                     emit(content_item_json("message", fi, conversation));
                 });
             }
+            var mi = item as Dino.MessageItem;
+            if (mi != null) {
+                mi.message.notify["marked"].connect(() => {
+                    emit(content_item_json("message", mi, conversation));
+                });
+            }
             push_conversations();
         });
         si.get_module(Dino.CounterpartInteractionManager.IDENTITY).received_state.connect((conversation, state) => {
@@ -171,6 +177,60 @@ private static string reactions_json(Dino.ContentItem item, Conversation convers
     return b.str;
 }
 
+private static string marked_name(Message.Marked m) {
+    switch (m) {
+        case Message.Marked.READ: return "read";
+        case Message.Marked.RECEIVED: return "received";
+        case Message.Marked.ACKNOWLEDGED: return "acknowledged";
+        case Message.Marked.SENT: return "sent";
+        case Message.Marked.SENDING: return "sending";
+        case Message.Marked.UNSENT: return "unsent";
+        case Message.Marked.WONTSEND: return "wontsend";
+        case Message.Marked.ERROR: return "error";
+        default: return "none";
+    }
+}
+
+// Removes fallback (quoted-reply) character ranges from a message body for
+// display, mirroring the desktop UI behaviour.
+private static string display_body(Message m) {
+    string body = m.body ?? "";
+    if (m.quoted_item_id <= 0) return body;
+    var fallbacks = m.get_fallbacks();
+    if (fallbacks == null) return body;
+    foreach (var fallback in fallbacks) {
+        if (fallback.ns_uri != Xmpp.Xep.Replies.NS_URI) continue;
+        foreach (var loc in fallback.locations) {
+            int from_byte = body.index_of_nth_char(loc.from_char);
+            int to_byte = body.index_of_nth_char(loc.to_char);
+            if (from_byte < 0 || to_byte < 0 || to_byte > body.length || from_byte > to_byte) continue;
+            body = body.substring(0, from_byte) + body.substring(to_byte);
+        }
+    }
+    return body;
+}
+
+private static string quote_json(Message m, Conversation conversation) {
+    if (m.quoted_item_id <= 0) return "null";
+    var quoted = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).get_item_by_id(conversation, m.quoted_item_id);
+    if (quoted == null) return "null";
+    string from = "";
+    string body = "";
+    var qmi = quoted as Dino.MessageItem;
+    if (qmi != null) {
+        from = qmi.message.from.to_string();
+        body = display_body(qmi.message);
+    } else {
+        var qfi = quoted as Dino.FileItem;
+        if (qfi != null) {
+            from = qfi.file_transfer.from != null ? qfi.file_transfer.from.to_string() : "";
+            body = qfi.file_transfer.file_name;
+        }
+    }
+    if (body.char_count() > 100) body = body.substring(0, body.index_of_nth_char(100)) + "…";
+    return "{\"item\":%d,\"from\":\"%s\",\"body\":\"%s\"}".printf(quoted.id, esc(from), esc(body));
+}
+
 private static string content_item_json(string type, Dino.ContentItem item, Conversation conversation) {
     var mi = item as Dino.MessageItem;
     if (mi != null) {
@@ -178,9 +238,9 @@ private static string content_item_json(string type, Dino.ContentItem item, Conv
         string direction = m.direction == Message.DIRECTION_SENT ? "out" : "in";
         bool editable = direction == "out" &&
             app.stream_interactor.get_module(Dino.MessageCorrection.IDENTITY).is_own_correction_allowed(conversation, m);
-        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"text\",\"direction\":\"%s\",\"from\":\"%s\",\"body\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"editable\":%s,\"reactions\":%s}".printf(
-            type, conversation.id, item.id, direction, esc(m.from.to_string()), esc(m.body), m.time.to_unix(), enc_name(m.encryption),
-            editable ? "true" : "false", reactions_json(item, conversation));
+        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"text\",\"direction\":\"%s\",\"from\":\"%s\",\"body\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"editable\":%s,\"marked\":\"%s\",\"quote\":%s,\"reactions\":%s}".printf(
+            type, conversation.id, item.id, direction, esc(m.from.to_string()), esc(display_body(m)), m.time.to_unix(), enc_name(m.encryption),
+            editable ? "true" : "false", marked_name(m.marked), quote_json(m, conversation), reactions_json(item, conversation));
     }
     var fi = item as Dino.FileItem;
     if (fi != null) {
@@ -476,15 +536,15 @@ public void request_messages(int conversation_id, int count) {
     });
 }
 
-public void send_text(int conversation_id, string body) {
-    int cid = conversation_id; string text = body;
+public void send_text(int conversation_id, string body, int reply_to_item) {
+    int cid = conversation_id; string text = body; int rid = reply_to_item;
     Idle.add(() => {
         Conversation? c = conversation_by_id(cid);
         if (c == null) {
             emit("{\"type\":\"error\",\"message\":\"Unknown conversation\"}");
             return Source.REMOVE;
         }
-        Dino.send_message(c, text, 0, null, new Gee.ArrayList<Xmpp.Xep.MessageMarkup.Span>());
+        Dino.send_message(c, text, rid, null, new Gee.ArrayList<Xmpp.Xep.MessageMarkup.Span>());
         return Source.REMOVE;
     });
 }
