@@ -180,9 +180,56 @@ struct ConversationListView: View {
     }
 }
 
+/// Grabs the enclosing UIScrollView so the scroll-to-bottom button can use
+/// setContentOffset, which (unlike ScrollViewReader.scrollTo) interrupts
+/// ongoing deceleration.
+final class ScrollViewHolder {
+    weak var view: UIScrollView?
+}
+
+struct ScrollViewGrabber: UIViewRepresentable {
+    let holder: ScrollViewHolder
+
+    func makeUIView(context: Context) -> UIView {
+        let v = UIView()
+        DispatchQueue.main.async { [weak v] in
+            var candidate: UIView? = v?.superview
+            while candidate != nil && !(candidate is UIScrollView) {
+                candidate = candidate?.superview
+            }
+            holder.view = candidate as? UIScrollView
+        }
+        return v
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
+}
+
 struct ChatBottomDistanceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// Tracks whether a chat scroll view is showing the newest message.
+/// On iOS 18+ uses onScrollGeometryChange; earlier systems fall back to a
+/// content-frame preference.
+struct BottomTracking: ViewModifier {
+    @Binding var isAtBottom: Bool
+    let viewportHeight: CGFloat
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: Int.self) { geo in
+                Int(geo.contentSize.height + geo.contentInsets.bottom - geo.contentOffset.y - geo.containerSize.height)
+            } action: { _, distance in
+                isAtBottom = distance < 150
+            }
+        } else {
+            content.onPreferenceChange(ChatBottomDistanceKey.self) { contentMaxY in
+                isAtBottom = contentMaxY <= viewportHeight + 60
+            }
+        }
+    }
 }
 
 func jidColor(_ jid: String) -> Color {
@@ -410,6 +457,7 @@ struct ChatView: View {
     @State private var editing: ChatMessage?
     @State private var replyingTo: ChatMessage?
     @State private var isAtBottom = true
+    @State private var scrollHolder = ScrollViewHolder()
     @State private var viewerItem: ImageViewerItem?
 
     private static func dayLabel(_ date: Date) -> String {
@@ -467,15 +515,18 @@ struct ChatView: View {
                         Color.clear.preference(key: ChatBottomDistanceKey.self,
                                                value: g.frame(in: .named("chatScroll")).maxY)
                     })
+                    .background(ScrollViewGrabber(holder: scrollHolder))
                 }
                 .coordinateSpace(name: "chatScroll")
-                .onPreferenceChange(ChatBottomDistanceKey.self) { contentMaxY in
-                    isAtBottom = contentMaxY <= outer.size.height + 60
-                }
+                .modifier(BottomTracking(isAtBottom: $isAtBottom, viewportHeight: outer.size.height))
                 .overlay(alignment: .bottomTrailing) {
                     if !isAtBottom {
                         Button {
-                            if let last = model.messages[conversationId]?.last {
+                            if let sv = scrollHolder.view {
+                                let y = max(-sv.adjustedContentInset.top,
+                                            sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)
+                                sv.setContentOffset(CGPoint(x: 0, y: y), animated: true)
+                            } else if let last = model.messages[conversationId]?.last {
                                 withAnimation {
                                     proxy.scrollTo(last.id, anchor: .bottom)
                                 }
