@@ -370,12 +370,20 @@ private static void re_emit_item_delayed(int item_id) {
 // Re-emits a content item given only its id by probing the active
 // conversations (used from signals that don't carry the conversation).
 private static void re_emit_item(int item_id) {
-    foreach (Conversation c in app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY).get_active_conversations()) {
-        var item = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).get_item_by_id(c, item_id);
-        if (item != null) {
-            emit(content_item_json("message", item, c));
-            return;
-        }
+    // ContentItemStore.get_item_by_id does not check that the item belongs
+    // to the conversation it is given, so resolve the owning conversation
+    // from the database instead of probing.
+    int conv_id = -1;
+    foreach (Qlite.Row row in app.db.content_item.select().with(app.db.content_item.id, "=", item_id)) {
+        conv_id = row[app.db.content_item.conversation_id];
+        break;
+    }
+    if (conv_id == -1) return;
+    Conversation? c = conversation_by_id(conv_id);
+    if (c == null) return;
+    var item = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).get_item_by_id(c, item_id);
+    if (item != null) {
+        emit(content_item_json("message", item, c));
     }
 }
 
