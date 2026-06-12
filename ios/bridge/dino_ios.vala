@@ -269,8 +269,38 @@ private static string content_item_json(string type, Dino.ContentItem item, Conv
         type, conversation.id, item.id, esc(item.type_), item.time.to_unix());
 }
 
+// Room names normally come from disco#info after the MUC join completes;
+// until then, fall back to the identity name cached in the database from a
+// previous session so the conversation list is labelled immediately.
+private static string? cached_room_name(Account account, Xmpp.Jid jid) {
+    var db = app.db;
+    string? hash = null;
+    foreach (Qlite.Row row in db.entity.select()
+            .with(db.entity.account_id, "=", account.id)
+            .with(db.entity.jid_id, "=", db.get_jid_id(jid))
+            .with(db.entity.resource, "=", jid.resourcepart ?? "")) {
+        hash = row[db.entity.caps_hash];
+        break;
+    }
+    if (hash == null) return null;
+    foreach (Qlite.Row row in db.entity_identity.select()
+            .with(db.entity_identity.entity, "=", hash)
+            .with(db.entity_identity.category, "=", "conference")) {
+        string name = row[db.entity_identity.entity_name];
+        if (name != null && name != "") return name;
+    }
+    return null;
+}
+
 private static string conversation_json(Conversation c) {
     string name = Dino.get_conversation_display_name(app.stream_interactor, c, null);
+    if (c.type_ == Conversation.Type.GROUPCHAT &&
+            app.stream_interactor.get_module(Dino.MucManager.IDENTITY).get_room_name(c.account, c.counterpart) == null) {
+        string? cached = cached_room_name(c.account, c.counterpart);
+        if (cached != null && cached != c.counterpart.localpart) {
+            name = cached;
+        }
+    }
     int unread = app.stream_interactor.get_module(Dino.ChatInteraction.IDENTITY).get_num_unread(c);
     string preview = "";
     string preview_direction = "";
