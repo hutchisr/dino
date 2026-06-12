@@ -118,7 +118,7 @@ struct ConversationListView: View {
                 }
             }
             if let account = model.accounts.first {
-                Section {
+                Section("Account") {
                     HStack {
                         Circle()
                             .fill(account.state == "CONNECTED" ? .green : .orange)
