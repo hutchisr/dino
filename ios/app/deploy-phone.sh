@@ -67,6 +67,11 @@ fi
 TEAM_ID=$(security cms -D -i "$PROFILE" 2>/dev/null | plutil -extract TeamIdentifier.0 raw -o - - 2>/dev/null || true)
 
 # --- build ----------------------------------------------------------------
+ROOT="$(dirname "$HERE")"
+if [ -d "$ROOT/build-device-arm64" ]; then
+  ninja -C "$ROOT/build-device-arm64" >/dev/null
+  ninja -C "$ROOT/build-device-arm64" install >/dev/null
+fi
 "$HERE/build-app.sh" build device-arm64
 
 # --- re-sign --------------------------------------------------------------
