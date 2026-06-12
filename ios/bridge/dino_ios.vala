@@ -153,6 +153,13 @@ private static void push_conversations() {
     emit(b.str);
 }
 
+private static Account? first_enabled_account() {
+    foreach (Account a in app.db.get_accounts()) {
+        if (a.enabled) return a;
+    }
+    return null;
+}
+
 private static Conversation? conversation_by_id(int id) {
     foreach (Conversation c in app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY).get_active_conversations()) {
         if (c.id == id) return c;
@@ -165,8 +172,15 @@ public void add_account(string jid_str, string password) {
     Idle.add(() => {
         try {
             var jid = new Xmpp.Jid(j);
+            // Re-enabling an existing (signed-out) account keeps its id and
+            // therefore its conversations and OMEMO device identity.
             foreach (Account existing in app.db.get_accounts()) {
                 if (existing.bare_jid.equals_bare(jid)) {
+                    existing.password = p;
+                    if (!existing.enabled) {
+                        existing.enabled = true;
+                        app.stream_interactor.connect_account(existing);
+                    }
                     emit(@"{\"type\":\"account_added\",\"account\":\"$(esc(existing.bare_jid.to_string()))\"}");
                     return Source.REMOVE;
                 }
@@ -215,11 +229,11 @@ public void add_contact(string jid_str, string? alias) {
     string? a = alias == null || alias == "" ? null : alias;
     Idle.add(() => {
         try {
-            var accounts = app.db.get_accounts();
-            if (accounts.is_empty) return Source.REMOVE;
+            var account = first_enabled_account();
+            if (account == null) return Source.REMOVE;
             var jid = new Xmpp.Jid(j).bare_jid;
-            app.stream_interactor.get_module(Dino.RosterManager.IDENTITY).add_jid(accounts[0], jid, a);
-            app.stream_interactor.get_module(Dino.PresenceManager.IDENTITY).request_subscription(accounts[0], jid);
+            app.stream_interactor.get_module(Dino.RosterManager.IDENTITY).add_jid(account, jid, a);
+            app.stream_interactor.get_module(Dino.PresenceManager.IDENTITY).request_subscription(account, jid);
         } catch (Error e) {
             emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
         }
@@ -231,9 +245,9 @@ public void remove_contact(string jid_str) {
     string j = jid_str;
     Idle.add(() => {
         try {
-            var accounts = app.db.get_accounts();
-            if (accounts.is_empty) return Source.REMOVE;
-            app.stream_interactor.get_module(Dino.RosterManager.IDENTITY).remove_jid(accounts[0], new Xmpp.Jid(j).bare_jid);
+            var account = first_enabled_account();
+            if (account == null) return Source.REMOVE;
+            app.stream_interactor.get_module(Dino.RosterManager.IDENTITY).remove_jid(account, new Xmpp.Jid(j).bare_jid);
         } catch (Error e) {
             emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
         }
@@ -246,15 +260,15 @@ public void respond_subscription(string jid_str, bool approve) {
     bool ok = approve;
     Idle.add(() => {
         try {
-            var accounts = app.db.get_accounts();
-            if (accounts.is_empty) return Source.REMOVE;
+            var account = first_enabled_account();
+            if (account == null) return Source.REMOVE;
             var jid = new Xmpp.Jid(j).bare_jid;
             var presence = app.stream_interactor.get_module(Dino.PresenceManager.IDENTITY);
             if (ok) {
-                presence.approve_subscription(accounts[0], jid);
-                presence.request_subscription(accounts[0], jid);
+                presence.approve_subscription(account, jid);
+                presence.request_subscription(account, jid);
             } else {
-                presence.deny_subscription(accounts[0], jid);
+                presence.deny_subscription(account, jid);
             }
         } catch (Error e) {
             emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
@@ -263,21 +277,22 @@ public void respond_subscription(string jid_str, bool approve) {
     });
 }
 
+// Disables the account and disconnects, but keeps it in the database so a
+// later sign-in reuses the same account id (conversations and the OMEMO
+// device identity survive). Deleting accounts would re-key OMEMO each time.
 public void sign_out() {
     Idle.add(() => {
-        var accounts = app.db.get_accounts();
-        if (accounts.is_empty) {
-            emit("{\"type\":\"signed_out\"}");
-            return Source.REMOVE;
-        }
-        foreach (Account a in accounts) {
+        bool any = false;
+        foreach (Account a in app.db.get_accounts()) {
+            if (!a.enabled) continue;
+            any = true;
             a.enabled = false;
             app.stream_interactor.disconnect_account.begin(a, (_, res) => {
                 app.stream_interactor.disconnect_account.end(res);
-                a.remove();
                 emit("{\"type\":\"signed_out\"}");
             });
         }
+        if (!any) emit("{\"type\":\"signed_out\"}");
         return Source.REMOVE;
     });
 }
@@ -287,6 +302,7 @@ public void request_state() {
         var b = new StringBuilder("{\"type\":\"accounts\",\"list\":[");
         bool first = true;
         foreach (Account a in app.db.get_accounts()) {
+            if (!a.enabled) continue;
             if (!first) b.append_c(',');
             first = false;
             b.append("{\"jid\":\"%s\",\"enabled\":%s,\"state\":\"%s\"}".printf(
@@ -305,13 +321,13 @@ public void start_conversation(string jid_str) {
     string j = jid_str;
     Idle.add(() => {
         try {
-            var accounts = app.db.get_accounts();
-            if (accounts.is_empty) {
+            var account = first_enabled_account();
+            if (account == null) {
                 emit("{\"type\":\"error\",\"message\":\"No account configured\"}");
                 return Source.REMOVE;
             }
             var cm = app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY);
-            Conversation conversation = cm.create_conversation(new Xmpp.Jid(j).bare_jid, accounts[0], Conversation.Type.CHAT);
+            Conversation conversation = cm.create_conversation(new Xmpp.Jid(j).bare_jid, account, Conversation.Type.CHAT);
             cm.start_conversation(conversation);
             push_conversations();
         } catch (Error e) {
