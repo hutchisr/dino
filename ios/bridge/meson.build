@@ -9,6 +9,7 @@ dependencies = [
 ]
 sources = files(
     'dino_ios.vala',
+    'ios_tls_database.c',
     'tls_glue.c',
 )
 vala_args = []

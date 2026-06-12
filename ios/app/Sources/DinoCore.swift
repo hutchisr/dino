@@ -10,9 +10,6 @@ final class DinoCore {
     private init() {}
 
     func start() {
-        if let ca = Bundle.main.path(forResource: "cacert", ofType: "pem") {
-            setenv("SSL_CERT_FILE", ca, 1)
-        }
         dino_ios_init_glib_tls()
         dino_ios_start(eventTrampoline, Unmanaged.passRetained(self).toOpaque(), releaseContext)
     }

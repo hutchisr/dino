@@ -33,10 +33,6 @@ xcrun -sdk iphonesimulator swiftc \
   -o "$APP/DinoPoc"
 
 cp "$HERE/Info.plist" "$APP/Info.plist"
-# CA bundle for OpenSSL certificate verification (from the build host).
-if [ -f /etc/ssl/cert.pem ]; then
-  cp /etc/ssl/cert.pem "$APP/cacert.pem"
-fi
 codesign --force --sign - "$APP"
 echo "built $APP"
 
