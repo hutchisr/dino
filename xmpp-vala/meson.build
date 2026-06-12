@@ -3,9 +3,11 @@ dependencies = [
     dep_gee,
     dep_gio,
     dep_glib,
-    dep_icu_uc,
     dep_m,
 ]
+if dep_icu_uc.found()
+    dependencies += dep_icu_uc
+endif
 sources = files(
     'src/core/direct_tls_xmpp_stream.vala',
     'src/core/io_xmpp_stream.vala',
@@ -139,6 +141,9 @@ c_args = [
 vala_args = [
     '--vapidir', meson.current_source_dir() / 'vapi',
 ]
+if not dep_icu_uc.found()
+    vala_args += ['-D', 'NO_ICU']
+endif
 if meson.get_compiler('vala').version().version_compare('=0.56.11')
     vala_args += ['-D', 'VALA_0_56_11']
 endif

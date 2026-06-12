@@ -1,0 +1,6 @@
+deps/
+prefix/
+cross/
+build-*/
+poc/out-*/
+app/build/

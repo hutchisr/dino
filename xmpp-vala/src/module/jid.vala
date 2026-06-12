@@ -52,6 +52,11 @@ public class Jid {
         if (localpart != null && localpart.length == 0) throw new InvalidJidError.EMPTY_LOCAL("Localpart is empty but non-null");
         if (resourcepart != null && resourcepart.length == 0) throw new InvalidJidError.EMPTY_RESOURCE("Resource is empty but non-null");
         string domain = domainpart[domainpart.length - 1] == '.' ? domainpart.substring(0, domainpart.length - 1) : domainpart;
+#if NO_ICU
+        this.localpart = prepare_simple(localpart, true);
+        this.domainpart = prepare_simple(domain, true);
+        this.resourcepart = prepare_simple(resourcepart, false);
+#else
         if (domain.contains("xn--")) {
             domain = idna_decode(domain);
         }
@@ -59,7 +64,26 @@ public class Jid {
         this.domainpart = prepare(domain, ICU.PrepType.RFC3491_NAMEPREP);
         this.resourcepart = prepare(resourcepart, ICU.PrepType.RFC3920_RESOURCEPREP);
         idna_verify(this.domainpart);
+#endif
     }
+
+#if NO_ICU
+    // Fallback used when ICU is unavailable (e.g. iOS): validates UTF-8 and
+    // casefolds local- and domainpart, but performs no stringprep mapping or
+    // prohibited-character checks beyond the basics, and no IDNA processing.
+    private static string? prepare_simple(string? src, bool fold) throws InvalidJidError {
+        if (src == null) return null;
+        if (!src.validate()) throw new InvalidJidError.INVALID_CHAR("Invalid UTF-8");
+        if (!fold) return src;
+        const string PROHIBITED = "\"&'/:<>@ ";
+        for (int i = 0; i < src.length; i++) {
+            if (PROHIBITED.index_of_char(src[i]) >= 0) {
+                throw new InvalidJidError.INVALID_CHAR("Found prohibited character");
+            }
+        }
+        return src.casefold();
+    }
+#else
 
     private static string idna_decode(string src) throws InvalidJidError {
         ICU.ErrorCode status = ICU.ErrorCode.ZERO_ERROR;
@@ -110,6 +134,7 @@ public class Jid {
             throw new InvalidJidError.INVALID_CHAR(@"Conversion error: $(e.message)");
         }
     }
+#endif
 
     public Jid with_resource(string? resourcepart) throws InvalidJidError {
         return new Jid.components(localpart, domainpart, resourcepart);

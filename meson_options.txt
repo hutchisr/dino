@@ -1,5 +1,8 @@
 option('plugindir', type: 'string', value: 'dino/plugins', description: 'Dino plugin directory, relative to libdir')
 
+option('ui', type: 'feature', value: 'enabled', description: 'Build the GTK4/libadwaita user interface (main)')
+option('icu', type: 'feature', value: 'enabled', description: 'Use ICU for full JID stringprep/IDNA (a simple casefold fallback is used when disabled)')
+
 option('set-install-rpath', type: 'boolean', value: false, description: 'Set rpath of installed binaries to the configured libdir')
 
 option('plugin-http-files', type: 'feature', description: 'HTTP file upload')
