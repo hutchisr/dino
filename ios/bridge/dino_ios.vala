@@ -89,6 +89,20 @@ public void start(owned EventCb cb) {
         }
 
         message("gecko: application created");
+        // identify as Gecko (mobile client) to servers and other clients
+        Dino.ModuleManager.client_identity_name = "Gecko";
+        Dino.ModuleManager.client_identity_type = "phone";
+        Account.resource_prefix = "gecko";
+        // migrate pre-rename resources before restore() loads the accounts
+        foreach (Qlite.Row row in app.db.account.select()) {
+            string? res = row[app.db.account.resourcepart];
+            if (res != null && res.has_prefix("dino.")) {
+                app.db.account.update()
+                    .with(app.db.account.id, "=", row[app.db.account.id])
+                    .set(app.db.account.resourcepart, "gecko." + res.substring(5))
+                    .perform();
+            }
+        }
 #if WITH_OMEMO
         omemo_plugin = new Dino.Plugins.Omemo.Plugin();
         omemo_plugin.registered(app);

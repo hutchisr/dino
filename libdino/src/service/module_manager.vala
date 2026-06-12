@@ -6,6 +6,8 @@ using Xmpp;
 namespace Dino {
 
 public class ModuleManager {
+    public static string client_identity_name = "Dino";
+    public static string client_identity_type = "pc";
     private HashMap<Account, ArrayList<XmppStreamModule>> module_map = new HashMap<Account, ArrayList<XmppStreamModule>>(Account.hash_func, Account.equals_func);
 
     public signal void initialize_account_modules(Account account, ArrayList<XmppStreamModule> modules);
@@ -51,7 +53,7 @@ public class ModuleManager {
             module_map[account].add(new Bind.Module(account.resourcepart));
             module_map[account].add(new Session.Module());
             module_map[account].add(new Roster.Module());
-            module_map[account].add(new Xep.ServiceDiscovery.Module.with_identity("client", "pc", "Dino"));
+            module_map[account].add(new Xep.ServiceDiscovery.Module.with_identity("client", client_identity_type, client_identity_name));
             module_map[account].add(new Xep.PrivateXmlStorage.Module());
             module_map[account].add(new Xep.Bookmarks.Module());
             module_map[account].add(new Xep.Bookmarks2.Module());

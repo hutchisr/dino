@@ -73,8 +73,10 @@ public class Account : Object {
         this.resourcepart = get_random_resource();
     }
 
+    public static string resource_prefix = "dino";
+
     private static string get_random_resource() {
-        return "dino." + Random.next_int().to_string("%x");
+        return resource_prefix + "." + Random.next_int().to_string("%x");
     }
 
     public bool equals(Account acc) {
