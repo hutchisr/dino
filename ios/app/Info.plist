@@ -42,7 +42,7 @@
 		</dict>
 	</dict>
 	<key>MinimumOSVersion</key>
-	<string>16.0</string>
+	<string>26.0</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save received images to your photo library.</string>
 	<key>UIDeviceFamily</key>

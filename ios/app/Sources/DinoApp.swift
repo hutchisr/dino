@@ -218,16 +218,10 @@ struct BottomTracking: ViewModifier {
     let viewportHeight: CGFloat
 
     func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content.onScrollGeometryChange(for: Int.self) { geo in
-                Int(geo.contentSize.height + geo.contentInsets.bottom - geo.contentOffset.y - geo.containerSize.height)
-            } action: { _, distance in
-                isAtBottom = distance < 150
-            }
-        } else {
-            content.onPreferenceChange(ChatBottomDistanceKey.self) { contentMaxY in
-                isAtBottom = contentMaxY <= viewportHeight + 60
-            }
+        content.onScrollGeometryChange(for: Int.self) { geo in
+            Int(geo.contentSize.height + geo.contentInsets.bottom - geo.contentOffset.y - geo.containerSize.height)
+        } action: { _, distance in
+            isAtBottom = distance < 150
         }
     }
 }
@@ -534,10 +528,9 @@ struct ChatView: View {
                         } label: {
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 16, weight: .semibold))
-                                .padding(10)
-                                .background(Circle().fill(.thinMaterial))
-                                .overlay(Circle().stroke(Color(.separator), lineWidth: 0.5))
+                                .padding(12)
                         }
+                        .glassEffect(.regular.interactive(), in: .circle)
                         .padding(.trailing, 14)
                         .padding(.bottom, 10)
                     }

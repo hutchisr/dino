@@ -11,7 +11,7 @@ ROOT="$(dirname "$HERE")"
 PREFIX="$ROOT/prefix/$TARGET"
 BUILD="$HERE/build-$TARGET"
 APP="$BUILD/Gecko.app"
-MIN_IOS=16.0
+MIN_IOS=26.0
 case "$TARGET" in
   sim-arm64)    SDK=iphonesimulator; TRIPLE="arm64-apple-ios${MIN_IOS}-simulator" ;;
   device-arm64) SDK=iphoneos;        TRIPLE="arm64-apple-ios${MIN_IOS}" ;;
