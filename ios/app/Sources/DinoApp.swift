@@ -380,7 +380,7 @@ struct ChatView: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
     @State private var draft = ""
-    @State private var photoItem: PhotosPickerItem?
+    @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showOccupants = false
     @State private var editing: ChatMessage?
@@ -487,7 +487,9 @@ struct ChatView: View {
             }
             HStack {
                 Menu {
-                    PhotosPicker(selection: $photoItem, matching: .images) {
+                    Button {
+                        showPhotoPicker = true
+                    } label: {
                         Label("Photo", systemImage: "photo")
                     }
                     Button {
@@ -521,14 +523,8 @@ struct ChatView: View {
             }
             .padding(10)
         }
-        .onChange(of: photoItem) { item in
-            guard let item else { return }
-            photoItem = nil
-            Task {
-                guard let data = try? await item.loadTransferable(type: Data.self) else { return }
-                let name = (item.itemIdentifier ?? UUID().uuidString).replacingOccurrences(of: "/", with: "_")
-                let url = FileManager.default.temporaryDirectory.appendingPathComponent("photo-\(name).jpg")
-                try? data.write(to: url)
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoPicker { url in
                 model.sendFile(conversationId, path: url.path)
             }
         }
