@@ -454,6 +454,21 @@ struct ChatView: View {
     @State private var scrollHolder = ScrollViewHolder()
     @State private var viewerItem: ImageViewerItem?
 
+    /// Scrolls to the last message, then settles to the true content bottom
+    /// (the proxy anchor ignores the stack's bottom padding).
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        if let last = model.messages[conversationId]?.last {
+            proxy.scrollTo(last.id, anchor: .bottom)
+        }
+        DispatchQueue.main.async {
+            if let sv = scrollHolder.view {
+                let y = max(-sv.adjustedContentInset.top,
+                            sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)
+                sv.setContentOffset(CGPoint(x: 0, y: y), animated: false)
+            }
+        }
+    }
+
     private static func dayLabel(_ date: Date) -> String {
         let cal = Calendar.current
         if cal.isDateInToday(date) { return "Today" }
@@ -538,18 +553,10 @@ struct ChatView: View {
                 }
                 .onAppear {
                     // wait a tick so the lazy rows exist before scrolling
-                    DispatchQueue.main.async {
-                        if let last = model.messages[conversationId]?.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                    }
+                    DispatchQueue.main.async { scrollToBottom(proxy) }
                 }
                 .onChange(of: model.messages[conversationId]?.count ?? 0) { _ in
-                    DispatchQueue.main.async {
-                        if let last = model.messages[conversationId]?.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                    }
+                    DispatchQueue.main.async { scrollToBottom(proxy) }
                 }
             }
             }
