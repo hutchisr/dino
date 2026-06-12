@@ -1,9 +1,10 @@
 dependencies = [
     dep_dino,
+    dep_gdk_pixbuf,
     dep_gee,
+    dep_gio,
     dep_glib,
     dep_gmodule,
-    dep_gtk4,
     dep_libsoup,
     dep_qlite,
     dep_xmpp_vala,
@@ -12,12 +13,14 @@ sources = files(
     'src/file_provider.vala',
     'src/file_sender.vala',
     'src/plugin.vala',
-    'src/register_plugin.vala',
 )
+if not static_plugins
+    sources += files('src/register_plugin.vala')
+endif
 
 vala_args = [
     '-D', 'SOUP_3_0',
 ]
-lib_http_files = shared_library('http-files', sources, name_prefix: '', vala_args: vala_args, dependencies: dependencies, install: true, install_dir: get_option('libdir') / get_option('plugindir'), install_rpath: default_install_rpath)
+lib_http_files = library('http-files', sources, name_prefix: '', vala_args: vala_args, dependencies: dependencies, install: true, install_dir: get_option('libdir') / get_option('plugindir'), install_rpath: default_install_rpath)
 dep_http_files = declare_dependency(link_with: lib_http_files, include_directories: include_directories('.'))
 summary('HTTP file upload (http-files)', dep_http_files, section: 'Plugins')

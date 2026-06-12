@@ -1,14 +1,14 @@
 subdir('po')
+omemo_ui = get_option('ui').allowed() and dep_gtk4.found()
 dependencies = [
-    dep_libadwaita,
     dep_crypto_vala,
     dep_dino,
+    dep_gdk_pixbuf,
     dep_gee,
+    dep_gio,
     dep_glib,
     dep_gmodule,
-    dep_gtk4,
     dep_libgcrypt,
-    dep_libqrencode,
     dep_libomemo_c,
     dep_m,
     dep_qlite,
@@ -32,7 +32,6 @@ sources = files(
     'src/protocol/bundle.vala',
     'src/protocol/message_flag.vala',
     'src/protocol/stream_module.vala',
-    'src/register_plugin.vala',
     'src/native/context.vala',
     'src/native/helper.c',
     'src/native/simple_iks.vala',
@@ -42,20 +41,6 @@ sources = files(
     'src/native/store.vala',
     'src/native/util.vala',
     'src/trust_level.vala',
-    'src/ui/bad_messages_populator.vala',
-    'src/ui/call_encryption_entry.vala',
-    'src/ui/contact_details_provider.vala',
-    'src/ui/device_notification_populator.vala',
-    'src/ui/encryption_list_entry.vala',
-    'src/ui/encryption_preferences_entry.vala',
-    'src/ui/manage_key_dialog.vala',
-    'src/ui/own_notifications.vala',
-    'src/ui/util.vala',
-)
-sources += gnome.compile_resources(
-    'resources',
-    'data/gresource.xml',
-    source_dir: 'data',
 )
 c_args = [
     '-DG_LOG_DOMAIN="OMEMO"',
@@ -69,8 +54,32 @@ vala_args = [
     '--internal-vapi', meson.current_build_dir() / 'omemo-internal.vapi',
     '--internal-header', meson.current_build_dir() / 'omemo-internal.h',
 ]
-lib_omemo = shared_library('omemo', sources, name_prefix: '', c_args: c_args, vala_args: vala_args, include_directories: include_directories('src'), dependencies: dependencies, install: true, install_dir: get_option('libdir') / get_option('plugindir'), install_rpath: default_install_rpath)
-dep_omemo = declare_dependency(link_with: lib_omemo, include_directories: include_directories('.'))
+if not static_plugins
+    sources += files('src/register_plugin.vala')
+endif
+if omemo_ui
+    dependencies += [dep_libadwaita, dep_gtk4, dep_libqrencode]
+    sources += files(
+        'src/ui/bad_messages_populator.vala',
+        'src/ui/call_encryption_entry.vala',
+        'src/ui/contact_details_provider.vala',
+        'src/ui/device_notification_populator.vala',
+        'src/ui/encryption_list_entry.vala',
+        'src/ui/encryption_preferences_entry.vala',
+        'src/ui/manage_key_dialog.vala',
+        'src/ui/own_notifications.vala',
+        'src/ui/util.vala',
+    )
+    sources += gnome.compile_resources(
+        'resources',
+        'data/gresource.xml',
+        source_dir: 'data',
+    )
+else
+    vala_args += ['-D', 'DINO_NO_UI']
+endif
+lib_omemo = library('omemo', sources, name_prefix: '', c_args: c_args, vala_args: vala_args, include_directories: include_directories('src'), dependencies: dependencies, install: true, install_dir: get_option('libdir') / get_option('plugindir'), install_rpath: default_install_rpath)
+dep_omemo = declare_dependency(link_with: lib_omemo, include_directories: include_directories('.', 'src'))
 summary('End-to-end encryption using OMEMO (omemo)', dep_omemo, section: 'Plugins')
 # This is to use the internal vapi instead of the regular
 vapi_omemo_internal = custom_target('omemo-internal-vapi', command: [find_program('touch'), meson.current_build_dir() / 'omemo-internal.vapi'], output: ['omemo-internal.vapi'], depends: lib_omemo)
@@ -88,5 +97,7 @@ test_vala_args = [
     '--vapidir', meson.current_source_dir() / 'vapi',
 ]
 
+if not meson.is_cross_build()
 exe_omemo_test = executable('omemo-test', test_sources, c_args: c_args, vala_args: test_vala_args, dependencies: dependencies + dep_omemo_internal, build_rpath: '$ORIGIN', install: false)
 test('Tests for omemo', exe_omemo_test)
+endif

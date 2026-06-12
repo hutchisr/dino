@@ -26,6 +26,14 @@ PIXBUF_PATCH=12
 OPENSSL_VER=3.5.1
 GLIB_NETWORKING_VER=2.80
 GLIB_NETWORKING_PATCH=1
+GPGERROR_VER=1.55
+GCRYPT_VER=1.11.2
+OMEMO_C_VER=0.5.1
+PROTOBUF_C_VER=1.5.2
+SRTP_VER=2.7.0
+PSL_VER=0.21.5
+SOUP_VER=3.6
+SOUP_PATCH=5
 
 case "$TARGET" in
   sim-arm64)
@@ -156,8 +164,71 @@ build_glib_networking() {
     -Dgnome_proxy=disabled -Dinstalled_tests=false -Ddebug_logs=false
 }
 
+autotools_build() { # autotools_build <srcdir> [extra configure args...]
+  local src="$1"; shift
+  cd "$src"
+  PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig" \
+  CC="$CLANG -target $TRIPLE -isysroot $SDKPATH -include $ROOT/compat/ios-compat.h" \
+  CXX="$CLANGXX -target $TRIPLE -isysroot $SDKPATH" \
+  ./configure --host=aarch64-apple-darwin --prefix="$PREFIX" \
+    --disable-shared --enable-static "$@"
+  make -j "$NCPU"
+  make install
+  cd -
+}
+
+build_gpgerror() {
+  fetch "https://www.gnupg.org/ftp/gcrypt/libgpg-error/libgpg-error-$GPGERROR_VER.tar.bz2" "libgpg-error"
+  autotools_build "$DEPS/libgpg-error" --disable-doc --disable-tests --disable-nls \
+    --enable-install-gpg-error-config
+}
+
+build_gcrypt() {
+  fetch "https://www.gnupg.org/ftp/gcrypt/libgcrypt/libgcrypt-$GCRYPT_VER.tar.bz2" "libgcrypt"
+  autotools_build "$DEPS/libgcrypt" --disable-doc --disable-asm \
+    --with-libgpg-error-prefix="$PREFIX"
+}
+
+build_protobuf_c() {
+  fetch "https://github.com/protobuf-c/protobuf-c/releases/download/v$PROTOBUF_C_VER/protobuf-c-$PROTOBUF_C_VER.tar.gz" "protobuf-c"
+  autotools_build "$DEPS/protobuf-c" --disable-protoc
+}
+
+build_omemo_c() {
+  fetch "https://github.com/dino/libomemo-c/archive/refs/tags/v$OMEMO_C_VER.tar.gz" "libomemo-c"
+  cmake -S "$DEPS/libomemo-c" -B "$DEPS/libomemo-c/_build-$TARGET" \
+    -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$SDKPATH" \
+    -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=$MIN_IOS \
+    -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    -DCMAKE_C_FLAGS="-I$PREFIX/include" \
+    -DCMAKE_EXE_LINKER_FLAGS="-L$PREFIX/lib" \
+    -DCMAKE_FIND_ROOT_PATH="$PREFIX"
+  cmake --build "$DEPS/libomemo-c/_build-$TARGET" -j "$NCPU"
+  cmake --install "$DEPS/libomemo-c/_build-$TARGET"
+}
+
+build_srtp() {
+  fetch "https://github.com/cisco/libsrtp/archive/refs/tags/v$SRTP_VER.tar.gz" "libsrtp"
+  meson_build "$DEPS/libsrtp" -Dtests=disabled
+}
+
+build_psl() {
+  fetch "https://github.com/rockdaboot/libpsl/releases/download/$PSL_VER/libpsl-$PSL_VER.tar.gz" "libpsl"
+  meson_build "$DEPS/libpsl" -Druntime=no -Dtests=false -Ddocs=false
+}
+
+build_soup() {
+  fetch "https://download.gnome.org/sources/libsoup/$SOUP_VER/libsoup-$SOUP_VER.$SOUP_PATCH.tar.xz" "libsoup"
+  (cd "$DEPS/libsoup" && "$MESON" wrap install nghttp2 2>/dev/null || true)
+  meson_build "$DEPS/libsoup" \
+    -Dtests=false -Ddocs=disabled -Dintrospection=disabled -Dvapi=disabled \
+    -Dgssapi=disabled -Dbrotli=disabled -Dntlm=disabled -Dtls_check=false \
+    -Dsysprof=disabled -Dautobahn=disabled -Dpkcs11_tests=disabled
+}
+
 if [ $# -eq 0 ]; then
-  set -- glib gee pixbuf openssl glib_networking
+  set -- glib gee pixbuf openssl glib_networking gpgerror gcrypt omemo_c srtp psl soup
 fi
 for dep in "$@"; do
   echo "=== building $dep ($TARGET) ==="

@@ -30,10 +30,12 @@ public class Plugin : RootInterface, Object {
 
     public Dino.Application app;
     public Database db;
+#if !DINO_NO_UI
     public EncryptionListEntry list_entry;
     public ContactDetailsProvider contact_details_provider;
     public DeviceNotificationPopulator device_notification_populator;
     public OwnNotifications own_notifications;
+#endif
     public TrustManager trust_manager;
     public HashMap<Account, OmemoDecryptor> decryptors = new HashMap<Account, OmemoDecryptor>(Account.hash_func, Account.equals_func);
     public HashMap<Account, OmemoEncryptor> encryptors = new HashMap<Account, OmemoEncryptor>(Account.hash_func, Account.equals_func);
@@ -42,10 +44,11 @@ public class Plugin : RootInterface, Object {
         ensure_context();
         this.app = app;
         this.db = new Database(Path.build_filename(Application.get_storage_dir(), "omemo.db"));
+        this.trust_manager = new TrustManager(this.app.stream_interactor, this.db);
+#if !DINO_NO_UI
         this.list_entry = new EncryptionListEntry(this);
         this.contact_details_provider = new ContactDetailsProvider(this);
         this.device_notification_populator = new DeviceNotificationPopulator(this, this.app.stream_interactor);
-        this.trust_manager = new TrustManager(this.app.stream_interactor, this.db);
 
         this.app.plugin_registry.register_encryption_list_entry(list_entry);
         this.app.plugin_registry.register_encryption_preferences_entry(new OmemoPreferencesEntry(this));
@@ -53,6 +56,7 @@ public class Plugin : RootInterface, Object {
         this.app.plugin_registry.register_notification_populator(device_notification_populator);
         this.app.plugin_registry.register_conversation_addition_populator(new BadMessagesPopulator(this.app.stream_interactor, this));
         this.app.plugin_registry.register_call_entryption_entry(DtlsSrtpVerificationDraft.NS_URI, new CallEncryptionEntry(db));
+#endif
 
         this.app.stream_interactor.module_manager.initialize_account_modules.connect((account, list) => {
             Store store = Plugin.get_context().create_store();
@@ -63,7 +67,9 @@ public class Plugin : RootInterface, Object {
             list.add(encryptors[account]);
             list.add(new JetOmemo.Module());
             list.add(new DtlsSrtpVerificationDraft.StreamModule());
+#if !DINO_NO_UI
             this.own_notifications = new OwnNotifications(this, this.app.stream_interactor, account);
+#endif
         });
 
         app.stream_interactor.get_module(MessageProcessor.IDENTITY).received_pipeline.connect(new DecryptMessageListener(decryptors));

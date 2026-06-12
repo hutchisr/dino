@@ -12,8 +12,8 @@ BDIR="$ROOT/build-$TARGET"
 
 meson setup "$BDIR" "$SRC" --cross-file "$CROSS" --prefix "$PREFIX" \
   --default-library static --buildtype debugoptimized \
-  -Dui=disabled -Dicu=disabled \
-  -Dplugin-http-files=disabled -Dplugin-ice=disabled -Dplugin-omemo=disabled \
+  -Dui=disabled -Dicu=disabled -Dios-bridge=enabled \
+  -Dplugin-http-files=enabled -Dplugin-ice=disabled -Dplugin-omemo=enabled \
   -Dplugin-openpgp=disabled -Dplugin-rtp=disabled -Dplugin-notification-sound=disabled \
   "${@:2}"
 ninja -C "$BDIR"

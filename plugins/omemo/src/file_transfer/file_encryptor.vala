@@ -1,5 +1,4 @@
 using Gee;
-using Gtk;
 
 using Crypto;
 using Dino.Entities;

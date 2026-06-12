@@ -16,12 +16,17 @@
 #define DINO_IOS_COMPAT_H
 #ifndef __ASSEMBLER__
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 int pipe2(int fildes[2], int flags);
 int dup3(int oldfd, int newfd, int flags);
+/* declared in <sys/random.h> but some configure-based projects call it
+ * without that include */
+int getentropy(void *buf, size_t buflen);
 
 #ifdef __cplusplus
 }

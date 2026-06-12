@@ -1,10 +1,11 @@
 import Foundation
 
-/// Thin Swift wrapper around the C bridge (dino_poc.h). Lines arrive on the
-/// GLib main-loop thread and are forwarded to `onLine` on the main queue.
+/// Swift wrapper around the libdino iOS bridge (dinoios.h). All bridge calls
+/// are fire-and-forget; results and events come back as JSON dictionaries on
+/// the main queue via `onEvent`.
 final class DinoCore {
     static let shared = DinoCore()
-    var onLine: ((String) -> Void)?
+    var onEvent: (([String: Any]) -> Void)?
 
     private init() {}
 
@@ -12,33 +13,34 @@ final class DinoCore {
         if let ca = Bundle.main.path(forResource: "cacert", ofType: "pem") {
             setenv("SSL_CERT_FILE", ca, 1)
         }
-        dino_poc_init()
+        dino_ios_init_glib_tls()
+        dino_ios_start(eventTrampoline, Unmanaged.passRetained(self).toOpaque(), releaseContext)
     }
 
-    func login(jid: String, password: String) {
-        dino_poc_login(jid, password, lineTrampoline, retainSelf(), releaseBox)
-    }
+    func addAccount(jid: String, password: String) { dino_ios_add_account(jid, password) }
+    func requestState() { dino_ios_request_state() }
+    func startConversation(jid: String) { dino_ios_start_conversation(jid) }
+    func requestMessages(conversation: Int32, count: Int32 = 50) { dino_ios_request_messages(conversation, count) }
+    func sendText(conversation: Int32, body: String) { dino_ios_send_text(conversation, body) }
+    func setEncryption(conversation: Int32, omemo: Bool) { dino_ios_set_encryption(conversation, omemo ? 1 : 0) }
 
-    func send(to: String, body: String) {
-        dino_poc_send_message(to, body, lineTrampoline, retainSelf(), releaseBox)
-    }
-
-    fileprivate func emit(_ line: String) {
-        DispatchQueue.main.async { self.onLine?(line) }
-    }
-
-    private func retainSelf() -> UnsafeMutableRawPointer {
-        Unmanaged.passRetained(self).toOpaque()
+    fileprivate func emit(_ json: String) {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data),
+              let dict = obj as? [String: Any] else {
+            NSLog("DinoCore: undecodable event: %@", json)
+            return
+        }
+        DispatchQueue.main.async { self.onEvent?(dict) }
     }
 }
 
-private func lineTrampoline(line: UnsafePointer<CChar>?, userData: gpointer?) {
-    guard let line, let userData else { return }
-    let core = Unmanaged<DinoCore>.fromOpaque(userData).takeUnretainedValue()
-    core.emit(String(cString: line))
+private func eventTrampoline(json: UnsafePointer<CChar>?, userData: gpointer?) {
+    guard let json, let userData else { return }
+    Unmanaged<DinoCore>.fromOpaque(userData).takeUnretainedValue().emit(String(cString: json))
 }
 
-private func releaseBox(userData: gpointer?) {
+private func releaseContext(userData: gpointer?) {
     guard let userData else { return }
     Unmanaged<DinoCore>.fromOpaque(userData).release()
 }

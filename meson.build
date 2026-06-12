@@ -34,7 +34,7 @@ dep_icu_uc = dependency('icu-uc', required: get_option('icu'))
 dep_libadwaita = dependency('libadwaita-1', version: '>=1.2', disabler: true, required: get_option('ui'))
 dep_libcanberra = dependency('libcanberra', disabler: true, required: get_option('plugin-notification-sound'))
 dep_libgcrypt = dependency('libgcrypt', disabler: true, required: plugin_crypto)
-dep_libqrencode = dependency('libqrencode', disabler: true, required: get_option('plugin-omemo'))
+dep_libqrencode = dependency('libqrencode', disabler: true, required: get_option('ui').allowed() ? get_option('plugin-omemo') : false)
 dep_libsrtp2 = dependency('libsrtp2', disabler: true, required: plugin_crypto)
 dep_libomemo_c = dependency('libomemo-c', disabler: true, required: get_option('plugin-omemo'))
 dep_libsoup = dependency('libsoup-3.0', disabler: true, required: get_option('plugin-http-files'))
@@ -69,6 +69,10 @@ if get_option('set-install-rpath')
     default_install_rpath = get_option('prefix') / get_option('libdir')
 endif
 
+# When the iOS bridge is built, plugins are linked statically and must not
+# define the (colliding) GModule entry point from register_plugin.vala.
+static_plugins = get_option('ios-bridge').enabled()
+
 subdir('qlite')
 subdir('xmpp-vala')
 subdir('libdino')
@@ -77,3 +81,6 @@ if get_option('ui').allowed() and dep_gtk4.found()
 endif
 subdir('crypto-vala')
 subdir('plugins')
+if get_option('ios-bridge').enabled()
+    subdir('ios/bridge')
+endif
