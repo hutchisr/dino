@@ -228,12 +228,13 @@ private static string quote_json(Message m, Conversation conversation) {
     string body = "";
     var qmi = quoted as Dino.MessageItem;
     if (qmi != null) {
-        from = qmi.message.from.to_string();
+        from = Dino.get_participant_display_name(app.stream_interactor, conversation, qmi.message.from);
         body = display_body(qmi.message);
     } else {
         var qfi = quoted as Dino.FileItem;
         if (qfi != null) {
-            from = qfi.file_transfer.from != null ? qfi.file_transfer.from.to_string() : "";
+            from = qfi.file_transfer.from != null
+                ? Dino.get_participant_display_name(app.stream_interactor, conversation, qfi.file_transfer.from) : "";
             body = qfi.file_transfer.file_name;
         }
     }

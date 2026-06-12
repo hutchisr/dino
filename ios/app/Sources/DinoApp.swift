@@ -493,7 +493,7 @@ struct ChatView: View {
                 HStack {
                     Image(systemName: "arrowshape.turn.up.left").font(.caption)
                     VStack(alignment: .leading) {
-                        Text("Replying to \(replyingTo.from.components(separatedBy: "/").first ?? replyingTo.from)")
+                        Text("Replying to \(replyingTo.fromDisplay.isEmpty ? replyingTo.from : replyingTo.fromDisplay)")
                             .font(.caption.bold())
                         Text(replyingTo.isFile ? replyingTo.fileName : replyingTo.body)
                             .font(.caption)
@@ -666,7 +666,7 @@ struct MessageBubble: View {
                                 .fill(Color.accentColor)
                                 .frame(width: 3)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(quote.from.components(separatedBy: "/").first ?? quote.from)
+                                Text(quote.from)
                                     .font(.caption2.bold())
                                 Text(quote.body)
                                     .font(.caption2)
