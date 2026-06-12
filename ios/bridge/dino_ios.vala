@@ -578,6 +578,16 @@ private static void push_account_details() {
         esc(account.bare_jid.to_string()), esc(account.alias ?? ""), device_id, fingerprint));
 }
 
+// Called when the app returns to the foreground: iOS freezes the process
+// and kills sockets, so reconnect promptly instead of waiting for the
+// regular retry cadence.
+public void app_foregrounded() {
+    Idle.add(() => {
+        app.stream_interactor.connection_manager.resume_reconnect();
+        return Source.REMOVE;
+    });
+}
+
 public void request_account_details() {
     Idle.add(() => {
         push_account_details();

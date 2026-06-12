@@ -5,12 +5,18 @@ import PhotosUI
 @main
 struct DinoApp: App {
     @StateObject private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(model)
                 .onAppear { model.boot() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && model.ready && model.hasAccount {
+                DinoCore.shared.appForegrounded()
+            }
         }
     }
 }

@@ -27,6 +27,7 @@ final class DinoCore {
     func setAlias(_ alias: String) { dino_ios_set_alias(alias) }
     func changePassword(_ pw: String) { dino_ios_change_password(pw) }
     func requestAccountDetails() { dino_ios_request_account_details() }
+    func appForegrounded() { dino_ios_app_foregrounded() }
     func requestRoster() { dino_ios_request_roster() }
     func focusConversation(_ id: Int32) { dino_ios_focus_conversation(id) }
     func blurConversation(_ id: Int32) { dino_ios_blur_conversation(id) }

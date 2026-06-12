@@ -284,6 +284,39 @@ public class ConnectionManager : Object {
         }
     }
 
+    /**
+     * Re-establishes connections promptly after an OS-level suspension
+     * (e.g. mobile platforms freezing the process): reconnects accounts
+     * without a stream immediately and verifies live streams with a short
+     * ping timeout instead of the regular reconnect cadence.
+     */
+    public void resume_reconnect() {
+        foreach (Account account in connections.keys) {
+            if (connections[account].stream == null) {
+                connect_stream.begin(account);
+                continue;
+            }
+
+            XmppStream stream = connections[account].stream;
+            bool acked = false;
+            stream.get_module(Xep.Ping.Module.IDENTITY).send_ping.begin(stream, account.bare_jid.domain_jid, () => {
+                acked = true;
+                if (connections[account].stream != stream) return;
+                change_connection_state(account, ConnectionState.CONNECTED);
+            });
+            Timeout.add_seconds(2, () => {
+                if (!connections.has_key(account)) return false;
+                if (connections[account].stream != stream) return false;
+                if (acked) return false;
+                debug("[%s %p] No ping ack after resume. Reconnecting", account.bare_jid.to_string(), stream);
+                change_connection_state(account, ConnectionState.DISCONNECTED);
+                connections[account].reset();
+                connect_stream.begin(account);
+                return false;
+            });
+        }
+    }
+
     private void check_reconnect(Account account, bool directly_reconnect = false) {
         if (!connections.has_key(account)) return;
 
