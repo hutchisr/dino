@@ -121,26 +121,31 @@ def collect():
         f"name={info.get('DEVICE_NAME')}",
         flush=True,
     )
-    # Phase 2 of the OTA flow: the device processes our response to its POST.
-    # It expects a signed profile to install OR a redirect — returning page
-    # content makes it report "Invalid Profile" (even though phase 1 already
-    # captured the UDID). Redirect to a plain success page so the device hands
-    # off to Safari and ends cleanly. 303 forces a GET on the redirect target.
-    return Response(status=303, headers={"Location": f"https://{request.host}/done"})
-
-
-@app.get("/done")
-def done():
-    return Response(
-        f"<!doctype html><html><head><meta charset=utf-8>"
-        f"<meta name=viewport content='width=device-width,initial-scale=1'>"
-        f"<title>Registered</title><style>{PAGE_STYLE}body{{text-align:center}}</style></head><body>"
-        "<h2>✅ Registered</h2>"
-        "<p>Thanks — your device is registered. You can close this page; the "
-        "registration profile removes itself automatically.</p>"
-        "</body></html>",
-        mimetype="text/html",
-    )
+    # Phase 2 of the OTA flow: the device installs whatever profile we return
+    # here. It REQUIRES a signed configuration profile — a redirect or page
+    # content makes it report "Invalid Profile". Return a signed, empty profile
+    # (no payloads) that auto-removes, so the device finishes with "Profile
+    # Installed" and nothing is actually configured. It installs silently as
+    # part of the same flow (no second Install prompt).
+    done = {
+        "PayloadContent": [],
+        "PayloadType": "Configuration",
+        "PayloadVersion": 1,
+        "PayloadIdentifier": "me.anemoneya.gecko.enroll.done",
+        "PayloadUUID": "C4D5E6F7-2B3C-4D5E-8F90-1A2B3C4D5E6F",
+        "PayloadDisplayName": "Gecko registration complete",
+        "PayloadDescription": "Registration complete — installs nothing and removes itself.",
+        "PayloadOrganization": "Gecko",
+        "PayloadRemovalDisallowed": False,
+        "DurationUntilRemoval": 60.0,
+    }
+    xml = plistlib.dumps(done)
+    try:
+        out = sign_profile(xml)
+    except Exception as exc:  # noqa: BLE001
+        print(f"collect: signing done profile failed: {exc!r}", flush=True)
+        out = xml
+    return Response(out, mimetype="application/x-apple-aspen-config")
 
 
 if __name__ == "__main__":

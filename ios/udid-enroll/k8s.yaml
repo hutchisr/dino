@@ -31,7 +31,7 @@ spec:
         - name: regcred
       containers:
         - name: enroll
-          image: lax.vultrcr.com/mercury/gecko-udid-enroll:v3
+          image: lax.vultrcr.com/mercury/gecko-udid-enroll:v4
           ports:
             - containerPort: 8080
           volumeMounts:
