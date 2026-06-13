@@ -14,9 +14,10 @@ device for an ad-hoc Gecko build.
 4. `/collect` logs them and shows a confirmation. The temporary profile removes
    itself.
 
-The profile is unsigned, so iOS shows an "Unsigned" note on install — expected;
-it still works. (To make it show "Verified", sign the `.mobileconfig` with a
-CA-trusted cert before serving.)
+iOS rejects an *unsigned* Profile Service profile as "invalid", so the service
+CMS-signs it with the domain's own TLS cert (cert-manager's `gecko-enroll-tls`
+secret, mounted at `/tls`). That chains to a trusted root (Let's Encrypt), so it
+installs as "Verified" — no extra trust step on the device.
 
 ## Deploy
 

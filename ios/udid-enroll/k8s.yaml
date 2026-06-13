@@ -31,15 +31,23 @@ spec:
         - name: regcred
       containers:
         - name: enroll
-          image: lax.vultrcr.com/mercury/gecko-udid-enroll:v1
+          image: lax.vultrcr.com/mercury/gecko-udid-enroll:v2
           ports:
             - containerPort: 8080
+          volumeMounts:
+            - name: tls          # domain cert+key, to CMS-sign the profile
+              mountPath: /tls
+              readOnly: true
           resources:
             requests:
               cpu: 10m
               memory: 48Mi
             limits:
               memory: 128Mi
+      volumes:
+        - name: tls
+          secret:
+            secretName: gecko-enroll-tls
 ---
 apiVersion: v1
 kind: Service

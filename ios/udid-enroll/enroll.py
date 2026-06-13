@@ -20,7 +20,34 @@ import plistlib
 from flask import Flask, request, Response
 from waitress import serve
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.serialization import (
+    Encoding, load_pem_private_key, pkcs7,
+)
+
 app = Flask(__name__)
+
+# The domain's TLS cert+key (cert-manager's gecko-enroll-tls secret), mounted
+# read-only. Used to CMS-sign the enrollment profile: iOS rejects an UNSIGNED
+# Profile Service profile as "invalid", and signing with a cert that chains to
+# a trusted root (Let's Encrypt) also shows it as "Verified" on install.
+TLS_CERT = "/tls/tls.crt"
+TLS_KEY = "/tls/tls.key"
+
+
+def sign_profile(xml_bytes: bytes) -> bytes:
+    """CMS/PKCS#7-sign the profile with the domain cert, content attached."""
+    certs = x509.load_pem_x509_certificates(open(TLS_CERT, "rb").read())
+    key = load_pem_private_key(open(TLS_KEY, "rb").read(), password=None)
+    builder = (
+        pkcs7.PKCS7SignatureBuilder()
+        .set_data(xml_bytes)
+        .add_signer(certs[0], key, hashes.SHA256())
+    )
+    for extra in certs[1:]:  # include the intermediate chain
+        builder = builder.add_certificate(extra)
+    return builder.sign(Encoding.DER, [pkcs7.PKCS7Options.Binary])
 
 # Stable id for the one-shot enrollment profile (any fixed UUID is fine).
 PROFILE_UUID = "7E6B0C2A-1D34-4F90-9A1E-9C0F1E2D3A4B"
@@ -45,8 +72,8 @@ def index():
         "device's identifier (UDID) so it can be added to the Gecko test build, "
         "then removes itself — nothing stays installed.</p>"
         "<p><a class=btn href='/profile'>Install registration profile</a></p>"
-        "<p class=muted>Open this page in <b>Safari</b> on the iPhone you want to register. "
-        "After installing, you'll see an “Unsigned” note — that's expected; tap Install.</p>"
+        "<p class=muted>Open this page in <b>Safari</b> on the iPhone you want to register, "
+        "then tap Install when prompted.</p>"
         "</body></html>"
     )
 
@@ -68,8 +95,13 @@ def profile():
         "PayloadIdentifier": "me.anemoneya.gecko.enroll",
         "PayloadType": "Profile Service",
     }
-    return Response(plistlib.dumps(payload),
-                    mimetype="application/x-apple-aspen-config")
+    xml = plistlib.dumps(payload)
+    try:
+        body = sign_profile(xml)
+    except Exception as exc:  # noqa: BLE001 — fall back to unsigned, but log it
+        print(f"profile: signing failed, serving unsigned: {exc!r}", flush=True)
+        body = xml
+    return Response(body, mimetype="application/x-apple-aspen-config")
 
 
 @app.post("/collect")
