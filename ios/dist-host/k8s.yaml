@@ -1,0 +1,85 @@
+# Static host for ad-hoc Gecko distribution (IPA + OTA manifest + install page).
+#
+# Serves dist.anemoneya.me over HTTPS via the nginx ingress + cert-manager.
+# iOS OTA install requires the manifest URL to use a CA-trusted cert — Let's
+# Encrypt qualifies.
+#
+# Before applying: point DNS for dist.anemoneya.me at the nginx ingress (same
+# target as your other *.anemoneya.me records).
+#
+# The image bakes in the release artifacts, so re-publish (rebuild + push +
+# rollout restart) each time deploy-friend.sh produces a new build — that's
+# what `PUBLISH=1 ./app/deploy-friend.sh` does.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gecko-dist
+  namespace: gecko
+  labels:
+    app: gecko-dist
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gecko-dist
+  template:
+    metadata:
+      labels:
+        app: gecko-dist
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      containers:
+        - name: nginx
+          image: lax.vultrcr.com/mercury/gecko-dist:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gecko-dist
+  namespace: gecko
+  labels:
+    app: gecko-dist
+spec:
+  selector:
+    app: gecko-dist
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gecko-dist
+  namespace: gecko
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-nginx
+    cert-manager.io/private-key-algorithm: ECDSA
+    nginx.ingress.kubernetes.io/proxy-body-size: "256m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - dist.anemoneya.me
+      secretName: gecko-dist-tls
+  rules:
+    - host: dist.anemoneya.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gecko-dist
+                port:
+                  number: 80

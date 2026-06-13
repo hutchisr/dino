@@ -1,0 +1,2 @@
+# Release artifacts copied in by deploy-friend.sh PUBLISH; rebuilt each release.
+dist/
