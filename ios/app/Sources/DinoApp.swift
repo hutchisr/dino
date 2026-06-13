@@ -730,13 +730,18 @@ struct ChatView: View {
     }
 
     private var titlePopover: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(conversation?.name ?? "Chat")
-                .font(.subheadline.weight(.semibold))
-            if let jid = conversation?.jid, jid != conversation?.name {
-                Text(jid)
-                    .font(.caption)
-                    .foregroundStyle(Color.secondary)
+        let name: String = conversation?.name ?? "Chat"
+        let jid: String = conversation?.jid ?? ""
+        return HStack(spacing: 12) {
+            AvatarView(jid: jid, name: name, isGroup: isGroupChat, size: 44)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(.subheadline.weight(.semibold))
+                if !jid.isEmpty, jid != name {
+                    Text(jid)
+                        .font(.caption)
+                        .foregroundStyle(Color.secondary)
+                }
             }
         }
         .padding(12)
