@@ -59,8 +59,9 @@ for p in paths:
     ents = pl.get("Entitlements", {})
     appid = ents.get("application-identifier", "")
     has_push = "aps-environment" in ents
+    has_groups = "com.apple.security.application-groups" in ents
     explicit = not appid.endswith("*")
-    candidates.append(((has_push, explicit), p))
+    candidates.append(((has_groups, has_push, explicit), p))
 if candidates:
     candidates.sort(reverse=True)
     print(candidates[0][1])
@@ -74,6 +75,49 @@ fi
 
 TEAM_ID=$(security cms -D -i "$PROFILE" 2>/dev/null | plutil -extract TeamIdentifier.0 raw -o - - 2>/dev/null || true)
 PROFILE_HAS_PUSH=$(security cms -D -i "$PROFILE" 2>/dev/null | grep -c 'aps-environment' || true)
+
+# --- resolve the Notification Service Extension profile -------------------
+# The .appex is its own bundle and needs a profile for its own app id, with
+# the App Groups capability, covering this device.
+NSE_BUNDLE_ID="${BUNDLE_ID}.NotificationService"
+APP_GROUP="group.me.anemoneya.gecko"
+if [ -z "${NSE_PROFILE:-}" ]; then
+  NSE_PROFILE=$(python3 - "$DEVICE_UDID" "$NSE_BUNDLE_ID" <<'EOF'
+import glob, os, plistlib, subprocess, sys
+udid, want = sys.argv[1], sys.argv[2]
+home = os.path.expanduser("~")
+paths = glob.glob(f"{home}/Library/MobileDevice/Provisioning Profiles/*.mobileprovision") + \
+        glob.glob(f"{home}/Library/Developer/Xcode/UserData/Provisioning Profiles/*.mobileprovision")
+best = None
+for p in paths:
+    raw = subprocess.run(["security", "cms", "-D", "-i", p], capture_output=True).stdout
+    try:
+        pl = plistlib.loads(raw)
+    except Exception:
+        continue
+    if udid not in (pl.get("ProvisionedDevices") or []):
+        continue
+    ents = pl.get("Entitlements", {})
+    appid = ents.get("application-identifier", "")
+    bid = appid.split(".", 1)[1] if "." in appid else ""
+    if bid != want:                       # explicit match for the extension id
+        continue
+    has_groups = "com.apple.security.application-groups" in ents
+    if best is None or (has_groups and not best[0]):
+        best = (has_groups, p)
+if best:
+    print(best[1])
+EOF
+)
+fi
+if [ -z "$NSE_PROFILE" ]; then
+  echo "error: no provisioning profile for $TEAM_ID.$NSE_BUNDLE_ID covering this device." >&2
+  echo "  Create an 'iOS App Development' profile in the developer portal for App ID" >&2
+  echo "  '$NSE_BUNDLE_ID' (App Groups capability enabled, your iPhone selected)," >&2
+  echo "  download it, double-click to install, then re-run this script." >&2
+  echo "  (Override with NSE_PROFILE=/path/to.mobileprovision.)" >&2
+  exit 1
+fi
 
 # --- build ----------------------------------------------------------------
 ROOT="$(dirname "$HERE")"
@@ -102,6 +146,10 @@ cat > "$STAGE/entitlements.plist" <<EOF
 	<key>get-task-allow</key>
 	<true/>
 $( [ "$PROFILE_HAS_PUSH" -gt 0 ] && printf '\t<key>aps-environment</key>\n\t<string>development</string>' )
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$APP_GROUP</string>
+	</array>
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$TEAM_ID.$BUNDLE_ID</string>
@@ -109,6 +157,34 @@ $( [ "$PROFILE_HAS_PUSH" -gt 0 ] && printf '\t<key>aps-environment</key>\n\t<str
 </dict>
 </plist>
 EOF
+
+# Sign the Notification Service Extension first (nested-first), with its own
+# profile + entitlements, so the host app's signature below seals it.
+APPEX="$APP/PlugIns/NotificationService.appex"
+if [ -d "$APPEX" ]; then
+  plutil -replace CFBundleIdentifier -string "$NSE_BUNDLE_ID" "$APPEX/Info.plist"
+  cp "$NSE_PROFILE" "$APPEX/embedded.mobileprovision"
+  cat > "$STAGE/nse-entitlements.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>$TEAM_ID.$NSE_BUNDLE_ID</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>$TEAM_ID</string>
+	<key>get-task-allow</key>
+	<true/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$APP_GROUP</string>
+	</array>
+</dict>
+</plist>
+EOF
+  codesign -f -s "$SIGN_IDENTITY" --timestamp=none --entitlements "$STAGE/nse-entitlements.plist" "$APPEX"
+fi
+
 codesign -f -s "$SIGN_IDENTITY" --timestamp=none --entitlements "$STAGE/entitlements.plist" "$APP"
 
 # --- install + launch -----------------------------------------------------
