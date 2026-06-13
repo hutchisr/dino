@@ -211,52 +211,6 @@ struct ConversationListView: View {
     }
 }
 
-/// Grabs the enclosing UIScrollView so the scroll-to-bottom button can use
-/// setContentOffset, which (unlike ScrollViewReader.scrollTo) interrupts
-/// ongoing deceleration.
-final class ScrollViewHolder {
-    weak var view: UIScrollView?
-}
-
-struct ScrollViewGrabber: UIViewRepresentable {
-    let holder: ScrollViewHolder
-
-    func makeUIView(context: Context) -> UIView {
-        let v = UIView()
-        DispatchQueue.main.async { [weak v] in
-            var candidate: UIView? = v?.superview
-            while candidate != nil && !(candidate is UIScrollView) {
-                candidate = candidate?.superview
-            }
-            holder.view = candidate as? UIScrollView
-        }
-        return v
-    }
-
-    func updateUIView(_ view: UIView, context: Context) {}
-}
-
-struct ChatBottomDistanceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
-/// Tracks whether a chat scroll view is showing the newest message.
-/// On iOS 18+ uses onScrollGeometryChange; earlier systems fall back to a
-/// content-frame preference.
-struct BottomTracking: ViewModifier {
-    @Binding var isAtBottom: Bool
-    let viewportHeight: CGFloat
-
-    func body(content: Content) -> some View {
-        content.onScrollGeometryChange(for: Int.self) { geo in
-            Int(geo.contentSize.height + geo.contentInsets.bottom - geo.contentOffset.y - geo.containerSize.height)
-        } action: { _, distance in
-            isAtBottom = distance < 150
-        }
-    }
-}
-
 func jidColor(_ jid: String) -> Color {
     let palette: [Color] = [.blue, .teal, .green, .orange, .pink, .purple, .indigo, .red]
     var hash = 5381
@@ -487,37 +441,19 @@ struct ChatView: View {
     @State private var actionMsg: ChatMessage?
     @State private var showFullTitle = false
     @State private var isAtBottom = true
-    @State private var scrollHolder = ScrollViewHolder()
     @State private var viewerItem: ImageViewerItem?
 
-    /// Scrolls to the last message, then settles to the true content bottom.
-    /// A LazyVStack only measures rows as they materialise, so tall rows below
-    /// the fold — e.g. a run of images, each up to ~280pt — keep growing
-    /// contentSize after the first scroll, and a single pass lands short. So we
-    /// re-pin across several frames until the content height stops growing.
+    /// Scrolls to the bottom anchor, retried across several frames. A LazyVStack
+    /// only measures tall rows (e.g. a run of images) as they materialise, and
+    /// the floating composer's bottom safeAreaInset settles a few frames after
+    /// appear — both move the true bottom, so a single scroll can land short.
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        if let last = model.messages[conversationId]?.last {
-            proxy.scrollTo(last.id, anchor: .bottom)
+        func pin(_ passesLeft: Int) {
+            guard passesLeft > 0 else { return }
+            proxy.scrollTo("chatBottom", anchor: .bottom)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { pin(passesLeft - 1) }
         }
-        DispatchQueue.main.async { pinToBottom(passesLeft: 12, lastHeight: -1) }
-    }
-
-    /// Repeatedly snaps the scroll view to its content bottom, re-reading
-    /// contentSize each frame, until the height settles (lazy rows / images
-    /// below the fold finished materialising) or we run out of passes.
-    private func pinToBottom(passesLeft: Int, lastHeight: CGFloat) {
-        guard passesLeft > 0, let sv = scrollHolder.view else { return }
-        let height = sv.contentSize.height
-        let y = max(-sv.adjustedContentInset.top,
-                    height - sv.bounds.height + sv.adjustedContentInset.bottom)
-        sv.setContentOffset(CGPoint(x: 0, y: y), animated: false)
-        // Keep correcting while the content is still growing; always give it a
-        // few passes first, since early heights underestimate lazy rows.
-        if height - lastHeight > 0.5 || passesLeft > 9 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
-                pinToBottom(passesLeft: passesLeft - 1, lastHeight: height)
-            }
-        }
+        DispatchQueue.main.async { pin(12) }
     }
 
     private static func dayLabel(_ date: Date) -> String {
@@ -553,7 +489,6 @@ struct ChatView: View {
                 Spacer()
             }
         }
-        Divider()
         if editing != nil {
             HStack {
                 Image(systemName: "pencil").font(.caption)
@@ -590,43 +525,63 @@ struct ChatView: View {
             .padding(.horizontal, 14)
             .padding(.top, 6)
         }
-        HStack {
-            Menu {
-                Button {
-                    showPhotoPicker = true
-                } label: {
-                    Label("Photo", systemImage: "photo")
-                }
-                Button {
-                    showFileImporter = true
-                } label: {
-                    Label("File", systemImage: "doc")
-                }
-            } label: {
-                Image(systemName: "plus.circle").font(.title3)
-            }
-            TextField("Message", text: $draft, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .onChange(of: draft) { value in
-                    if editing == nil {
-                        model.setTyping(conversationId, !value.isEmpty)
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                Menu {
+                    Button {
+                        showPhotoPicker = true
+                    } label: {
+                        Label("Photo", systemImage: "photo")
                     }
+                    Button {
+                        showFileImporter = true
+                    } label: {
+                        Label("File", systemImage: "doc")
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.title3.weight(.medium))
+                        .frame(width: 24, height: 24)
                 }
-            Button {
-                if let editing {
-                    model.correctMessage(conversationId, item: editing.id, body: draft)
-                    self.editing = nil
-                } else {
-                    model.send(conversationId, draft, replyTo: replyingTo?.id ?? 0)
-                    replyingTo = nil
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+
+                TextField("Message", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
+                    .glassEffect(.regular, in: Capsule())
+                    .onChange(of: draft) { value in
+                        if editing == nil {
+                            model.setTyping(conversationId, !value.isEmpty)
+                        }
+                    }
+
+                if !draft.isEmpty {
+                    Button {
+                        if let editing {
+                            model.correctMessage(conversationId, item: editing.id, body: draft)
+                            self.editing = nil
+                        } else {
+                            model.send(conversationId, draft, replyTo: replyingTo?.id ?? 0)
+                            replyingTo = nil
+                        }
+                        draft = ""
+                    } label: {
+                        Image(systemName: editing != nil ? "checkmark" : "paperplane.fill")
+                            .font(.title3.weight(.semibold))
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(.blue)
+                    .buttonBorderShape(.circle)
+                    .transition(.scale.combined(with: .opacity))
                 }
-                draft = ""
-            } label: {
-                Image(systemName: editing != nil ? "checkmark.circle.fill" : "paperplane.fill")
             }
-            .disabled(draft.isEmpty)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .animation(.spring(response: 0.32, dampingFraction: 0.7), value: draft.isEmpty)
         }
-        .padding(10)
     }
 
     private func reactionSheet(for m: ChatMessage) -> some View {
@@ -652,22 +607,24 @@ struct ChatView: View {
             ForEach(chatMessages.indices, id: \.self) { index in
                 messageRow(index: index)
             }
+            // Bottom anchor: target for scroll-to-bottom, and its on-screen
+            // visibility is the source of truth for `isAtBottom` (robust against
+            // the floating composer's safeAreaInset, unlike offset math).
+            Color.clear.frame(height: 1).id("chatBottom")
+                .onScrollVisibilityChange(threshold: 0.01) { visible in
+                    isAtBottom = visible
+                }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(GeometryReader { g in
-            Color.clear.preference(key: ChatBottomDistanceKey.self,
-                                   value: g.frame(in: .named("chatScroll")).maxY)
-        })
-        .background(ScrollViewGrabber(holder: scrollHolder))
     }
 
     private func scrollContent(outer: GeometryProxy, proxy: ScrollViewProxy) -> some View {
         ScrollView {
             messageStack
         }
+        .defaultScrollAnchor(.bottom)
         .coordinateSpace(name: "chatScroll")
-        .modifier(BottomTracking(isAtBottom: $isAtBottom, viewportHeight: outer.size.height))
         .overlay(alignment: .bottomTrailing) {
             if !isAtBottom {
                 scrollDownButton(proxy: proxy)
@@ -827,12 +784,12 @@ struct ChatView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            GeometryReader { outer in
-                ScrollViewReader { proxy in
-                    scrollContent(outer: outer, proxy: proxy)
-                }
+        GeometryReader { outer in
+            ScrollViewReader { proxy in
+                scrollContent(outer: outer, proxy: proxy)
             }
+        }
+        .safeAreaInset(edge: .bottom) {
             composerArea
         }
         .sheet(isPresented: $showPhotoPicker) {
