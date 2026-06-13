@@ -9,16 +9,59 @@ final class DinoCore {
 
     private init() {}
 
+    /// App Group shared with the Notification Service Extension. The NSE reads
+    /// the same dino.db / omemo.db to decrypt and filter pushes on-device, so
+    /// the GLib storage dirs must live in this shared container.
+    static let appGroupID = "group.me.anemoneya.gecko"
+
     func start() {
         // GLib's XDG dirs default to $HOME/.local/... — the container root is
-        // not writable on a real device, so point them at Library/Caches.
-        let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].path
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].path
-        setenv("XDG_DATA_HOME", library + "/xdg-data", 1)
-        setenv("XDG_CONFIG_HOME", library + "/xdg-config", 1)
-        setenv("XDG_CACHE_HOME", caches + "/xdg-cache", 1)
+        // not writable on a real device, so point them at the App Group
+        // container (shared with the NSE), falling back to Library/Caches.
+        let dirs = DinoCore.storageDirs()
+        setenv("XDG_DATA_HOME", dirs.data, 1)
+        setenv("XDG_CONFIG_HOME", dirs.config, 1)
+        setenv("XDG_CACHE_HOME", dirs.cache, 1)
         dino_ios_init_glib_tls()
         dino_ios_start(eventTrampoline, Unmanaged.passRetained(self).toOpaque(), releaseContext)
+    }
+
+    /// Resolve the three XDG roots. Prefer the App Group container so the NSE
+    /// sees the same databases; fall back to the app's own Library/Caches if
+    /// the App Group entitlement isn't present. Data left in the old per-app
+    /// location is migrated into the container on first run.
+    static func storageDirs() -> (data: String, config: String, cache: String) {
+        let fm = FileManager.default
+        let library = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+        let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let legacy = (data: library.appendingPathComponent("xdg-data"),
+                      config: library.appendingPathComponent("xdg-config"),
+                      cache: caches.appendingPathComponent("xdg-cache"))
+
+        guard let container = fm.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) else {
+            NSLog("DinoCore: App Group unavailable, using per-app storage")
+            return (legacy.data.path, legacy.config.path, legacy.cache.path)
+        }
+        let shared = (data: container.appendingPathComponent("xdg-data"),
+                      config: container.appendingPathComponent("xdg-config"),
+                      cache: container.appendingPathComponent("xdg-cache"))
+        migrateStorage(legacy.data, to: shared.data, fm: fm)
+        migrateStorage(legacy.config, to: shared.config, fm: fm)
+        migrateStorage(legacy.cache, to: shared.cache, fm: fm)
+        return (shared.data.path, shared.config.path, shared.cache.path)
+    }
+
+    /// Move an old XDG root into the shared container, but only when the new
+    /// location is empty — never clobber a container the NSE may already use.
+    private static func migrateStorage(_ from: URL, to: URL, fm: FileManager) {
+        guard fm.fileExists(atPath: from.path), !fm.fileExists(atPath: to.path) else { return }
+        do {
+            try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fm.moveItem(at: from, to: to)
+            NSLog("DinoCore: migrated %@ -> %@", from.path, to.path)
+        } catch {
+            NSLog("DinoCore: storage migration failed for %@: %@", from.path, error.localizedDescription)
+        }
     }
 
     func addAccount(jid: String, password: String) { dino_ios_add_account(jid, password) }

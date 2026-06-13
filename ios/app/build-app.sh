@@ -41,6 +41,10 @@ if [ "$TARGET" = "sim-arm64" ]; then
 	<string>998J34UYP5</string>
 	<key>aps-environment</key>
 	<string>development</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.me.anemoneya.gecko</string>
+	</array>
 	<key>get-task-allow</key>
 	<true/>
 </dict>
