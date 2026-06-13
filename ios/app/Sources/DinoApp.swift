@@ -15,8 +15,11 @@ struct DinoApp: App {
                 .onAppear { model.boot() }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active && model.ready && model.hasAccount {
-                DinoCore.shared.appForegrounded()
+            if phase == .active {
+                PushRegistration.clearDelivered()
+                if model.ready && model.hasAccount {
+                    DinoCore.shared.appForegrounded()
+                }
             }
         }
     }

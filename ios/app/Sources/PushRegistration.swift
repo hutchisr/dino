@@ -51,4 +51,12 @@ enum PushRegistration {
         guard let token = deviceToken else { return }
         DinoCore.shared.enablePush(proxyJid: proxyJid, node: token)
     }
+
+    /// Clears delivered banners and the badge — the app is open, so the
+    /// messages are (about to be) seen in the conversation list.
+    static func clearDelivered() {
+        let center = UNUserNotificationCenter.current()
+        center.removeAllDeliveredNotifications()
+        center.setBadgeCount(0)
+    }
 }
