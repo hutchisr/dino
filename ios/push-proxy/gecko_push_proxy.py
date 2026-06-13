@@ -79,6 +79,12 @@ class PushBot(slixmpp.ClientXMPP):
         # device token -> {"muted": set of bare jids,
         #                  "mention": {bare jid: nick}}
         self.filters: dict[str, dict] = {}
+        # device token -> monotonic time of the last push actually sent.
+        # The user's server publishes the same message several times in a
+        # burst (one per accumulated push registration, plus a known
+        # double-publish), which would surface as several identical banners.
+        # Collapse a burst to a single push per token.
+        self.last_push: dict[str, float] = {}
         self.add_event_handler("session_start", self.on_start)
         self.add_event_handler("message", self.on_message)
         self.register_plugin("xep_0030")
@@ -162,6 +168,15 @@ class PushBot(slixmpp.ClientXMPP):
                 if not last_body or nick.lower() not in last_body.lower():
                     log.info("mention-only %s without mention — dropping push", bare)
                     return
+
+        # Collapse a burst of identical publishes (the server emits one per
+        # registration, plus a double-publish) into a single banner.
+        now = time.monotonic()
+        tok = node.lower()
+        if now - self.last_push.get(tok, 0.0) < 5.0:
+            log.info("deduped burst push for %s…", node[:8])
+            return
+        self.last_push[tok] = now
 
         body = "New message" if not count or count <= 1 else f"{count} new messages"
         payload = {

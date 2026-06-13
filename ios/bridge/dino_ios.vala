@@ -753,14 +753,22 @@ public void enable_push(string push_jid, string node) {
         try {
             var jid = new Xmpp.Jid(j);
             var module = stream.get_module(Xmpp.Xep.PushNotifications.Module.IDENTITY);
-            module.enable.begin(stream, jid, n, (_, res) => {
-                bool ok = module.enable.end(res);
-                if (ok) {
-                    push_proxy_jid = j;
-                    push_token = n;
-                    sync_push_filters();
-                }
-                emit(@"{\"type\":\"push_state\",\"enabled\":$(ok ? "true" : "false")}");
+            // Clear ALL existing registrations for this push service first, then
+            // register exactly one. Re-enabling without this accumulates stale
+            // registrations on the server (each makes it publish again -> the
+            // same message arrives as several pushes, and stale phantom state
+            // keeps re-pushing). disable(node=null) wipes them for a clean slate.
+            module.disable.begin(stream, jid, null, (_, dres) => {
+                module.disable.end(dres);
+                module.enable.begin(stream, jid, n, (_, res) => {
+                    bool ok = module.enable.end(res);
+                    if (ok) {
+                        push_proxy_jid = j;
+                        push_token = n;
+                        sync_push_filters();
+                    }
+                    emit(@"{\"type\":\"push_state\",\"enabled\":$(ok ? "true" : "false")}");
+                });
             });
         } catch (Error e) {
             emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
