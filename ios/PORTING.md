@@ -124,10 +124,16 @@ works on any server and also unlocks decrypted previews.
   host bundle by build-app.sh). Verified the NSE spawns for a
   mutable-content push and reads the shared dino.db. `NSEStore` is the
   read-only accessor.
-* **Phase 2 (todo):** in the NSE, connect over XMPP, fetch the latest
-  message via MAM, OMEMO-decrypt, map to a conversation, apply its notify
-  setting, and enrich the alert with sender + preview. Reuses the static
-  Vala/OMEMO libs via a new lean bridge entrypoint; tight 24MB/30s budget.
+* **Phase 2 (done, validated on simulator):** `dino_ios_nse_fetch` boots a
+  trimmed libdino in the extension (shared `boot_core`), points storage at
+  the App Group container, connects, MAM-syncs, and returns each incoming
+  message with its conversation, OMEMO-decrypted body, and effective notify
+  setting; `NSEFetcher` drives it from Swift and enriches the alert.
+  Verified end to end: an OMEMO message to the offline account was
+  connected, synced, decrypted on-device, and flagged for its muted
+  conversation. Still to confirm on a real device, where the 24MB/30s
+  budget is enforced (sim doesn't); a transient first-connect stream error
+  auto-retries and eats into that budget — watch it on device.
 * **Phase 3 (todo, gated):** suppress muted-conversation banners. Requires
   the `com.apple.developer.usernotifications.filtering` entitlement (Apple
   request on the dev account); enrichment in Phase 2 works without it.
