@@ -709,13 +709,20 @@ struct ChatView: View {
 
     private var titleButton: some View {
         let name: String = conversation?.name ?? "Chat"
+        // The principal item sits just right of the back chevron and is not
+        // clipped against the trailing button group (bell + lock, plus
+        // occupants in group chats), so cap its width to the space between
+        // the two.
+        let reserved: CGFloat = 70 + (isGroupChat ? 165 : 120)
         return Button {
             showFullTitle = true
         } label: {
             Text(name)
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
+                .truncationMode(.tail)
                 .foregroundStyle(Color.primary)
+                .frame(maxWidth: UIScreen.main.bounds.width - reserved)
         }
     }
 
