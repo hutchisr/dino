@@ -23,45 +23,13 @@ class NotificationService: UNNotificationServiceExtension {
         }
         self.bestAttempt = content
 
-        // Peek at the triggering message on-device: connect (without ever
-        // sending presence, so we don't consume offline delivery or re-trigger
-        // pushes), MAM-sync against a throwaway DB copy, and OMEMO-decrypt.
-        // Budget under the ~30s NSE limit so our callback wins the race against
-        // serviceExtensionTimeWillExpire.
-        NSEFetcher.fetch(timeoutMs: 24_000) { messages in
-            guard let latest = messages.last else {
-                // Couldn't resolve it — leave the generic alert as-is.
-                contentHandler(content)
-                return
-            }
-
-            // Stamp the conversation so tapping the banner opens the right chat.
-            if !latest.conversationJid.isEmpty {
-                var info = content.userInfo
-                info["conversationJid"] = latest.conversationJid
-                content.userInfo = info
-            }
-
-            if latest.isMuted {
-                // Phase 3 will drop this entirely (needs the filtering
-                // entitlement); until then, keep the generic text for a muted
-                // conversation (but still tappable to the chat).
-                contentHandler(content)
-                return
-            }
-
-            if latest.isGroupchat {
-                content.title = latest.conversationName
-                content.body = "\(latest.sender): \(latest.body)"
-            } else {
-                content.title = latest.sender.isEmpty ? latest.conversationName : latest.sender
-                content.body = latest.body
-            }
-            if messages.count > 1 {
-                content.subtitle = "\(messages.count) new messages"
-            }
-            contentHandler(content)
-        }
+        // NSE fetch DISABLED again: connecting from the extension re-triggers
+        // server pushes on xmpp.is (each connect leaves the pending message
+        // unacked, so the server re-pushes, waking the extension — a flood).
+        // No-presence didn't break it; the trigger is at the
+        // stream-management/delivery layer, not presence. Pass the generic
+        // push through until a fetch that doesn't disturb server state exists.
+        contentHandler(content)
     }
 
     /// Temporary verification breadcrumb (simulator banners show the static
