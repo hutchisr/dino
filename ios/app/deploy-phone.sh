@@ -73,6 +73,7 @@ if [ -z "$PROFILE" ]; then
 fi
 
 TEAM_ID=$(security cms -D -i "$PROFILE" 2>/dev/null | plutil -extract TeamIdentifier.0 raw -o - - 2>/dev/null || true)
+PROFILE_HAS_PUSH=$(security cms -D -i "$PROFILE" 2>/dev/null | grep -c 'aps-environment' || true)
 
 # --- build ----------------------------------------------------------------
 ROOT="$(dirname "$HERE")"
@@ -100,8 +101,7 @@ cat > "$STAGE/entitlements.plist" <<EOF
 	<string>$TEAM_ID</string>
 	<key>get-task-allow</key>
 	<true/>
-	<key>aps-environment</key>
-	<string>development</string>
+$( [ "$PROFILE_HAS_PUSH" -gt 0 ] && printf '\t<key>aps-environment</key>\n\t<string>development</string>' )
 	<key>keychain-access-groups</key>
 	<array>
 		<string>$TEAM_ID.$BUNDLE_ID</string>
