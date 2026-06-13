@@ -23,39 +23,14 @@ class NotificationService: UNNotificationServiceExtension {
         }
         self.bestAttempt = content
 
-        // Connect, MAM-sync, and OMEMO-decrypt the message(s) that triggered
-        // this push. Budget under the ~30s NSE limit so our callback wins the
-        // race against serviceExtensionTimeWillExpire.
-        NSEFetcher.fetch(timeoutMs: 24_000) { messages in
-            guard let latest = messages.last else {
-                // Couldn't fetch in time — leave the generic alert as-is.
-                Self.debug("fetch empty — delivering generic")
-                contentHandler(content)
-                return
-            }
-
-            if latest.isMuted {
-                // Phase 3 will drop this entirely (needs the filtering
-                // entitlement); until then, deliver the original generic alert
-                // rather than an enriched one for a muted conversation.
-                Self.debug("muted [\(latest.notify)] \(latest.conversationName)")
-                contentHandler(request.content)
-                return
-            }
-
-            if latest.isGroupchat {
-                content.title = latest.conversationName
-                content.body = "\(latest.sender): \(latest.body)"
-            } else {
-                content.title = latest.sender.isEmpty ? latest.conversationName : latest.sender
-                content.body = latest.body
-            }
-            if messages.count > 1 {
-                content.subtitle = "\(messages.count) new messages"
-            }
-            Self.debug("enriched (\(messages.count)) title=\(content.title) body=\(content.body)")
-            contentHandler(content)
-        }
+        // The on-device fetch (NSEFetcher) is temporarily disabled. Opening a
+        // full XMPP session from the extension had server-side side effects:
+        // because it works on a throwaway DB copy it can't mark the message
+        // handled, so the server keeps re-pushing (a notification loop), and
+        // its connect/disconnect churn disturbed the app's message delivery.
+        // Pass the generic push through unchanged until the fetch is
+        // redesigned to peek without those side effects.
+        contentHandler(content)
     }
 
     /// Temporary verification breadcrumb (simulator banners show the static
