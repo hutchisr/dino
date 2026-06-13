@@ -432,7 +432,11 @@ struct ContactsView: View {
 struct ChatView: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
+    @Namespace private var composerGlass
     @State private var draft = ""
+    @State private var showSend = false
+    /// Shared height for the composer's buttons and text field so they align.
+    private let composerControlHeight: CGFloat = 44
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showOccupants = false
@@ -525,8 +529,8 @@ struct ChatView: View {
             .padding(.horizontal, 14)
             .padding(.top, 6)
         }
-        GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 10) {
+        GlassEffectContainer(spacing: 6) {
+            HStack(spacing: 12) {
                 Menu {
                     Button {
                         showPhotoPicker = true
@@ -541,23 +545,36 @@ struct ChatView: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.title3.weight(.medium))
-                        .frame(width: 24, height: 24)
+                        .foregroundStyle(.primary)
+                        .frame(width: composerControlHeight, height: composerControlHeight)
+                        .glassEffect(.regular.interactive(), in: Circle())
                 }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
+                .buttonStyle(.plain)
 
                 TextField("Message", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 11)
+                    .frame(minHeight: composerControlHeight)
                     .glassEffect(.regular, in: Capsule())
+                    .glassEffectID("composerField", in: composerGlass)
                     .onChange(of: draft) { value in
                         if editing == nil {
                             model.setTyping(conversationId, !value.isEmpty)
                         }
+                        // Drive the send button's presence explicitly so it
+                        // morphs in/out (split from / merge into the field) on
+                        // BOTH first keystroke and delete-to-empty — relying on
+                        // an implicit .animation(value:) didn't animate the
+                        // structural removal on delete.
+                        withAnimation(.spring(response: 0.36, dampingFraction: 0.74)) {
+                            showSend = !value.isEmpty
+                        }
                     }
 
-                if !draft.isEmpty {
+                if showSend {
+                    // Blue send button that fluidly splits out of the text
+                    // field's glass (and merges back when the draft clears),
+                    // via the shared GlassEffectContainer + matched id.
                     Button {
                         if let editing {
                             model.correctMessage(conversationId, item: editing.id, body: draft)
@@ -570,17 +587,16 @@ struct ChatView: View {
                     } label: {
                         Image(systemName: editing != nil ? "checkmark" : "paperplane.fill")
                             .font(.title3.weight(.semibold))
-                            .frame(width: 24, height: 24)
+                            .foregroundStyle(.white)
+                            .frame(width: composerControlHeight, height: composerControlHeight)
+                            .glassEffect(.regular.tint(.blue).interactive(), in: Circle())
+                            .glassEffectID("composerSend", in: composerGlass)
                     }
-                    .buttonStyle(.glassProminent)
-                    .tint(.blue)
-                    .buttonBorderShape(.circle)
-                    .transition(.scale.combined(with: .opacity))
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .animation(.spring(response: 0.32, dampingFraction: 0.7), value: draft.isEmpty)
         }
     }
 
@@ -636,6 +652,12 @@ struct ChatView: View {
         }
         .onChange(of: model.messages[conversationId]?.count ?? 0) { _ in
             DispatchQueue.main.async { scrollToBottom(proxy) }
+        }
+        .onChange(of: chatMessages.reduce(0) { $0 + $1.reactions.count }) { _ in
+            // A reaction chip appearing grows its message row; keep the latest
+            // in view if we're already pinned to the bottom (don't yank the user
+            // away if they've scrolled up into history).
+            if isAtBottom { DispatchQueue.main.async { scrollToBottom(proxy) } }
         }
     }
 
