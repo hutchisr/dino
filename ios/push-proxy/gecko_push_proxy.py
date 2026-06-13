@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import signal
 import sys
 import time
 
@@ -75,7 +76,11 @@ class PushBot(slixmpp.ClientXMPP):
     def __init__(self, jid: str, password: str, apns: Apns):
         super().__init__(jid, password)
         self.apns = apns
+        # device token -> {"muted": set of bare jids,
+        #                  "mention": {bare jid: nick}}
+        self.filters: dict[str, dict] = {}
         self.add_event_handler("session_start", self.on_start)
+        self.add_event_handler("message", self.on_message)
         self.register_plugin("xep_0030")
         self.register_plugin("xep_0060")
         self.register_plugin("xep_0198")
@@ -88,6 +93,23 @@ class PushBot(slixmpp.ClientXMPP):
     async def on_start(self, _event):
         self.send_presence()
         log.info("connected as %s", self.boundjid.full)
+
+    def on_message(self, msg):
+        """Clients send their notification filters as a JSON message."""
+        body = msg["body"] or ""
+        if '"gecko-push-filters"' not in body:
+            return
+        try:
+            data = json.loads(body)
+            token = data["token"].lower()
+            self.filters[token] = {
+                "muted": {j.lower() for j in data.get("muted", [])},
+                "mention": {e["jid"].lower(): e.get("nick", "") for e in data.get("mention_only", [])},
+            }
+            log.info("filters for %s…: %d muted, %d mention-only",
+                     token[:8], len(self.filters[token]["muted"]), len(self.filters[token]["mention"]))
+        except Exception:
+            log.exception("bad filter message")
 
     async def on_publish_iq(self, iq):
         try:
@@ -102,16 +124,38 @@ class PushBot(slixmpp.ClientXMPP):
         if not TOKEN_RE.match(node or ""):
             log.warning("publish with non-token node %r ignored", (node or "")[:24])
             return
-        # XEP-0357 summary form may carry a message count
+        # XEP-0357 summary form: message count, and (server-dependent)
+        # last-message-sender / last-message-body
         count = None
+        sender = None
+        last_body = None
         try:
             for field in iq.xml.iter("{jabber:x:data}field"):
-                if field.get("var") == "message-count":
-                    value = field.find("{jabber:x:data}value")
-                    if value is not None and value.text:
-                        count = int(value.text)
+                var = field.get("var")
+                value = field.find("{jabber:x:data}value")
+                text = value.text if value is not None else None
+                if var == "message-count" and text:
+                    count = int(text)
+                elif var == "last-message-sender" and text:
+                    sender = text
+                elif var == "last-message-body" and text:
+                    last_body = text
         except Exception:
             pass
+        log.info("summary: count=%s sender=%s body=%s",
+                 count, sender, "yes" if last_body else "no")
+
+        rules = self.filters.get(node.lower())
+        if rules and sender:
+            bare = sender.split("/")[0].lower()
+            if bare in rules["muted"]:
+                log.info("muted conversation %s — dropping push", bare)
+                return
+            if bare in rules["mention"]:
+                nick = rules["mention"][bare]
+                if not last_body or nick.lower() not in last_body.lower():
+                    log.info("mention-only %s without mention — dropping push", bare)
+                    return
 
         body = "New message" if not count or count <= 1 else f"{count} new messages"
         payload = {
@@ -137,8 +181,11 @@ def main():
 
     bot = PushBot(jid, password, apns)
     bot.connect()
+    loop = asyncio.get_event_loop()
+    # exit promptly on SIGTERM so k8s Recreate rollouts don't hang
+    loop.add_signal_handler(signal.SIGTERM, loop.stop)
     try:
-        asyncio.get_event_loop().run_forever()
+        loop.run_forever()
     except KeyboardInterrupt:
         pass
 

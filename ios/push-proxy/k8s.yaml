@@ -25,6 +25,7 @@ spec:
       labels:
         app: gecko-push-proxy
     spec:
+      terminationGracePeriodSeconds: 10
       imagePullSecrets:
         - name: regcred
       containers:

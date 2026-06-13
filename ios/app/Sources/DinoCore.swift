@@ -29,6 +29,7 @@ final class DinoCore {
     func requestAccountDetails() { dino_ios_request_account_details() }
     func appForegrounded() { dino_ios_app_foregrounded() }
     func enablePush(proxyJid: String, node: String) { dino_ios_enable_push(proxyJid, node) }
+    func setNotify(_ id: Int32, _ setting: String) { dino_ios_set_notify(id, setting) }
     func requestRoster() { dino_ios_request_roster() }
     func focusConversation(_ id: Int32) { dino_ios_focus_conversation(id) }
     func blurConversation(_ id: Int32) { dino_ios_blur_conversation(id) }

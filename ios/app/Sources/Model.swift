@@ -18,6 +18,8 @@ struct XmppConversation: Identifiable {
     var preview: String = ""
     var previewDirection: String = ""
     var time: Date = Date(timeIntervalSince1970: 0)
+    var notify: String = "default"
+    var notifyEffective: String = "on"
 
     var isGroupchat: Bool { kind == "groupchat" }
 }
@@ -232,6 +234,10 @@ final class AppModel: ObservableObject {
         DinoCore.shared.setEncryption(conversation: id, omemo: omemo)
     }
 
+    func setNotify(_ id: Int32, _ setting: String) {
+        DinoCore.shared.setNotify(id, setting)
+    }
+
     private func handle(_ e: [String: Any]) {
         switch e["type"] as? String {
         case "ready":
@@ -288,7 +294,9 @@ final class AppModel: ObservableObject {
                         unread: c["unread"] as? Int ?? 0,
                         preview: c["preview"] as? String ?? "",
                         previewDirection: c["preview_direction"] as? String ?? "",
-                        time: Date(timeIntervalSince1970: TimeInterval(c["time"] as? Int ?? 0)))
+                        time: Date(timeIntervalSince1970: TimeInterval(c["time"] as? Int ?? 0)),
+                        notify: c["notify"] as? String ?? "default",
+                        notifyEffective: c["notify_effective"] as? String ?? "on")
                 }.sorted { $0.time > $1.time }
                 if let pending = pendingChatJid,
                    let conv = conversations.first(where: { $0.jid == pending }) {

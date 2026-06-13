@@ -315,6 +315,9 @@ struct ConversationRow: View {
                     if conv.encryption == "OMEMO" {
                         Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.green)
                     }
+                    if conv.notifyEffective == "off" {
+                        Image(systemName: "bell.slash.fill").font(.caption2).foregroundStyle(.secondary)
+                    }
                     Spacer()
                     Text(timeLabel).font(.caption2).foregroundStyle(.secondary)
                 }
@@ -490,6 +493,18 @@ struct ChatView: View {
 
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
+    }
+
+    private var defaultNotifyLabel: String {
+        conversation?.isGroupchat == true ? "mentions" : "on"
+    }
+
+    private var bellIcon: String {
+        switch conversation?.notifyEffective {
+        case "off": return "bell.slash"
+        case "highlight": return "bell.badge"
+        default: return "bell"
+        }
     }
 
     var body: some View {
@@ -674,6 +689,38 @@ struct ChatView: View {
         .navigationTitle(conversation?.name ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            Menu {
+                let current = conversation?.notify ?? "default"
+                let isGroup = conversation?.isGroupchat == true
+                Button {
+                    model.setNotify(conversationId, "default")
+                } label: {
+                    if current == "default" {
+                        Label("Default (\(defaultNotifyLabel))", systemImage: "checkmark")
+                    } else {
+                        Text("Default (\(defaultNotifyLabel))")
+                    }
+                }
+                Button {
+                    model.setNotify(conversationId, "on")
+                } label: {
+                    current == "on" ? Label("All messages", systemImage: "checkmark") : Label("All messages", systemImage: "")
+                }
+                if isGroup {
+                    Button {
+                        model.setNotify(conversationId, "highlight")
+                    } label: {
+                        current == "highlight" ? Label("Only when mentioned", systemImage: "checkmark") : Label("Only when mentioned", systemImage: "")
+                    }
+                }
+                Button {
+                    model.setNotify(conversationId, "off")
+                } label: {
+                    current == "off" ? Label("Off", systemImage: "checkmark") : Label("Off", systemImage: "")
+                }
+            } label: {
+                Image(systemName: bellIcon)
+            }
             if conversation?.isGroupchat == true {
                 Button {
                     model.requestOccupants(conversationId)

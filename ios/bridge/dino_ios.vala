@@ -32,6 +32,8 @@ public class Application : GLib.Application, Dino.Application {
 
 private static Application? app = null;
 private static EventCb? event_cb = null;
+private static string? push_proxy_jid = null;
+private static string? push_token = null;
 #if WITH_OMEMO
 private static Dino.Plugins.Omemo.Plugin? omemo_plugin = null;
 #endif
@@ -46,6 +48,15 @@ private static string enc_name(Encryption e) {
         case Encryption.PGP: return "PGP";
         case Encryption.NONE: return "NONE";
         default: return "UNKNOWN";
+    }
+}
+
+private static string notify_name(Conversation.NotifySetting s) {
+    switch (s) {
+        case Conversation.NotifySetting.ON: return "on";
+        case Conversation.NotifySetting.OFF: return "off";
+        case Conversation.NotifySetting.HIGHLIGHT: return "highlight";
+        default: return "default";
     }
 }
 
@@ -337,9 +348,10 @@ private static string conversation_json(Conversation c) {
     }
     long last_time = c.last_active != null ? (long) c.last_active.to_unix() : 0;
     string kind = c.type_ == Conversation.Type.GROUPCHAT ? "groupchat" : "chat";
-    return "{\"id\":%d,\"account\":\"%s\",\"jid\":\"%s\",\"name\":\"%s\",\"encryption\":\"%s\",\"kind\":\"%s\",\"unread\":%d,\"preview\":\"%s\",\"preview_direction\":\"%s\",\"time\":%ld}".printf(
+    return "{\"id\":%d,\"account\":\"%s\",\"jid\":\"%s\",\"name\":\"%s\",\"encryption\":\"%s\",\"kind\":\"%s\",\"unread\":%d,\"preview\":\"%s\",\"preview_direction\":\"%s\",\"time\":%ld,\"notify\":\"%s\",\"notify_effective\":\"%s\"}".printf(
         c.id, esc(c.account.bare_jid.to_string()), esc(c.counterpart.to_string()), esc(name), enc_name(c.encryption),
-        kind, unread, esc(preview), preview_direction, last_time);
+        kind, unread, esc(preview), preview_direction, last_time,
+        notify_name(c.notify_setting), notify_name(c.get_notification_setting(app.stream_interactor)));
 }
 
 private static void push_avatar(Account account, Xmpp.Jid jid) {
@@ -614,11 +626,71 @@ public void enable_push(string push_jid, string node) {
             var module = stream.get_module(Xmpp.Xep.PushNotifications.Module.IDENTITY);
             module.enable.begin(stream, jid, n, (_, res) => {
                 bool ok = module.enable.end(res);
+                if (ok) {
+                    push_proxy_jid = j;
+                    push_token = n;
+                    sync_push_filters();
+                }
                 emit(@"{\"type\":\"push_state\",\"enabled\":$(ok ? "true" : "false")}");
             });
         } catch (Error e) {
             emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
         }
+        return Source.REMOVE;
+    });
+}
+
+// Sends the per-conversation notification filters to the push proxy as a
+// JSON message. The proxy applies them per device token; rules are re-sent
+// on every (re-)enable so proxy restarts self-heal.
+private static void sync_push_filters() {
+    if (push_proxy_jid == null || push_token == null) return;
+    var account = first_enabled_account();
+    if (account == null) return;
+    var stream = app.stream_interactor.get_stream(account);
+    if (stream == null) return;
+
+    var muted = new StringBuilder();
+    var mention = new StringBuilder();
+    foreach (Conversation c in app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY).get_active_conversations()) {
+        var effective = c.get_notification_setting(app.stream_interactor);
+        if (effective == Conversation.NotifySetting.OFF) {
+            if (muted.len > 0) muted.append_c(',');
+            muted.append("\"%s\"".printf(esc(c.counterpart.bare_jid.to_string())));
+        } else if (effective == Conversation.NotifySetting.HIGHLIGHT) {
+            string nick = c.nickname ?? account.localpart;
+            if (mention.len > 0) mention.append_c(',');
+            mention.append("{\"jid\":\"%s\",\"nick\":\"%s\"}".printf(esc(c.counterpart.bare_jid.to_string()), esc(nick)));
+        }
+    }
+    string json = "{\"gecko-push-filters\":1,\"token\":\"%s\",\"muted\":[%s],\"mention_only\":[%s]}".printf(
+        push_token, muted.str, mention.str);
+
+    try {
+        var msg = new Xmpp.MessageStanza();
+        msg.to = new Xmpp.Jid(push_proxy_jid);
+        msg.body = json;
+        msg.type_ = Xmpp.MessageStanza.TYPE_NORMAL;
+        stream.get_module(Xmpp.MessageModule.IDENTITY).send_message.begin(stream, msg);
+    } catch (Error e) {
+        warning("Could not sync push filters: %s", e.message);
+    }
+}
+
+public void set_notify(int conversation_id, string setting) {
+    int cid = conversation_id;
+    string sset = setting;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        switch (sset) {
+            case "on": c.notify_setting = Conversation.NotifySetting.ON; break;
+            case "off": c.notify_setting = Conversation.NotifySetting.OFF; break;
+            case "highlight": c.notify_setting = Conversation.NotifySetting.HIGHLIGHT; break;
+            default: c.notify_setting = Conversation.NotifySetting.DEFAULT; break;
+        }
+        push_conversations();
+        sync_push_filters();
         return Source.REMOVE;
     });
 }
