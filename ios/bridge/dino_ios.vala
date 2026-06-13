@@ -667,10 +667,16 @@ private static void sync_push_filters() {
         push_token, muted.str, mention.str);
 
     try {
+        // no body + no-store/no-copy hints: invisible to chat clients and
+        // kept out of MAM/carbons
         var msg = new Xmpp.MessageStanza();
         msg.to = new Xmpp.Jid(push_proxy_jid);
-        msg.body = json;
         msg.type_ = Xmpp.MessageStanza.TYPE_NORMAL;
+        var filters_node = new Xmpp.StanzaNode.build("filters", "urn:gecko:push:filters").add_self_xmlns();
+        filters_node.put_node(new Xmpp.StanzaNode.text(json));
+        msg.stanza.put_node(filters_node);
+        msg.stanza.put_node(new Xmpp.StanzaNode.build("no-store", "urn:xmpp:hints").add_self_xmlns());
+        msg.stanza.put_node(new Xmpp.StanzaNode.build("no-copy", "urn:xmpp:hints").add_self_xmlns());
         stream.get_module(Xmpp.MessageModule.IDENTITY).send_message.begin(stream, msg);
     } catch (Error e) {
         warning("Could not sync push filters: %s", e.message);

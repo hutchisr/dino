@@ -95,12 +95,18 @@ class PushBot(slixmpp.ClientXMPP):
         log.info("connected as %s", self.boundjid.full)
 
     def on_message(self, msg):
-        """Clients send their notification filters as a JSON message."""
-        body = msg["body"] or ""
-        if '"gecko-push-filters"' not in body:
+        """Clients send their notification filters in a custom element
+        (bodyless message with no-store hints)."""
+        payload = None
+        el = msg.xml.find("{urn:gecko:push:filters}filters")
+        if el is not None and el.text:
+            payload = el.text
+        elif msg["body"] and '"gecko-push-filters"' in msg["body"]:
+            payload = msg["body"]  # legacy clients
+        if not payload:
             return
         try:
-            data = json.loads(body)
+            data = json.loads(payload)
             token = data["token"].lower()
             self.filters[token] = {
                 "muted": {j.lower() for j in data.get("muted", [])},
