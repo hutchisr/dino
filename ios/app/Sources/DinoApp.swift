@@ -137,55 +137,49 @@ struct ConversationListView: View {
                     }
                 }
             }
-            if let account = model.accounts.first {
-                Section("Account") {
-                    Button {
-                        showAccountSettings = true
-                    } label: {
-                        HStack {
-                            Circle()
-                                .fill(account.state == "CONNECTED" ? .green : .orange)
-                                .frame(width: 10, height: 10)
-                            Text(account.id).font(.caption)
-                            Spacer()
-                            Text(account.state.lowercased()).font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            model.signOut()
-                        } label: {
-                            Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
-                        }
-                    }
-                }
-            }
         }
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Int32.self) { id in
             ChatView(conversationId: id)
         }
         .toolbar {
-            Button {
-                model.requestState()
-                showContacts = true
-            } label: {
-                Image(systemName: "square.and.pencil")
+            ToolbarItem(placement: .topBarLeading) {
+                if let account = model.accounts.first {
+                    Button {
+                        showAccountSettings = true
+                    } label: {
+                        AvatarView(jid: account.id, name: model.accountAlias, isGroup: false, size: 34)
+                            .padding(3)
+                            .glassEffect(.regular.tint(accountStatusColor(account.state)).interactive(), in: Circle())
+                            .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            Menu {
+            .sharedBackgroundVisibility(.hidden)
+            ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    showJoinMuc = true
+                    model.requestState()
+                    showContacts = true
                 } label: {
-                    Label("Join channel", systemImage: "person.2")
+                    Image(systemName: "square.and.pencil")
                 }
-                Button {
-                    showAccountSettings = true
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        showJoinMuc = true
+                    } label: {
+                        Label("Join channel", systemImage: "person.2")
+                    }
+                    Button {
+                        showAccountSettings = true
+                    } label: {
+                        Label("Account", systemImage: "person.crop.circle")
+                    }
                 } label: {
-                    Label("Account", systemImage: "person.crop.circle")
+                    Image(systemName: "ellipsis.circle")
                 }
-            } label: {
-                Image(systemName: "ellipsis.circle")
             }
         }
         .sheet(isPresented: $showContacts) {
@@ -208,6 +202,15 @@ struct ConversationListView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+    }
+}
+
+/// Ring colour for the account avatar, reflecting the connection state.
+func accountStatusColor(_ state: String) -> Color {
+    switch state.uppercased() {
+    case "CONNECTED": return .green
+    case "CONNECTING": return .orange
+    default: return .red
     }
 }
 
