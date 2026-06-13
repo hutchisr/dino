@@ -212,6 +212,10 @@ public void nse_fetch(int timeout_ms, owned EventCb cb) {
             int n = 0;
             foreach (Account account in app.db.get_accounts()) {
                 if (account.enabled) {
+                    // Bind a distinct resource so the extension's connection
+                    // never collides with the app's session (which would kick
+                    // one off with a stream conflict).
+                    account.set_ephemeral_resource("gecko-nse.%x".printf(Random.next_int()));
                     app.stream_interactor.connect_account(account);
                     n++;
                 }

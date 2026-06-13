@@ -281,7 +281,11 @@ final class AppModel: ObservableObject {
                 }
             }
         case "connection_error":
-            lastError = "Connection error (\(e["source"] as? String ?? "?"))"
+            // Transient and auto-recovering (e.g. a brief stream drop or a
+            // resource handover with the notification extension) — the live
+            // connection state is already shown in the account row, so don't
+            // interrupt with a modal alert.
+            NSLog("Gecko: connection error (%@)", e["source"] as? String ?? "?")
         case "conversations":
             if let list = e["list"] as? [[String: Any]] {
                 conversations = list.compactMap { c in

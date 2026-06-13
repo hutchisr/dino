@@ -73,6 +73,19 @@ public class Account : Object {
         this.resourcepart = get_random_resource();
     }
 
+    // Set a transient resource for this in-memory account WITHOUT persisting
+    // it. The Notification Service Extension uses this so it binds a distinct
+    // full JID and never conflicts with the main app's session. Assigns
+    // full_jid directly (not the resourcepart property) so the persistence
+    // notify handler doesn't fire.
+    public void set_ephemeral_resource(string resource) {
+        try {
+            full_jid = bare_jid.with_resource(resource);
+        } catch (InvalidJidError e) {
+            warning("Invalid ephemeral resource %s: %s", resource, e.message);
+        }
+    }
+
     public static string resource_prefix = "dino";
 
     private static string get_random_resource() {
