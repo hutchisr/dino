@@ -108,9 +108,16 @@ xcrun -sdk "$SDK" swiftc \
   -target "$TRIPLE" \
   -parse-as-library \
   -module-name NotificationService \
+  -import-objc-header "$HERE/bridge.h" \
+  $(printf -- '-Xcc %s ' $CFLAGS) -Xcc -I"$PREFIX/include" \
   -Xlinker -e -Xlinker _NSExtensionMain \
   $NSE_ENTS \
   "$ROOT"/nse/*.swift \
+  -L "$PREFIX/lib" -L "$PREFIX/lib/gio/modules" -L "$PREFIX/lib/dino/plugins" \
+  -ldinoios -ldino -lxmpp-vala -lqlite -lcrypto-vala \
+  -Xlinker -force_load -Xlinker "$PREFIX/lib/dino/plugins/omemo.a" \
+  -Xlinker -force_load -Xlinker "$PREFIX/lib/dino/plugins/http-files.a" \
+  $LIBS \
   -o "$APPEX/NotificationService"
 cp "$ROOT/nse/Info.plist" "$APPEX/Info.plist"
 codesign --force --sign - "$APPEX"

@@ -88,47 +88,157 @@ private static string esc(string? s) {
     return b.str;
 }
 
+// Boots the libdino service stack shared by the app and the Notification
+// Service Extension: database, stream interactor, OMEMO + HTTP-file plugins,
+// and the push module. Enabled accounts connect (and MAM-sync) automatically
+// once the stack is built.
+private static void boot_core() throws Error {
+    app = new Application();
+    // identify as Gecko (mobile client) to servers and other clients
+    Dino.ModuleManager.client_identity_name = "Gecko";
+    Dino.ModuleManager.client_identity_type = "phone";
+    Account.resource_prefix = "gecko";
+    // migrate pre-rename resources before restore() loads the accounts
+    foreach (Qlite.Row row in app.db.account.select()) {
+        string? res = row[app.db.account.resourcepart];
+        if (res != null && res.has_prefix("dino.")) {
+            app.db.account.update()
+                .with(app.db.account.id, "=", row[app.db.account.id])
+                .set(app.db.account.resourcepart, "gecko." + res.substring(5))
+                .perform();
+        }
+    }
+#if WITH_OMEMO
+    omemo_plugin = new Dino.Plugins.Omemo.Plugin();
+    omemo_plugin.registered(app);
+#endif
+#if WITH_HTTP_FILES
+    var http_files_plugin = new Dino.Plugins.HttpFiles.Plugin();
+    http_files_plugin.registered(app);
+#endif
+    app.stream_interactor.module_manager.initialize_account_modules.connect((account, list) => {
+        list.add(new Xmpp.Xep.PushNotifications.Module());
+    });
+}
+
+// --- Notification Service Extension fetch path ---------------------------
+// The NSE boots the stack, lets the enabled account connect and MAM-sync,
+// and collects the incoming messages that arrive within its time budget,
+// then returns a single {"type":"nse_result","messages":[...]} line. Each
+// message carries everything the extension needs to decide on-device:
+// conversation, sender, decrypted body, the conversation's effective notify
+// setting, and whether it mentions the user.
+
+private static StringBuilder? nse_msgs = null;
+private static bool nse_done = false;
+private static bool nse_first = true;
+private static uint nse_settle = 0;
+private static Gee.HashSet<string>? nse_seen = null;
+
+private static string nse_message_json(Dino.MessageItem mi, Conversation c) {
+    Message m = mi.message;
+    string from_display = Dino.get_participant_display_name(app.stream_interactor, c, m.from);
+    string conv_name = Dino.get_conversation_display_name(app.stream_interactor, c, null);
+    var effective = c.get_notification_setting(app.stream_interactor);
+    bool is_group = c.type_ == Conversation.Type.GROUPCHAT;
+    string body = display_body(m);
+    bool mentioned = false;
+    if (is_group) {
+        string? nick = c.nickname ?? c.account.localpart;
+        if (nick != null && nick != "") mentioned = body.down().contains(nick.down());
+    }
+    return "{\"conversation\":%d,\"conversation_name\":\"%s\",\"from\":\"%s\",\"body\":\"%s\",\"encrypted\":%s,\"notify\":\"%s\",\"groupchat\":%s,\"mentioned\":%s,\"time\":%lld}".printf(
+        c.id, esc(conv_name), esc(from_display), esc(body),
+        m.encryption != Encryption.NONE ? "true" : "false",
+        notify_name(effective), is_group ? "true" : "false",
+        mentioned ? "true" : "false", m.time.to_unix());
+}
+
+private static void nse_finish() {
+    if (nse_done) return;
+    nse_done = true;
+    if (nse_settle != 0) { Source.remove(nse_settle); nse_settle = 0; }
+    nse_msgs.append_c(']');
+    emit(@"{\"type\":\"nse_result\",\"messages\":$(nse_msgs.str)}");
+    if (app != null) app.quit();
+}
+
+public void nse_fetch(int timeout_ms, owned EventCb cb) {
+    event_cb = (owned) cb;
+    int hard_ms = timeout_ms;
+    new Thread<bool>("dino-nse", () => {
+        nse_msgs = new StringBuilder("[");
+        nse_done = false;
+        nse_first = true;
+        nse_settle = 0;
+        nse_seen = new Gee.HashSet<string>();
+        try {
+            boot_core();
+        } catch (Error e) {
+            emit(@"{\"type\":\"nse_result\",\"error\":\"$(esc(e.message))\",\"messages\":[]}");
+            return false;
+        }
+        emit("{\"type\":\"nse_diag\",\"stage\":\"booted\"}");
+        app.stream_interactor.connection_manager.connection_state_changed.connect((account, state) => {
+            emit(@"{\"type\":\"nse_diag\",\"stage\":\"conn\",\"state\":\"$(state_name(state))\"}");
+        });
+        app.stream_interactor.connection_manager.connection_error.connect((account, error) => {
+            emit(@"{\"type\":\"nse_diag\",\"stage\":\"conn_error\",\"source\":\"$(error.source)\"}");
+        });
+        app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).new_item.connect((item, conversation) => {
+            var mi = item as Dino.MessageItem;
+            if (mi == null) return;
+            Message m = mi.message;
+            if (m.direction != Message.DIRECTION_RECEIVED) return;
+            string body = display_body(m);
+            if (body.strip() == "") return;
+            // The same message can surface twice (offline delivery + MAM, or
+            // duplicate publishes), so dedupe on sender + time + body.
+            string key = "%s|%lld|%s".printf(m.from.to_string(), m.time.to_unix(), body);
+            if (nse_seen.contains(key)) return;
+            nse_seen.add(key);
+            if (!nse_first) nse_msgs.append_c(',');
+            nse_first = false;
+            nse_msgs.append(nse_message_json(mi, conversation));
+            // return shortly after the burst of MAM-synced messages settles
+            if (nse_settle != 0) Source.remove(nse_settle);
+            nse_settle = Timeout.add(2500, () => { nse_settle = 0; nse_finish(); return Source.REMOVE; });
+        });
+        // Connect enabled accounts explicitly: the app relies on the
+        // GApplication `startup` signal (-> restore) to do this, but that path
+        // doesn't drive the connection inside the extension, so trigger it
+        // ourselves once the loop is running.
+        Idle.add(() => {
+            int n = 0;
+            foreach (Account account in app.db.get_accounts()) {
+                if (account.enabled) {
+                    app.stream_interactor.connect_account(account);
+                    n++;
+                }
+            }
+            emit(@"{\"type\":\"nse_diag\",\"stage\":\"connect\",\"accounts\":$(n)}");
+            return Source.REMOVE;
+        });
+        Timeout.add(hard_ms, () => { nse_finish(); return Source.REMOVE; });
+        app.hold();
+        app.run();
+        return true;
+    });
+}
+
 public void start(owned EventCb cb) {
     event_cb = (owned) cb;
     new Thread<bool>("dino-main", () => {
         message("gecko: creating application");
         try {
-            app = new Application();
+            boot_core();
         } catch (Error e) {
             emit(@"{\"type\":\"fatal\",\"message\":\"$(esc(e.message))\"}");
             return false;
         }
-
         message("gecko: application created");
-        // identify as Gecko (mobile client) to servers and other clients
-        Dino.ModuleManager.client_identity_name = "Gecko";
-        Dino.ModuleManager.client_identity_type = "phone";
-        Account.resource_prefix = "gecko";
-        // migrate pre-rename resources before restore() loads the accounts
-        foreach (Qlite.Row row in app.db.account.select()) {
-            string? res = row[app.db.account.resourcepart];
-            if (res != null && res.has_prefix("dino.")) {
-                app.db.account.update()
-                    .with(app.db.account.id, "=", row[app.db.account.id])
-                    .set(app.db.account.resourcepart, "gecko." + res.substring(5))
-                    .perform();
-            }
-        }
-#if WITH_OMEMO
-        omemo_plugin = new Dino.Plugins.Omemo.Plugin();
-        omemo_plugin.registered(app);
-        message("gecko: omemo registered");
-#endif
-#if WITH_HTTP_FILES
-        var http_files_plugin = new Dino.Plugins.HttpFiles.Plugin();
-        http_files_plugin.registered(app);
-        message("gecko: http-files registered");
-#endif
 
         var si = app.stream_interactor;
-        si.module_manager.initialize_account_modules.connect((account, list) => {
-            list.add(new Xmpp.Xep.PushNotifications.Module());
-        });
         string? log_xmpp = Environment.get_variable("DINO_LOG_XMPP");
         if (log_xmpp != null) si.connection_manager.log_options = log_xmpp;
         si.connection_manager.connection_state_changed.connect((account, state) => {

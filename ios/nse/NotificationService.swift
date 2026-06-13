@@ -23,13 +23,61 @@ class NotificationService: UNNotificationServiceExtension {
         }
         self.bestAttempt = content
 
-        // Phase 2 will connect over XMPP, fetch the latest message via MAM,
-        // OMEMO-decrypt it, map it to a conversation, apply that conversation's
-        // notify setting (suppressing when muted, once the filtering
-        // entitlement lands), and enrich the alert with sender + preview —
-        // all reading from the shared App Group databases via NSEStore.
-        // For now the push is delivered unchanged.
-        contentHandler(content)
+        // Connect, MAM-sync, and OMEMO-decrypt the message(s) that triggered
+        // this push. Budget under the ~30s NSE limit so our callback wins the
+        // race against serviceExtensionTimeWillExpire.
+        NSEFetcher.fetch(timeoutMs: 24_000) { messages in
+            guard let latest = messages.last else {
+                // Couldn't fetch in time — leave the generic alert as-is.
+                Self.debug("fetch empty — delivering generic")
+                contentHandler(content)
+                return
+            }
+
+            if latest.isMuted {
+                // Phase 3 will drop this entirely (needs the filtering
+                // entitlement); until then, deliver the original generic alert
+                // rather than an enriched one for a muted conversation.
+                Self.debug("muted [\(latest.notify)] \(latest.conversationName)")
+                contentHandler(request.content)
+                return
+            }
+
+            if latest.isGroupchat {
+                content.title = latest.conversationName
+                content.body = "\(latest.sender): \(latest.body)"
+            } else {
+                content.title = latest.sender.isEmpty ? latest.conversationName : latest.sender
+                content.body = latest.body
+            }
+            if messages.count > 1 {
+                content.subtitle = "\(messages.count) new messages"
+            }
+            Self.debug("enriched (\(messages.count)) title=\(content.title) body=\(content.body)")
+            contentHandler(content)
+        }
+    }
+
+    /// Temporary verification breadcrumb (simulator banners show the static
+    /// payload, not our replacement) — removed once validated on device.
+    static func debug(_ s: String) {
+        guard let url = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: "group.me.anemoneya.gecko")?
+            .appendingPathComponent("nse-last.txt") else { return }
+        try? (s + "\n").data(using: .utf8)?.write(to: url)
+    }
+
+    /// Temporary append-only trace of every bridge line, for diagnosing the
+    /// connect/sync sequence on the simulator.
+    static func debugAppend(_ s: String) {
+        guard let url = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: "group.me.anemoneya.gecko")?
+            .appendingPathComponent("nse-trace.txt") else { return }
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile(); h.write((s + "\n").data(using: .utf8)!); try? h.close()
+        } else {
+            try? (s + "\n").data(using: .utf8)?.write(to: url)
+        }
     }
 
     override func serviceExtensionTimeWillExpire() {
