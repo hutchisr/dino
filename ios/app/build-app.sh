@@ -73,6 +73,50 @@ if [ -f "$HERE/AppIcon.png" ]; then
   sips -z 180 180 "$HERE/AppIcon.png" --out "$APP/AppIcon60x60@3x.png" >/dev/null
   sips -z 152 152 "$HERE/AppIcon.png" --out "$APP/AppIcon76x76@2x~ipad.png" >/dev/null
 fi
+
+# ---- Notification Service Extension ----
+# Decrypts/filters pushes on-device. An app-extension executable has no main()
+# of its own; its entry point is _NSExtensionMain (from Foundation) and the
+# principal class comes from the Info.plist. On the simulator its entitlements
+# (App Group) ride in a __TEXT,__entitlements section just like the host app.
+APPEX="$APP/PlugIns/NotificationService.appex"
+mkdir -p "$APPEX"
+NSE_ENTS=""
+if [ "$TARGET" = "sim-arm64" ]; then
+  cat > "$BUILD/nse-entitlements.plist" <<'EOF3'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>998J34UYP5.me.anemoneya.gecko.NotificationService</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>998J34UYP5</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.me.anemoneya.gecko</string>
+	</array>
+	<key>get-task-allow</key>
+	<true/>
+</dict>
+</plist>
+EOF3
+  NSE_ENTS="-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker $BUILD/nse-entitlements.plist"
+fi
+
+xcrun -sdk "$SDK" swiftc \
+  -target "$TRIPLE" \
+  -parse-as-library \
+  -module-name NotificationService \
+  -Xlinker -e -Xlinker _NSExtensionMain \
+  $NSE_ENTS \
+  "$ROOT"/nse/*.swift \
+  -o "$APPEX/NotificationService"
+cp "$ROOT/nse/Info.plist" "$APPEX/Info.plist"
+codesign --force --sign - "$APPEX"
+echo "built $APPEX"
+
+# Seal the host bundle last so its signature covers the embedded extension.
 codesign --force --sign - "$APP"
 echo "built $APP"
 
