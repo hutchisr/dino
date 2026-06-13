@@ -25,9 +25,11 @@ spec:
       labels:
         app: gecko-push-proxy
     spec:
+      imagePullSecrets:
+        - name: regcred
       containers:
         - name: proxy
-          image: gecko-push-proxy:latest   # replace with your registry path
+          image: lax.vultrcr.com/mercury/gecko-push-proxy:latest
           envFrom:
             - secretRef:
                 name: gecko-push
