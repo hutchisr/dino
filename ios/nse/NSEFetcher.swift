@@ -21,6 +21,21 @@ final class NSEFetcher {
         // decrypts, stores and ACKs the message so the server clears its
         // pending state (no re-push loop), and the app reads the stored result
         // (decrypted once). Relies on message dedup to avoid double-storing.
+        // Stable, per-install XMPP resource for the extension. Persisted once in
+        // App-Group defaults so it's the same across every NSE wake (a repeat
+        // wake then replaces its own server session instead of orphaning a new
+        // one), yet unique per install (so multiple installs don't kick each
+        // other). Distinct from the app's own "gecko.<hex>" resource.
+        let defaults = UserDefaults(suiteName: "group.me.anemoneya.gecko")
+        let nseResource: String
+        if let saved = defaults?.string(forKey: "nseResource") {
+            nseResource = saved
+        } else {
+            nseResource = "gecko-nse." + UUID().uuidString.prefix(8).lowercased()
+            defaults?.set(nseResource, forKey: "nseResource")
+        }
+        setenv("GECKO_NSE_RESOURCE", nseResource, 1)
+
         if let container = FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: "group.me.anemoneya.gecko") {
             setenv("XDG_DATA_HOME", container.appendingPathComponent("xdg-data").path, 1)
@@ -35,7 +50,6 @@ final class NSEFetcher {
     }
 
     fileprivate func deliver(_ json: String) {
-        NotificationService.debugAppend("evt " + json)   // temporary tracing
         guard !fired else { return }
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

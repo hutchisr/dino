@@ -18,11 +18,24 @@ struct DinoApp: App {
                 }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
+            switch phase {
+            case .active:
+                // Cancel any pending background-disconnect (quick toggle) and
+                // keep the live connection rather than churning it.
+                appDelegate.cancelBackgroundDisconnect()
                 PushRegistration.clearDelivered()
                 if model.ready && model.hasAccount {
                     DinoCore.shared.appForegrounded()
                 }
+            case .background:
+                // Cleanly disconnect (after a short grace delay) so iOS doesn't
+                // suspend us with an unacked message that the server would
+                // re-push on a loop.
+                if model.ready && model.hasAccount {
+                    appDelegate.scheduleBackgroundDisconnect()
+                }
+            default:
+                break
             }
         }
     }
@@ -477,17 +490,32 @@ struct ChatView: View {
     @State private var scrollHolder = ScrollViewHolder()
     @State private var viewerItem: ImageViewerItem?
 
-    /// Scrolls to the last message, then settles to the true content bottom
-    /// (the proxy anchor ignores the stack's bottom padding).
+    /// Scrolls to the last message, then settles to the true content bottom.
+    /// A LazyVStack only measures rows as they materialise, so tall rows below
+    /// the fold — e.g. a run of images, each up to ~280pt — keep growing
+    /// contentSize after the first scroll, and a single pass lands short. So we
+    /// re-pin across several frames until the content height stops growing.
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         if let last = model.messages[conversationId]?.last {
             proxy.scrollTo(last.id, anchor: .bottom)
         }
-        DispatchQueue.main.async {
-            if let sv = scrollHolder.view {
-                let y = max(-sv.adjustedContentInset.top,
-                            sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)
-                sv.setContentOffset(CGPoint(x: 0, y: y), animated: false)
+        DispatchQueue.main.async { pinToBottom(passesLeft: 12, lastHeight: -1) }
+    }
+
+    /// Repeatedly snaps the scroll view to its content bottom, re-reading
+    /// contentSize each frame, until the height settles (lazy rows / images
+    /// below the fold finished materialising) or we run out of passes.
+    private func pinToBottom(passesLeft: Int, lastHeight: CGFloat) {
+        guard passesLeft > 0, let sv = scrollHolder.view else { return }
+        let height = sv.contentSize.height
+        let y = max(-sv.adjustedContentInset.top,
+                    height - sv.bounds.height + sv.adjustedContentInset.bottom)
+        sv.setContentOffset(CGPoint(x: 0, y: y), animated: false)
+        // Keep correcting while the content is still growing; always give it a
+        // few passes first, since early heights underestimate lazy rows.
+        if height - lastHeight > 0.5 || passesLeft > 9 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
+                pinToBottom(passesLeft: passesLeft - 1, lastHeight: height)
             }
         }
     }
@@ -656,15 +684,9 @@ struct ChatView: View {
 
     private func scrollDownButton(proxy: ScrollViewProxy) -> some View {
         Button {
-            if let sv = scrollHolder.view {
-                let y = max(-sv.adjustedContentInset.top,
-                            sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)
-                sv.setContentOffset(CGPoint(x: 0, y: y), animated: true)
-            } else if let last = model.messages[conversationId]?.last {
-                withAnimation {
-                    proxy.scrollTo(last.id, anchor: .bottom)
-                }
-            }
+            // Reuse the settling scroll so tall image runs reach the true
+            // bottom instead of stopping at the underestimated contentSize.
+            scrollToBottom(proxy)
         } label: {
             Image(systemName: "chevron.down")
                 .font(.system(size: 17, weight: .semibold))

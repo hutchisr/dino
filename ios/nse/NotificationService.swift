@@ -38,9 +38,12 @@ class NotificationService: UNNotificationServiceExtension {
                 content.userInfo = info
             }
             if latest.isMuted {
-                // Suppression needs the filtering entitlement (pending); keep
-                // generic text for now, still tappable to the chat.
-                contentHandler(content)
+                // Suppress the banner entirely. With the filtering entitlement
+                // an empty UNNotificationContent silences the push; without it
+                // (un-granted device) iOS substitutes the original payload, so
+                // this degrades to the generic "New message" rather than a
+                // wrong banner.
+                contentHandler(UNNotificationContent())
                 return
             }
             if latest.isGroupchat {
@@ -54,28 +57,6 @@ class NotificationService: UNNotificationServiceExtension {
                 content.subtitle = "\(messages.count) new messages"
             }
             contentHandler(content)
-        }
-    }
-
-    /// Temporary verification breadcrumb (simulator banners show the static
-    /// payload, not our replacement) — removed once validated on device.
-    static func debug(_ s: String) {
-        guard let url = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: "group.me.anemoneya.gecko")?
-            .appendingPathComponent("nse-last.txt") else { return }
-        try? (s + "\n").data(using: .utf8)?.write(to: url)
-    }
-
-    /// Temporary append-only trace of every bridge line, for diagnosing the
-    /// connect/sync sequence on the simulator.
-    static func debugAppend(_ s: String) {
-        guard let url = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: "group.me.anemoneya.gecko")?
-            .appendingPathComponent("nse-trace.txt") else { return }
-        if let h = try? FileHandle(forWritingTo: url) {
-            h.seekToEndOfFile(); h.write((s + "\n").data(using: .utf8)!); try? h.close()
-        } else {
-            try? (s + "\n").data(using: .utf8)?.write(to: url)
         }
     }
 

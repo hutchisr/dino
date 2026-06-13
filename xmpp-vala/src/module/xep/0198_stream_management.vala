@@ -7,6 +7,13 @@ public const string NS_URI = "urn:xmpp:sm:3";
 public class Module : XmppStreamNegotiationModule, WriteNodeFunc {
     public static ModuleIdentity<Module> IDENTITY = new ModuleIdentity<Module>(NS_URI, "0198_stream_management");
 
+    // When false, the stream enables SM without requesting resumption. The iOS
+    // notification extension sets this so the server never hibernates its
+    // short-lived session — a hibernated session holds the delivered message
+    // unacked and re-pushes it forever (the "New Message" loop). Process-global:
+    // the extension runs in its own process, so this never affects the app.
+    public static bool request_resumption = true;
+
     public int h_inbound = 0;
     public int h_outbound = 0;
 
@@ -139,7 +146,8 @@ public class Module : XmppStreamNegotiationModule, WriteNodeFunc {
 
     private void check_enable(XmppStream stream) {
         if (stream_has_sm_feature(stream) && session_id == null) {
-            StanzaNode node = new StanzaNode.build("enable", NS_URI).add_self_xmlns().put_attribute("resume", "true");
+            StanzaNode node = new StanzaNode.build("enable", NS_URI).add_self_xmlns();
+            if (request_resumption) node.put_attribute("resume", "true");
             write_node.begin(stream, node);
             stream.add_flag(new Flag());
             h_outbound = 0;
@@ -196,6 +204,17 @@ public class Module : XmppStreamNegotiationModule, WriteNodeFunc {
     private void send_ack(XmppStream stream) {
         StanzaNode node = new StanzaNode.build("a", NS_URI).add_self_xmlns().put_attribute("h", h_inbound.to_string());
         write_node.begin(stream, node);
+    }
+
+    // Synchronously flush an ack of everything received so far and wait for it
+    // to hit the socket. Used before a deliberate disconnect (e.g. the iOS
+    // notification extension) so the server marks the delivered messages as
+    // acknowledged and stops re-pushing them. Must run before the stream's
+    // cancellable is cancelled by disconnect().
+    public async void flush_ack(XmppStream stream) {
+        if (session_id == null) return;
+        StanzaNode node = new StanzaNode.build("a", NS_URI).add_self_xmlns().put_attribute("h", h_inbound.to_string());
+        yield write_node(stream, node);
     }
 
     private void handle_ack(XmppStream stream, StanzaNode node) {

@@ -98,6 +98,16 @@ private static void boot_core() throws Error {
     Dino.ModuleManager.client_identity_name = "Gecko";
     Dino.ModuleManager.client_identity_type = "phone";
     Account.resource_prefix = "gecko";
+    // Never request XEP-0198 resumption on iOS. The app process is killed when
+    // backgrounded, losing the in-memory SM session id, so resumption can never
+    // actually resume — instead each launch leaves a hibernated "ghost" session
+    // on the server (resume=true) that holds the account's presence/queue and
+    // fires phantom `c2s_session_pending` push notifications forever. Worse, the
+    // next launch's fresh bind of the same resource conflicts with the ghost,
+    // gets rejected, and rotates to a new random resource (more ghosts). With
+    // resumption off, sessions terminate cleanly on kill: no ghosts, no
+    // rejection, stable resource. Offline messages still arrive via MAM + push.
+    Xmpp.Xep.StreamManagement.Module.request_resumption = false;
     // migrate pre-rename resources before restore() loads the accounts
     foreach (Qlite.Row row in app.db.account.select()) {
         string? res = row[app.db.account.resourcepart];
@@ -154,12 +164,79 @@ private static string nse_message_json(Dino.MessageItem mi, Conversation c) {
         mentioned ? "true" : "false", m.time.to_unix());
 }
 
+// When the NSE's live fetch collected nothing, the triggering message was
+// almost always already in the shared DB — the backgrounded-but-still-connected
+// app received it inline (so ContentItemStore.new_item never re-fired here), or
+// a duplicate push already handled it. Fall back to the most recent RECEIVED
+// message across conversations so the extension can still classify it (and, for
+// a muted conversation, suppress the banner instead of leaking a generic one).
+// Gated on recency: a stale latest message means this push doesn't correspond
+// to anything new, so we leave the result empty (generic banner) rather than
+// resurrecting an old message as a notification.
+private const int64 NSE_FALLBACK_MAX_AGE_SEC = 600;
+private static void nse_append_latest_received() {
+    int64 now = GLib.get_real_time() / 1000000;
+    Dino.MessageItem? best_mi = null;
+    Conversation? best_conv = null;
+    int64 best_time = 0;
+    var conv_mgr = app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY);
+    var item_store = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY);
+    var chat_interaction = app.stream_interactor.get_module(Dino.ChatInteraction.IDENTITY);
+    foreach (Conversation c in conv_mgr.get_active_conversations()) {
+        // Only conversations with unread messages — a read conversation means
+        // the user already saw it, so this push isn't something to surface.
+        if (chat_interaction.get_num_unread(c) <= 0) continue;
+        var items = item_store.get_n_latest(c, 1);
+        foreach (var item in items) {
+            var mi = item as Dino.MessageItem;
+            if (mi == null) continue;
+            Message m = mi.message;
+            if (m.direction != Message.DIRECTION_RECEIVED) continue;
+            if (display_body(m).strip() == "") continue;
+            int64 t = m.time.to_unix();
+            if (now - t > NSE_FALLBACK_MAX_AGE_SEC) continue;
+            if (t > best_time) { best_time = t; best_mi = mi; best_conv = c; }
+        }
+    }
+    if (best_mi != null && best_conv != null) {
+        if (!nse_first) nse_msgs.append_c(',');
+        nse_first = false;
+        nse_msgs.append(nse_message_json(best_mi, best_conv));
+    }
+}
+
 private static void nse_finish() {
     if (nse_done) return;
     nse_done = true;
     if (nse_settle != 0) { Source.remove(nse_settle); nse_settle = 0; }
+    if (nse_first) nse_append_latest_received();
     nse_msgs.append_c(']');
     emit(@"{\"type\":\"nse_result\",\"messages\":$(nse_msgs.str)}");
+    // Tear the XMPP session down cleanly before quitting: ack everything we
+    // received (XEP-0198) so the server clears its pending-push queue, then
+    // send unavailable presence + close the stream. An abrupt app.quit() left
+    // the delivered message unacked, so xmpp.is re-queued and re-pushed it
+    // forever — the "New Message" loop.
+    nse_shutdown.begin();
+}
+
+private static async void nse_shutdown() {
+    try {
+        var cm = app.stream_interactor.connection_manager;
+        foreach (Account account in app.db.get_accounts()) {
+            if (!account.enabled) continue;
+            Xmpp.XmppStream? stream = cm.get_stream(account);
+            if (stream != null) {
+                var sm = stream.get_module(Xmpp.Xep.StreamManagement.Module.IDENTITY);
+                if (sm != null) {
+                    try { yield sm.flush_ack(stream); } catch (Error e) {}
+                }
+            }
+            yield cm.disconnect_account(account);
+        }
+    } catch (Error e) {
+        warning("nse shutdown error: %s", e.message);
+    }
     if (app != null) app.quit();
 }
 
@@ -172,19 +249,18 @@ public void nse_fetch(int timeout_ms, owned EventCb cb) {
         nse_first = true;
         nse_settle = 0;
         nse_seen = new Gee.HashSet<string>();
+        // Don't request XEP-0198 resumption: the extension's session is
+        // short-lived, and a resumable (hibernated) session left on the server
+        // re-pushes its held message forever. Without resumption the session
+        // ends on disconnect and any undelivered message falls back to normal
+        // offline storage, which pushes once rather than on a loop.
+        Xmpp.Xep.StreamManagement.Module.request_resumption = false;
         try {
             boot_core();
         } catch (Error e) {
             emit(@"{\"type\":\"nse_result\",\"error\":\"$(esc(e.message))\",\"messages\":[]}");
             return false;
         }
-        emit("{\"type\":\"nse_diag\",\"stage\":\"booted\"}");
-        app.stream_interactor.connection_manager.connection_state_changed.connect((account, state) => {
-            emit(@"{\"type\":\"nse_diag\",\"stage\":\"conn\",\"state\":\"$(state_name(state))\"}");
-        });
-        app.stream_interactor.connection_manager.connection_error.connect((account, error) => {
-            emit(@"{\"type\":\"nse_diag\",\"stage\":\"conn_error\",\"source\":\"$(error.source)\"}");
-        });
         app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).new_item.connect((item, conversation) => {
             var mi = item as Dino.MessageItem;
             if (mi == null) return;
@@ -212,17 +288,30 @@ public void nse_fetch(int timeout_ms, owned EventCb cb) {
             int n = 0;
             foreach (Account account in app.db.get_accounts()) {
                 if (account.enabled) {
-                    // Bind a distinct resource so the extension's connection
-                    // never collides with the app's session (which would kick
-                    // one off with a stream conflict).
-                    account.set_ephemeral_resource("gecko-nse.%x".printf(Random.next_int()));
+                    // Resource was already set to the stable "gecko-nse" before
+                    // app.run() (so restore() bound it correctly); this explicit
+                    // connect is a backstop in case restore() didn't fire.
                     app.stream_interactor.connect_account(account);
                     n++;
                 }
             }
-            emit(@"{\"type\":\"nse_diag\",\"stage\":\"connect\",\"accounts\":$(n)}");
             return Source.REMOVE;
         });
+        // Force a STABLE, per-install, app-distinct resource BEFORE app.run()
+        // fires the `startup` signal -> restore() -> add_connection(), which
+        // would otherwise bind with the db-stored (and periodically
+        // regenerated) "gecko.<hex>" resource. A fresh random resource per wake
+        // left a new server-side session each time; with resume/push that
+        // orphans a push-enabled session that re-pushes forever. The resource
+        // must be STABLE across wakes (so a repeat wake resource-conflict-
+        // *replaces* its own previous session instead of orphaning a new one)
+        // and UNIQUE per install (so multiple installs' extensions don't kick
+        // each other). Swift hands us a per-install id via GECKO_NSE_RESOURCE.
+        // db.get_accounts() returns cached instances, so restore() sees these.
+        string nse_resource = Environment.get_variable("GECKO_NSE_RESOURCE") ?? "gecko-nse";
+        foreach (Account account in app.db.get_accounts()) {
+            if (account.enabled) account.set_ephemeral_resource(nse_resource);
+        }
         Timeout.add(hard_ms, () => { nse_finish(); return Source.REMOVE; });
         app.hold();
         app.run();
@@ -843,12 +932,51 @@ public void set_notify(int conversation_id, string setting) {
 
 // Called when the app returns to the foreground: iOS freezes the process
 // and kills sockets, so reconnect promptly instead of waiting for the
-// regular retry cadence.
+// regular retry cadence. connect_account re-establishes a fresh connection
+// for any account the background handler cleanly disconnected (it was unset
+// from the manager), and falls back to check_reconnect for ones still managed.
 public void app_foregrounded() {
     Idle.add(() => {
+        foreach (Account account in app.db.get_accounts()) {
+            if (account.enabled) app.stream_interactor.connect_account(account);
+        }
         app.stream_interactor.connection_manager.resume_reconnect();
         return Source.REMOVE;
     });
+}
+
+// Called when the app enters the background. iOS will suspend the process
+// shortly, freezing the XMPP socket with any just-received message still
+// unacked — the server then treats that c2s session as pending and re-pushes
+// the message every couple of seconds (the same mechanism as the old phantom
+// loop, but for a real message; mod_push_keepalive keeps it alive for hours).
+// Tear the session down cleanly instead: flush XEP-0198 acks so nothing is
+// pending, then disconnect (unavailable presence + close). With resumption
+// disabled the session ends outright (no hibernated ghost), so the server
+// delivers subsequent messages to the NSE's session (which acks them) or to
+// offline storage — one push per message. The app reconnects on foreground.
+public void app_backgrounded() {
+    app_disconnect_clean.begin();
+}
+
+private static async void app_disconnect_clean() {
+    try {
+        var cm = app.stream_interactor.connection_manager;
+        foreach (Account account in app.db.get_accounts()) {
+            if (!account.enabled) continue;
+            Xmpp.XmppStream? stream = cm.get_stream(account);
+            if (stream != null) {
+                var sm = stream.get_module(Xmpp.Xep.StreamManagement.Module.IDENTITY);
+                if (sm != null) {
+                    try { yield sm.flush_ack(stream); } catch (Error e) {}
+                }
+            }
+            yield cm.disconnect_account(account);
+        }
+    } catch (Error e) {
+        emit(@"{\"type\":\"app_background_error\",\"msg\":\"$(esc(e.message))\"}");
+    }
+    emit("{\"type\":\"app_backgrounded\"}");
 }
 
 public void request_account_details() {

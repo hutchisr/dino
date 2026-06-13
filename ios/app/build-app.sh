@@ -96,6 +96,12 @@ if [ "$TARGET" = "sim-arm64" ]; then
 	<array>
 		<string>group.me.anemoneya.gecko</string>
 	</array>
+	<!-- Suppress muted-conversation banners. This is a managed entitlement that
+	     Apple must grant before it works on a real device; the simulator does
+	     not validate entitlements against a provisioning profile, so we can
+	     exercise the suppression path here while the request is pending. -->
+	<key>com.apple.developer.usernotifications.filtering</key>
+	<true/>
 	<key>get-task-allow</key>
 	<true/>
 </dict>

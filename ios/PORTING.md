@@ -143,6 +143,18 @@ works on any server and also unlocks decrypted previews.
 1. NSE Phase 2/3 (above); dedupe the occasional duplicate publish.
 2. Calls (plugin-rtp/ice via GStreamer's official iOS binaries).
 3. CI for the cross-compile.
+4. **(TBD) XEP-0198 resumption across launches.** We currently disable SM
+   resumption on iOS (`request_resumption = false` in `boot_core`) because the
+   app/NSE process dies on backgrounding, losing the in-memory SM state — so
+   `resume=true` only manufactured hibernated "ghost" sessions that fired
+   phantom pushes forever. The optimization we gave up: skipping a re-login +
+   MAM re-sync on every reconnect. To get it back the right way (Monal-style),
+   persist the SM session state — `session_id` (previd), `h_inbound`/`h_outbound`,
+   and the unacked outbound queue from `0198_stream_management.vala` — to the
+   shared App Group, send `<resume previd h>` on launch (fall back to fresh bind
+   on `<failed/>`), and add a process lock (Monal uses `flock`) so the app and
+   the NSE never try to own/resume the same stream at once. Only worth it if MAM
+   re-sync proves slow or battery-costly. See memory `gecko-push-filtering`.
 
 Done beyond the basics: contact management (roster, presence,
 subscription requests), sign in/out with stable OMEMO identity, avatars,

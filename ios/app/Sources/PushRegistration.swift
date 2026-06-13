@@ -30,6 +30,51 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         return true
     }
 
+    // --- Background clean-disconnect coordination ---
+    // On entering the background we cleanly disconnect (flush XEP-0198 acks +
+    // close) so iOS doesn't suspend us with an unacked message that the server
+    // would re-push on a loop. A short grace delay avoids churning the
+    // connection on a quick background→foreground toggle (e.g. a glance at
+    // Control Center): if we return to the foreground first, the disconnect is
+    // cancelled and the live connection is kept.
+    private var pendingDisconnect: DispatchWorkItem?
+    private var bgTask: UIBackgroundTaskIdentifier = .invalid
+    private let backgroundGrace: TimeInterval = 3
+
+    func scheduleBackgroundDisconnect() {
+        pendingDisconnect?.cancel()
+        beginBgTaskIfNeeded()
+        let work = DispatchWorkItem { [weak self] in
+            DinoCore.shared.appBackgrounded()
+            self?.pendingDisconnect = nil
+            // Let the flush-ack + stream close finish before releasing the
+            // background assertion that keeps the process alive to do it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self?.endBgTask() }
+        }
+        pendingDisconnect = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + backgroundGrace, execute: work)
+    }
+
+    func cancelBackgroundDisconnect() {
+        pendingDisconnect?.cancel()
+        pendingDisconnect = nil
+        endBgTask()
+    }
+
+    private func beginBgTaskIfNeeded() {
+        guard bgTask == .invalid else { return }
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "gecko-clean-disconnect") { [weak self] in
+            self?.endBgTask()
+        }
+    }
+
+    private func endBgTask() {
+        if bgTask != .invalid {
+            UIApplication.shared.endBackgroundTask(bgTask)
+            bgTask = .invalid
+        }
+    }
+
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
