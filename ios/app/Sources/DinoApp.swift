@@ -123,14 +123,19 @@ struct ConversationListView: View {
             }
             if let account = model.accounts.first {
                 Section("Account") {
-                    HStack {
-                        Circle()
-                            .fill(account.state == "CONNECTED" ? .green : .orange)
-                            .frame(width: 10, height: 10)
-                        Text(account.id).font(.caption)
-                        Spacer()
-                        Text(account.state.lowercased()).font(.caption2).foregroundStyle(.secondary)
+                    Button {
+                        showAccountSettings = true
+                    } label: {
+                        HStack {
+                            Circle()
+                                .fill(account.state == "CONNECTED" ? .green : .orange)
+                                .frame(width: 10, height: 10)
+                            Text(account.id).font(.caption)
+                            Spacer()
+                            Text(account.state.lowercased()).font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
+                    .buttonStyle(.plain)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
                             model.signOut()
@@ -464,6 +469,7 @@ struct ChatView: View {
     @State private var editing: ChatMessage?
     @State private var replyingTo: ChatMessage?
     @State private var actionMsg: ChatMessage?
+    @State private var showFullTitle = false
     @State private var isAtBottom = true
     @State private var scrollHolder = ScrollViewHolder()
     @State private var viewerItem: ImageViewerItem?
@@ -496,8 +502,266 @@ struct ChatView: View {
         model.conversations.first { $0.id == conversationId }
     }
 
-    private var defaultNotifyLabel: String {
-        conversation?.isGroupchat == true ? "mentions" : "on"
+    private var chatMessages: [ChatMessage] {
+        model.messages[conversationId] ?? []
+    }
+
+    private var isGroupChat: Bool {
+        conversation?.isGroupchat == true
+    }
+
+    @ViewBuilder
+    private var composerArea: some View {
+        if model.chatStates[conversationId] == "composing" {
+            HStack {
+                Text("typing…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 2)
+                Spacer()
+            }
+        }
+        Divider()
+        if editing != nil {
+            HStack {
+                Image(systemName: "pencil").font(.caption)
+                Text("Editing message").font(.caption)
+                Spacer()
+                Button {
+                    editing = nil
+                    draft = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+        }
+        if let replyingTo {
+            HStack {
+                Image(systemName: "arrowshape.turn.up.left").font(.caption)
+                VStack(alignment: .leading) {
+                    Text("Replying to \(replyingTo.fromDisplay.isEmpty ? replyingTo.from : replyingTo.fromDisplay)")
+                        .font(.caption.bold())
+                    Text(replyingTo.isFile ? replyingTo.fileName : replyingTo.body)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    self.replyingTo = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+        }
+        HStack {
+            Menu {
+                Button {
+                    showPhotoPicker = true
+                } label: {
+                    Label("Photo", systemImage: "photo")
+                }
+                Button {
+                    showFileImporter = true
+                } label: {
+                    Label("File", systemImage: "doc")
+                }
+            } label: {
+                Image(systemName: "plus.circle").font(.title3)
+            }
+            TextField("Message", text: $draft, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: draft) { value in
+                    if editing == nil {
+                        model.setTyping(conversationId, !value.isEmpty)
+                    }
+                }
+            Button {
+                if let editing {
+                    model.correctMessage(conversationId, item: editing.id, body: draft)
+                    self.editing = nil
+                } else {
+                    model.send(conversationId, draft, replyTo: replyingTo?.id ?? 0)
+                    replyingTo = nil
+                }
+                draft = ""
+            } label: {
+                Image(systemName: editing != nil ? "checkmark.circle.fill" : "paperplane.fill")
+            }
+            .disabled(draft.isEmpty)
+        }
+        .padding(10)
+    }
+
+    private func reactionSheet(for m: ChatMessage) -> some View {
+        ReactionSheet(
+            msg: m,
+            onReact: { emoji in
+                let mine = m.reactions.first { $0.emoji == emoji }?.me ?? false
+                model.setReaction(conversationId, item: m.id, emoji: emoji, add: !mine)
+            },
+            onReply: {
+                editing = nil
+                replyingTo = m
+            },
+            onEdit: m.editable ? {
+                replyingTo = nil
+                editing = m
+                draft = m.body
+            } : nil)
+    }
+
+    private var messageStack: some View {
+        LazyVStack(spacing: 6) {
+            ForEach(chatMessages.indices, id: \.self) { index in
+                messageRow(index: index)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(GeometryReader { g in
+            Color.clear.preference(key: ChatBottomDistanceKey.self,
+                                   value: g.frame(in: .named("chatScroll")).maxY)
+        })
+        .background(ScrollViewGrabber(holder: scrollHolder))
+    }
+
+    private func scrollContent(outer: GeometryProxy, proxy: ScrollViewProxy) -> some View {
+        ScrollView {
+            messageStack
+        }
+        .coordinateSpace(name: "chatScroll")
+        .modifier(BottomTracking(isAtBottom: $isAtBottom, viewportHeight: outer.size.height))
+        .overlay(alignment: .bottomTrailing) {
+            if !isAtBottom {
+                scrollDownButton(proxy: proxy)
+            }
+        }
+        .onAppear {
+            // wait a tick so the lazy rows exist before scrolling
+            DispatchQueue.main.async { scrollToBottom(proxy) }
+        }
+        .onChange(of: model.messages[conversationId]?.count ?? 0) { _ in
+            DispatchQueue.main.async { scrollToBottom(proxy) }
+        }
+    }
+
+    private func scrollDownButton(proxy: ScrollViewProxy) -> some View {
+        Button {
+            if let sv = scrollHolder.view {
+                let y = max(-sv.adjustedContentInset.top,
+                            sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)
+                sv.setContentOffset(CGPoint(x: 0, y: y), animated: true)
+            } else if let last = model.messages[conversationId]?.last {
+                withAnimation {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.primary)
+                .frame(width: 44, height: 44)
+        }
+        .glassEffect(.regular.interactive(), in: .circle)
+        .padding(.trailing, 14)
+        .padding(.bottom, 10)
+    }
+
+    @ViewBuilder
+    private func messageRow(index: Int) -> some View {
+        let msgs = chatMessages
+        let msg = msgs[index]
+        let isGroup = isGroupChat
+        let newDay = index == 0 || !Calendar.current.isDate(msg.time, inSameDayAs: msgs[index - 1].time)
+        if newDay {
+            Text(Self.dayLabel(msg.time))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Color(.secondarySystemBackground)))
+                .padding(.vertical, 6)
+        }
+        MessageBubble(conversationId: conversationId, msg: msg,
+                      inGroupchat: isGroup,
+                      showSender: isGroup && msg.direction == "in" &&
+                          (newDay || index == 0 || msgs[index - 1].from != msg.from),
+                      onEdit: { m in
+            replyingTo = nil
+            editing = m
+            draft = m.body
+        }, onReply: { m in
+            editing = nil
+            replyingTo = m
+        }, onImageTap: { path in
+            viewerItem = ImageViewerItem(id: path)
+        }, onActions: { m in
+            actionMsg = m
+        })
+        .id(msg.id)
+    }
+
+    private var titleButton: some View {
+        let name: String = conversation?.name ?? "Chat"
+        return Button {
+            showFullTitle = true
+        } label: {
+            Text(name)
+                .font(.headline)
+                .lineLimit(1)
+                .foregroundStyle(Color.primary)
+        }
+    }
+
+    private var bellMenu: some View {
+        Menu {
+            notifyOption("All messages", "on")
+            if isGroupChat {
+                notifyOption("Only when mentioned", "highlight")
+            }
+            notifyOption("Off", "off")
+        } label: {
+            Image(systemName: bellIcon)
+        }
+    }
+
+    private var occupantsButton: some View {
+        Button {
+            model.requestOccupants(conversationId)
+            showOccupants = true
+        } label: {
+            Image(systemName: "person.2")
+        }
+    }
+
+    private var lockButton: some View {
+        let omemoOn: Bool = conversation?.encryption == "OMEMO"
+        return Button {
+            model.setEncryption(conversationId, omemo: !omemoOn)
+        } label: {
+            Image(systemName: omemoOn ? "lock.fill" : "lock.open")
+                .foregroundStyle(omemoOn ? Color.green : Color.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func notifyOption(_ title: String, _ value: String) -> some View {
+        let effective = conversation?.notifyEffective ?? "on"
+        Button {
+            model.setNotify(conversationId, value)
+        } label: {
+            if effective == value {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
+            }
+        }
     }
 
     private var bellIcon: String {
@@ -511,167 +775,11 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             GeometryReader { outer in
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 6) {
-                        let msgs = model.messages[conversationId] ?? []
-                        let isGroup = conversation?.isGroupchat == true
-                        ForEach(Array(msgs.enumerated()), id: \.element.id) { index, msg in
-                            let newDay = index == 0 || !Calendar.current.isDate(msg.time, inSameDayAs: msgs[index - 1].time)
-                            if newDay {
-                                Text(Self.dayLabel(msg.time))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 3)
-                                    .background(Capsule().fill(Color(.secondarySystemBackground)))
-                                    .padding(.vertical, 6)
-                            }
-                            MessageBubble(conversationId: conversationId, msg: msg,
-                                          inGroupchat: isGroup,
-                                          showSender: isGroup && msg.direction == "in" &&
-                                              (newDay || index == 0 || msgs[index - 1].from != msg.from),
-                                          onEdit: { m in
-                                replyingTo = nil
-                                editing = m
-                                draft = m.body
-                            }, onReply: { m in
-                                editing = nil
-                                replyingTo = m
-                            }, onImageTap: { path in
-                                viewerItem = ImageViewerItem(id: path)
-                            }, onActions: { m in
-                                actionMsg = m
-                            })
-                            .id(msg.id)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(GeometryReader { g in
-                        Color.clear.preference(key: ChatBottomDistanceKey.self,
-                                               value: g.frame(in: .named("chatScroll")).maxY)
-                    })
-                    .background(ScrollViewGrabber(holder: scrollHolder))
-                }
-                .coordinateSpace(name: "chatScroll")
-                .modifier(BottomTracking(isAtBottom: $isAtBottom, viewportHeight: outer.size.height))
-                .overlay(alignment: .bottomTrailing) {
-                    if !isAtBottom {
-                        Button {
-                            if let sv = scrollHolder.view {
-                                let y = max(-sv.adjustedContentInset.top,
-                                            sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)
-                                sv.setContentOffset(CGPoint(x: 0, y: y), animated: true)
-                            } else if let last = model.messages[conversationId]?.last {
-                                withAnimation {
-                                    proxy.scrollTo(last.id, anchor: .bottom)
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Color.primary)
-                                .frame(width: 44, height: 44)
-                        }
-                        .glassEffect(.regular.interactive(), in: .circle)
-                        .padding(.trailing, 14)
-                        .padding(.bottom, 10)
-                    }
-                }
-                .onAppear {
-                    // wait a tick so the lazy rows exist before scrolling
-                    DispatchQueue.main.async { scrollToBottom(proxy) }
-                }
-                .onChange(of: model.messages[conversationId]?.count ?? 0) { _ in
-                    DispatchQueue.main.async { scrollToBottom(proxy) }
+                ScrollViewReader { proxy in
+                    scrollContent(outer: outer, proxy: proxy)
                 }
             }
-            }
-            if model.chatStates[conversationId] == "composing" {
-                HStack {
-                    Text("typing…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 2)
-                    Spacer()
-                }
-            }
-            Divider()
-            if editing != nil {
-                HStack {
-                    Image(systemName: "pencil").font(.caption)
-                    Text("Editing message").font(.caption)
-                    Spacer()
-                    Button {
-                        editing = nil
-                        draft = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 6)
-            }
-            if let replyingTo {
-                HStack {
-                    Image(systemName: "arrowshape.turn.up.left").font(.caption)
-                    VStack(alignment: .leading) {
-                        Text("Replying to \(replyingTo.fromDisplay.isEmpty ? replyingTo.from : replyingTo.fromDisplay)")
-                            .font(.caption.bold())
-                        Text(replyingTo.isFile ? replyingTo.fileName : replyingTo.body)
-                            .font(.caption)
-                            .lineLimit(1)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button {
-                        self.replyingTo = nil
-                    } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 6)
-            }
-            HStack {
-                Menu {
-                    Button {
-                        showPhotoPicker = true
-                    } label: {
-                        Label("Photo", systemImage: "photo")
-                    }
-                    Button {
-                        showFileImporter = true
-                    } label: {
-                        Label("File", systemImage: "doc")
-                    }
-                } label: {
-                    Image(systemName: "plus.circle").font(.title3)
-                }
-                TextField("Message", text: $draft, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: draft) { value in
-                        if editing == nil {
-                            model.setTyping(conversationId, !value.isEmpty)
-                        }
-                    }
-                Button {
-                    if let editing {
-                        model.correctMessage(conversationId, item: editing.id, body: draft)
-                        self.editing = nil
-                    } else {
-                        model.send(conversationId, draft, replyTo: replyingTo?.id ?? 0)
-                        replyingTo = nil
-                    }
-                    draft = ""
-                } label: {
-                    Image(systemName: editing != nil ? "checkmark.circle.fill" : "paperplane.fill")
-                }
-                .disabled(draft.isEmpty)
-            }
-            .padding(10)
+            composerArea
         }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker { url in
@@ -692,52 +800,15 @@ struct ChatView: View {
         .navigationTitle(conversation?.name ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            Menu {
-                let current = conversation?.notify ?? "default"
-                let isGroup = conversation?.isGroupchat == true
-                Button {
-                    model.setNotify(conversationId, "default")
-                } label: {
-                    if current == "default" {
-                        Label("Default (\(defaultNotifyLabel))", systemImage: "checkmark")
-                    } else {
-                        Text("Default (\(defaultNotifyLabel))")
-                    }
-                }
-                Button {
-                    model.setNotify(conversationId, "on")
-                } label: {
-                    current == "on" ? Label("All messages", systemImage: "checkmark") : Label("All messages", systemImage: "")
-                }
-                if isGroup {
-                    Button {
-                        model.setNotify(conversationId, "highlight")
-                    } label: {
-                        current == "highlight" ? Label("Only when mentioned", systemImage: "checkmark") : Label("Only when mentioned", systemImage: "")
-                    }
-                }
-                Button {
-                    model.setNotify(conversationId, "off")
-                } label: {
-                    current == "off" ? Label("Off", systemImage: "checkmark") : Label("Off", systemImage: "")
-                }
-            } label: {
-                Image(systemName: bellIcon)
+            ToolbarItem(placement: .principal) {
+                titleButton
             }
-            if conversation?.isGroupchat == true {
-                Button {
-                    model.requestOccupants(conversationId)
-                    showOccupants = true
-                } label: {
-                    Image(systemName: "person.2")
+            ToolbarItemGroup(placement: .primaryAction) {
+                bellMenu
+                if isGroupChat {
+                    occupantsButton
                 }
-            }
-            Button {
-                let omemoOn = conversation?.encryption == "OMEMO"
-                model.setEncryption(conversationId, omemo: !omemoOn)
-            } label: {
-                Image(systemName: conversation?.encryption == "OMEMO" ? "lock.fill" : "lock.open")
-                    .foregroundStyle(conversation?.encryption == "OMEMO" ? .green : .secondary)
+                lockButton
             }
         }
         .sheet(isPresented: $showOccupants) {
@@ -747,22 +818,13 @@ struct ChatView: View {
         .fullScreenCover(item: $viewerItem) { item in
             ImageViewer(path: item.path)
         }
+        .alert(conversation?.name ?? "Chat", isPresented: $showFullTitle) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(conversation?.jid ?? "")
+        }
         .sheet(item: $actionMsg) { m in
-            ReactionSheet(
-                msg: m,
-                onReact: { emoji in
-                    let mine = m.reactions.first { $0.emoji == emoji }?.me ?? false
-                    model.setReaction(conversationId, item: m.id, emoji: emoji, add: !mine)
-                },
-                onReply: {
-                    editing = nil
-                    replyingTo = m
-                },
-                onEdit: m.editable ? {
-                    replyingTo = nil
-                    editing = m
-                    draft = m.body
-                } : nil)
+            reactionSheet(for: m)
         }
         .onChange(of: model.viewerRequest) { path in
             if let path {
