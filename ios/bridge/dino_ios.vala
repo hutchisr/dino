@@ -160,8 +160,8 @@ private static string nse_message_json(Dino.MessageItem mi, Conversation c) {
         string? nick = c.nickname ?? c.account.localpart;
         if (nick != null && nick != "") mentioned = body.down().contains(nick.down());
     }
-    return "{\"conversation\":%d,\"conversation_name\":\"%s\",\"from\":\"%s\",\"body\":\"%s\",\"encrypted\":%s,\"notify\":\"%s\",\"groupchat\":%s,\"mentioned\":%s,\"time\":%lld}".printf(
-        c.id, esc(conv_name), esc(from_display), esc(body),
+    return "{\"conversation\":%d,\"jid\":\"%s\",\"conversation_name\":\"%s\",\"from\":\"%s\",\"body\":\"%s\",\"encrypted\":%s,\"notify\":\"%s\",\"groupchat\":%s,\"mentioned\":%s,\"time\":%lld}".printf(
+        c.id, esc(c.counterpart.to_string()), esc(conv_name), esc(from_display), esc(body),
         m.encryption != Encryption.NONE ? "true" : "false",
         notify_name(effective), is_group ? "true" : "false",
         mentioned ? "true" : "false", m.time.to_unix());

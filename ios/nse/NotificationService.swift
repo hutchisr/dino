@@ -35,11 +35,18 @@ class NotificationService: UNNotificationServiceExtension {
                 return
             }
 
+            // Stamp the conversation so tapping the banner opens the right chat.
+            if !latest.conversationJid.isEmpty {
+                var info = content.userInfo
+                info["conversationJid"] = latest.conversationJid
+                content.userInfo = info
+            }
+
             if latest.isMuted {
                 // Phase 3 will drop this entirely (needs the filtering
-                // entitlement); until then, deliver the original generic alert
-                // rather than an enriched one for a muted conversation.
-                contentHandler(request.content)
+                // entitlement); until then, keep the generic text for a muted
+                // conversation (but still tappable to the chat).
+                contentHandler(content)
                 return
             }
 

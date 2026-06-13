@@ -6,8 +6,29 @@ import UserNotifications
 /// and enable XEP-0357 push on the XMPP server with the device token as the
 /// node (the proxy decodes the node back into a token, so no registration
 /// round-trip is needed).
-final class AppDelegate: NSObject, UIApplicationDelegate {
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     static var onToken: ((String) -> Void)?
+
+    /// Set by the UI once the model is available; routes a tapped
+    /// notification's conversation to `openChat`. A tap that arrives before
+    /// the handler is set (cold launch) is held in `pendingOpenJid`.
+    private static var openHandler: ((String) -> Void)?
+    private static var pendingOpenJid: String?
+
+    static func setOpenHandler(_ handler: @escaping (String) -> Void) {
+        openHandler = handler
+        if let jid = pendingOpenJid {
+            pendingOpenJid = nil
+            DispatchQueue.main.async { handler(jid) }
+        }
+    }
+
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // Must be set before launch finishes to receive notification responses.
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
 
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
@@ -19,6 +40,21 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
         NSLog("gecko-push: APNs registration failed: %@", error.localizedDescription)
+    }
+
+    /// User tapped a notification — open the conversation it belongs to (the
+    /// extension stamped the jid into userInfo).
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        if let jid = response.notification.request.content.userInfo["conversationJid"] as? String, !jid.isEmpty {
+            if let handler = AppDelegate.openHandler {
+                DispatchQueue.main.async { handler(jid) }
+            } else {
+                AppDelegate.pendingOpenJid = jid
+            }
+        }
+        completionHandler()
     }
 }
 

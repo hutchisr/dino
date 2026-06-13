@@ -63,6 +63,7 @@ final class NSEFetcher {
 /// One decrypted incoming message, with the conversation's notify policy so
 /// the extension can decide whether to present or suppress it.
 struct NSEMessage {
+    let conversationJid: String
     let conversationName: String
     let sender: String
     let body: String
@@ -71,6 +72,7 @@ struct NSEMessage {
     let mentioned: Bool
 
     init(json: [String: Any]) {
+        conversationJid = json["jid"] as? String ?? ""
         conversationName = json["conversation_name"] as? String ?? ""
         sender = json["from"] as? String ?? ""
         body = json["body"] as? String ?? ""

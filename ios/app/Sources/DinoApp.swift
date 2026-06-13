@@ -12,7 +12,10 @@ struct DinoApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(model)
-                .onAppear { model.boot() }
+                .onAppear {
+                    model.boot()
+                    AppDelegate.setOpenHandler { jid in model.openChat(with: jid) }
+                }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
