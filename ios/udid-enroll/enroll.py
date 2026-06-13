@@ -16,6 +16,7 @@ full CMS parsing. (The UDID is logged regardless of what we return, so capture
 never depends on the device's handling of the response.)
 """
 import plistlib
+import re
 
 from flask import Flask, request, Response
 from waitress import serve
@@ -51,6 +52,16 @@ def sign_profile(xml_bytes: bytes) -> bytes:
 
 # Stable id for the one-shot enrollment profile (any fixed UUID is fine).
 PROFILE_UUID = "7E6B0C2A-1D34-4F90-9A1E-9C0F1E2D3A4B"
+
+# Match a real iOS UDID: modern (e.g. 00008150-000C2D9C2280401C) or legacy
+# 40-hex. Re-validated wherever it's rendered, so only safe chars reach HTML.
+UDID_RE = re.compile(r"(0000[0-9]{4}-00[A-Fa-f0-9]+)|([a-fA-F0-9]{40})")
+
+
+def valid_udid(s):
+    m = UDID_RE.search(s or "")
+    return m.group(0) if m else None
+
 
 PAGE_STYLE = (
     "body{font-family:-apple-system,system-ui,sans-serif;max-width:34rem;"
@@ -125,18 +136,30 @@ def collect():
     # follow-on profile fails iOS's strict validation (empty -> "Invalid
     # Profile"; cert payload -> "no identity certificate"; etc). The proven
     # approach (udid.fyi / whatismyudid) is a 301 redirect to a normal web page,
-    # which the device hands off to Safari, ending the flow with no error.
-    return Response(status=301, headers={"Location": f"https://{request.host}/done"})
+    # which the device hands off to Safari, ending the flow with no error. Carry
+    # the UDID along so the page can show it to the tester to copy.
+    loc = f"https://{request.host}/done"
+    u = valid_udid(udid)
+    if u:
+        loc += f"?udid={u}"
+    return Response(status=301, headers={"Location": loc})
 
 
 @app.get("/done")
 def done():
+    u = valid_udid(request.args.get("udid", ""))  # re-validated -> safe to render
+    udid_block = (
+        f"<p>Your device UDID:</p>"
+        f"<p><code style='font-size:1.05rem;user-select:all;-webkit-user-select:all'>{u}</code></p>"
+        "<p class=muted>Copy this and send it to whoever invited you.</p>"
+    ) if u else ""
     return Response(
         f"<!doctype html><html><head><meta charset=utf-8>"
         f"<meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>Registered</title><style>{PAGE_STYLE}body{{text-align:center}}</style></head><body>"
         "<h2>✅ Registered</h2>"
-        "<p>Thanks — your device is registered. You can close this page.</p>"
+        "<p>Thanks — your device is registered.</p>"
+        f"{udid_block}"
         "</body></html>",
         mimetype="text/html",
     )
