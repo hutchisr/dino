@@ -107,11 +107,34 @@ All desktop-neutral (defaults unchanged; GTK Dino still builds):
   with the iOS clang. Watch for vala `char` being signed when doing
   byte-level work (see `esc()` in the bridge).
 
+## Notification Service Extension (in progress)
+
+Per-conversation notification settings (off / mentions-only) cannot be
+enforced server-side: Gecko is general-purpose, and public servers strip
+sender+body from XEP-0357 push summaries for privacy (xmpp.is sends only a
+count; Prosody defaults sender off too), so the proxy never learns which
+conversation a push belongs to. The fix is on-device filtering in an NSE —
+works on any server and also unlocks decrypted previews.
+
+* **Phase 0 (done):** GLib storage (dino.db / omemo.db) lives in the
+  `group.me.anemoneya.gecko` App Group container, migrated from the old
+  per-app location on first run, so the NSE can read it.
+* **Phase 1 (done):** `ios/nse` builds `PlugIns/NotificationService.appex`
+  (own `_NSExtensionMain` executable, App Group entitlement, sealed in the
+  host bundle by build-app.sh). Verified the NSE spawns for a
+  mutable-content push and reads the shared dino.db. `NSEStore` is the
+  read-only accessor.
+* **Phase 2 (todo):** in the NSE, connect over XMPP, fetch the latest
+  message via MAM, OMEMO-decrypt, map to a conversation, apply its notify
+  setting, and enrich the alert with sender + preview. Reuses the static
+  Vala/OMEMO libs via a new lean bridge entrypoint; tight 24MB/30s budget.
+* **Phase 3 (todo, gated):** suppress muted-conversation banners. Requires
+  the `com.apple.developer.usernotifications.filtering` entitlement (Apple
+  request on the dev account); enrichment in Phase 2 works without it.
+
 ## Next steps
 
-1. Notification Service Extension for real message previews in pushes
-   (the proxy already sends mutable-content); dedupe the occasional
-   duplicate publish.
+1. NSE Phase 2/3 (above); dedupe the occasional duplicate publish.
 2. Calls (plugin-rtp/ice via GStreamer's official iOS binaries).
 3. CI for the cross-compile.
 
