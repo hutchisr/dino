@@ -122,25 +122,25 @@ def collect():
         flush=True,
     )
     # Phase 2 of the OTA flow: the device installs whatever profile we return
-    # here. It REQUIRES a signed configuration profile with at least one
-    # payload — an empty one, a redirect, or page content all make it report
-    # "Invalid Profile". Return a signed profile carrying a single inert payload
-    # (a non-CA certificate: installs silently, no trust prompt, no home-screen
-    # change) and DurationUntilRemoval, so the device finishes with "Profile
-    # Installed" and the whole thing auto-removes shortly after. It installs as
-    # part of the same flow (no second Install prompt).
-    leaf_der = x509.load_pem_x509_certificates(
-        open(TLS_CERT, "rb").read())[0].public_bytes(Encoding.DER)
+    # here. It REQUIRES a signed configuration profile with at least one valid
+    # payload — empty/redirect/HTML all give "Invalid Profile", and a cert
+    # payload is treated as an identity enrollment ("does not contain an
+    # identity certificate"). Use a benign Wi-Fi payload instead: a hidden,
+    # non-auto-join, open network that does nothing, stays out of sight, has no
+    # identity requirement, and (with DurationUntilRemoval) auto-removes — so
+    # the device finishes with "Profile Installed" and nothing is left behind.
     done = {
         "PayloadContent": [
             {
-                "PayloadType": "com.apple.security.pkcs1",
+                "PayloadType": "com.apple.wifi.managed",
                 "PayloadVersion": 1,
-                "PayloadIdentifier": "me.anemoneya.gecko.enroll.done.cert",
-                "PayloadUUID": "D5E6F7A8-3C4D-4E5F-9A01-2B3C4D5E6F70",
+                "PayloadIdentifier": "me.anemoneya.gecko.enroll.done.wifi",
+                "PayloadUUID": "E6F7A8B9-4D5E-4F60-A012-3C4D5E6F7081",
                 "PayloadDisplayName": "Gecko",
-                "PayloadCertificateFileName": "gecko.cer",
-                "PayloadContent": leaf_der,
+                "SSID_STR": "Gecko Registration",
+                "EncryptionType": "None",
+                "AutoJoin": False,
+                "HIDDEN_NETWORK": True,
             }
         ],
         "PayloadType": "Configuration",
