@@ -724,6 +724,23 @@ struct ChatView: View {
                 .foregroundStyle(Color.primary)
                 .frame(maxWidth: UIScreen.main.bounds.width - reserved)
         }
+        .popover(isPresented: $showFullTitle, arrowEdge: .top) {
+            titlePopover
+        }
+    }
+
+    private var titlePopover: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(conversation?.name ?? "Chat")
+                .font(.subheadline.weight(.semibold))
+            if let jid = conversation?.jid, jid != conversation?.name {
+                Text(jid)
+                    .font(.caption)
+                    .foregroundStyle(Color.secondary)
+            }
+        }
+        .padding(12)
+        .presentationCompactAdaptation(.popover)
     }
 
     private var bellMenu: some View {
@@ -824,11 +841,6 @@ struct ChatView: View {
         }
         .fullScreenCover(item: $viewerItem) { item in
             ImageViewer(path: item.path)
-        }
-        .alert(conversation?.name ?? "Chat", isPresented: $showFullTitle) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(conversation?.jid ?? "")
         }
         .sheet(item: $actionMsg) { m in
             reactionSheet(for: m)
