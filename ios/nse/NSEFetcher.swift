@@ -17,33 +17,21 @@ final class NSEFetcher {
     }
 
     static func fetch(timeoutMs: Int32, completion: @escaping ([NSEMessage]) -> Void) {
-        prepareThrowawayStorage()
+        // Share the app's REAL databases (Monal-style): the extension receives,
+        // decrypts, stores and ACKs the message so the server clears its
+        // pending state (no re-push loop), and the app reads the stored result
+        // (decrypted once). Relies on message dedup to avoid double-storing.
+        if let container = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: "group.me.anemoneya.gecko") {
+            setenv("XDG_DATA_HOME", container.appendingPathComponent("xdg-data").path, 1)
+            setenv("XDG_CONFIG_HOME", container.appendingPathComponent("xdg-config").path, 1)
+            setenv("XDG_CACHE_HOME", container.appendingPathComponent("xdg-cache").path, 1)
+        }
         dino_ios_init_glib_tls()   // register the iOS trust store for the XMPP TLS connection
 
         let fetcher = NSEFetcher(completion: completion)
         let ctx = Unmanaged.passRetained(fetcher).toOpaque()
         dino_ios_nse_fetch(timeoutMs, nseTrampoline, ctx, nseRelease)
-    }
-
-    /// Point libdino at a private, throwaway copy of the account + OMEMO
-    /// databases instead of the app's live store. The extension connects,
-    /// MAM-syncs, and decrypts against the copy; it never writes to the shared
-    /// dino.db, so messages aren't duplicated when the app later re-syncs them
-    /// (the app stays the single source of truth). A same-volume copy is
-    /// copy-on-write on APFS, so this is cheap.
-    private static func prepareThrowawayStorage() {
-        let fm = FileManager.default
-        guard let container = fm.containerURL(
-            forSecurityApplicationGroupIdentifier: "group.me.anemoneya.gecko") else { return }
-        let sharedDino = container.appendingPathComponent("xdg-data/dino")
-        let work = container.appendingPathComponent("nse-work")
-        let workData = work.appendingPathComponent("xdg-data")
-        try? fm.removeItem(at: work)
-        try? fm.createDirectory(at: workData, withIntermediateDirectories: true)
-        try? fm.copyItem(at: sharedDino, to: workData.appendingPathComponent("dino"))
-        setenv("XDG_DATA_HOME", workData.path, 1)
-        setenv("XDG_CONFIG_HOME", work.appendingPathComponent("xdg-config").path, 1)
-        setenv("XDG_CACHE_HOME", work.appendingPathComponent("xdg-cache").path, 1)
     }
 
     fileprivate func deliver(_ json: String) {

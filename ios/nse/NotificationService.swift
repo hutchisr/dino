@@ -23,13 +23,38 @@ class NotificationService: UNNotificationServiceExtension {
         }
         self.bestAttempt = content
 
-        // NSE fetch DISABLED again: connecting from the extension re-triggers
-        // server pushes on xmpp.is (each connect leaves the pending message
-        // unacked, so the server re-pushes, waking the extension — a flood).
-        // No-presence didn't break it; the trigger is at the
-        // stream-management/delivery layer, not presence. Pass the generic
-        // push through until a fetch that doesn't disturb server state exists.
-        contentHandler(content)
+        // Receive + decrypt the triggering message on-device (Monal-style):
+        // shares the real DB and connects so the message is acked and the
+        // server's pending state clears (no re-push). Budget under the ~30s
+        // limit so we beat serviceExtensionTimeWillExpire.
+        NSEFetcher.fetch(timeoutMs: 24_000) { messages in
+            guard let latest = messages.last else {
+                contentHandler(content)
+                return
+            }
+            if !latest.conversationJid.isEmpty {
+                var info = content.userInfo
+                info["conversationJid"] = latest.conversationJid
+                content.userInfo = info
+            }
+            if latest.isMuted {
+                // Suppression needs the filtering entitlement (pending); keep
+                // generic text for now, still tappable to the chat.
+                contentHandler(content)
+                return
+            }
+            if latest.isGroupchat {
+                content.title = latest.conversationName
+                content.body = "\(latest.sender): \(latest.body)"
+            } else {
+                content.title = latest.sender.isEmpty ? latest.conversationName : latest.sender
+                content.body = latest.body
+            }
+            if messages.count > 1 {
+                content.subtitle = "\(messages.count) new messages"
+            }
+            contentHandler(content)
+        }
     }
 
     /// Temporary verification breadcrumb (simulator banners show the static
