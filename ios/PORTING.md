@@ -109,17 +109,23 @@ All desktop-neutral (defaults unchanged; GTK Dino still builds):
 
 ## Next steps
 
-1. Push notifications (XEP-0357 + proxy + NSE) — the big one.
-3. iOS-native trust store via a custom `GTlsDatabase`.
-4. Device build + signing; CI for the cross-compile.
+1. Notification Service Extension for real message previews in pushes
+   (the proxy already sends mutable-content); dedupe the occasional
+   duplicate publish.
+2. Calls (plugin-rtp/ice via GStreamer's official iOS binaries).
+3. CI for the cross-compile.
 
-Already done beyond the basics: contact management (roster, presence,
+Done beyond the basics: contact management (roster, presence,
 subscription requests), sign in/out with stable OMEMO identity, avatars,
 conversation previews/unread counts/read markers (XEP-0333), typing
-notifications (XEP-0085), and file transfers (HTTP upload via libsoup,
-OMEMO-encrypted aesgcm files, inline image previews, tap-to-download;
+notifications (XEP-0085), file transfers (HTTP upload via libsoup,
+OMEMO-encrypted aesgcm files, inline image previews, full-screen viewer;
 note: GIO mime sniffing is extension-based on iOS — no shared-mime-info),
-MUC management (join/create channels with bookmarks, leave/close via
-swipe, participant list), emoji reactions (XEP-0444, long-press or tap
-chips), and message corrections (XEP-0308, long-press own message to
-edit).
+MUC management (join/leave, participant list, per-sender avatars/nicks),
+emoji reactions (XEP-0444), message corrections (XEP-0308), replies
+(XEP-0461), delivery markers, account settings (avatar publishing,
+display name, password change, OMEMO fingerprint), TLS via the iOS trust
+store, fast reconnect on foreground, client identity "Gecko" (phone),
+verified device deployment (`ios/app/deploy-phone.sh`), and **push
+notifications**: XEP-0357 + the containerized proxy in ios/push-proxy,
+hosted on k8s (namespace `gecko`), verified end to end through APNs.
