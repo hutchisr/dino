@@ -37,9 +37,13 @@ Without `PUBLISH=1` it just produces the artifacts in
 ## Share
 
 Send the tester `https://dist.anemoneya.me/`. They open it in **Safari**, tap
-Install, then tap the Gecko icon to launch it. (Ad-hoc / distribution-signed
-builds run directly — there's no "trust developer" step; that only applies to
-Development-signed apps.)
+Install, then **enable Developer Mode** (Settings → Privacy & Security →
+Developer Mode → on → Restart → Turn On) and open the Gecko icon.
+
+Ad-hoc builds require Developer Mode on iOS 16+ (only App Store/TestFlight and
+Enterprise In-House skip it). There's no separate "trust developer" step — the
+Apple Distribution cert is trusted; that step is only for Development-signed
+apps.
 
 ## Caveat: push
 

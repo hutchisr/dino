@@ -233,9 +233,11 @@ cat > "$DIST/index.html" <<EOF
 a.btn{display:inline-block;background:#16a34a;color:#fff;padding:.85rem 1.5rem;border-radius:13px;text-decoration:none;font-weight:600;margin:1rem 0}
 .muted{color:#8e8e93;font-size:.9rem}</style></head><body>
 <h2>Install Gecko (v$SHORT_VER)</h2>
-<p>Open this page in <b>Safari</b> on your registered iPhone and tap below. iOS
-will ask to install — confirm, then just tap the Gecko icon on your home screen
-to open it. (No “trust developer” step is needed for this build.)</p>
+<p>Open this page in <b>Safari</b> on your registered iPhone and tap below; iOS
+will ask to install — confirm.</p>
+<p><b>Then enable Developer Mode</b> (required once for test builds):
+Settings → Privacy &amp; Security → Developer Mode → turn it on → Restart →
+after reboot tap <b>Turn On</b>. Now open the Gecko icon.</p>
 <p><a class=btn href="$INSTALL_URL">Install Gecko</a></p>
 <p class=muted>Build $SHORT_VER ($BUILD_VER).</p>
 </body></html>
