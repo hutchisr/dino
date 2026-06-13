@@ -463,6 +463,7 @@ struct ChatView: View {
     @State private var showOccupants = false
     @State private var editing: ChatMessage?
     @State private var replyingTo: ChatMessage?
+    @State private var actionMsg: ChatMessage?
     @State private var isAtBottom = true
     @State private var scrollHolder = ScrollViewHolder()
     @State private var viewerItem: ImageViewerItem?
@@ -539,6 +540,8 @@ struct ChatView: View {
                                 replyingTo = m
                             }, onImageTap: { path in
                                 viewerItem = ImageViewerItem(id: path)
+                            }, onActions: { m in
+                                actionMsg = m
                             })
                             .id(msg.id)
                         }
@@ -744,6 +747,23 @@ struct ChatView: View {
         .fullScreenCover(item: $viewerItem) { item in
             ImageViewer(path: item.path)
         }
+        .sheet(item: $actionMsg) { m in
+            ReactionSheet(
+                msg: m,
+                onReact: { emoji in
+                    let mine = m.reactions.first { $0.emoji == emoji }?.me ?? false
+                    model.setReaction(conversationId, item: m.id, emoji: emoji, add: !mine)
+                },
+                onReply: {
+                    editing = nil
+                    replyingTo = m
+                },
+                onEdit: m.editable ? {
+                    replyingTo = nil
+                    editing = m
+                    draft = m.body
+                } : nil)
+        }
         .onChange(of: model.viewerRequest) { path in
             if let path {
                 viewerItem = ImageViewerItem(id: path)
@@ -769,8 +789,9 @@ struct MessageBubble: View {
     var onEdit: ((ChatMessage) -> Void)? = nil
     var onReply: ((ChatMessage) -> Void)? = nil
     var onImageTap: ((String) -> Void)? = nil
+    var onActions: ((ChatMessage) -> Void)? = nil
 
-    private static let quickEmojis = ["👍", "❤️", "😂", "😮", "😢"]
+    @State private var dragOffset: CGFloat = 0
 
     @ViewBuilder
     private var markIcon: some View {
@@ -798,6 +819,12 @@ struct MessageBubble: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             if msg.direction == "out" { Spacer(minLength: 40) }
+            if dragOffset > 8 {
+                Image(systemName: "arrowshape.turn.up.left.fill")
+                    .foregroundStyle(.secondary)
+                    .opacity(Double(min(dragOffset / 60, 1)))
+                    .frame(maxHeight: .infinity, alignment: .center)
+            }
             if inGroupchat && msg.direction == "in" {
                 if showSender {
                     AvatarView(jid: msg.from, name: msg.fromDisplay, isGroup: false, size: 30)
@@ -850,30 +877,9 @@ struct MessageBubble: View {
                 .padding(.vertical, 6)
                 .background(msg.direction == "out" ? Color.accentColor.opacity(0.2) : Color(.secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                .contextMenu {
-                    ForEach(Self.quickEmojis, id: \.self) { emoji in
-                        Button {
-                            let mine = msg.reactions.first { $0.emoji == emoji }?.me ?? false
-                            model.setReaction(conversationId, item: msg.id, emoji: emoji, add: !mine)
-                        } label: {
-                            Text(emoji)
-                        }
-                    }
-                    Divider()
-                    if let onReply {
-                        Button {
-                            onReply(msg)
-                        } label: {
-                            Label("Reply", systemImage: "arrowshape.turn.up.left")
-                        }
-                    }
-                    if msg.editable, let onEdit {
-                        Button {
-                            onEdit(msg)
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
-                        }
-                    }
+                .onLongPressGesture(minimumDuration: 0.35) {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    onActions?(msg)
                 }
                 if !msg.reactions.isEmpty {
                     HStack(spacing: 4) {
@@ -897,6 +903,23 @@ struct MessageBubble: View {
             }
             if msg.direction != "out" { Spacer(minLength: 40) }
         }
+        .offset(x: dragOffset)
+        .animation(.spring(duration: 0.25), value: dragOffset == 0)
+        .gesture(
+            DragGesture(minimumDistance: 25)
+                .onChanged { value in
+                    // horizontal pull to the right only; vertical stays scroll
+                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                    dragOffset = max(0, min(value.translation.width, 90))
+                }
+                .onEnded { value in
+                    if dragOffset > 55 {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        onReply?(msg)
+                    }
+                    dragOffset = 0
+                }
+        )
     }
 }
 
