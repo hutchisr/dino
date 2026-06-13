@@ -12,7 +12,10 @@ Configuration (environment):
   APNS_KEY_ID     APNs auth key id          (required)
   APNS_TEAM_ID    Apple developer team id   (required)
   APNS_TOPIC      app bundle id             (default me.anemoneya.gecko)
-  APNS_SANDBOX    "1" for development-signed builds (default 1)
+  APNS_SANDBOX    which APNs env to try first: "1" sandbox (dev builds),
+                  "0" production (ad-hoc/TestFlight). Both are tried — this is
+                  only the preference; tokens for the other env fall back
+                  automatically. (default 1)
 """
 import asyncio
 import json
@@ -32,8 +35,15 @@ from slixmpp.xmlstream.matcher import StanzaPath
 log = logging.getLogger("gecko-push")
 
 APNS_TOPIC = os.environ.get("APNS_TOPIC", "me.anemoneya.gecko")
-APNS_SANDBOX = os.environ.get("APNS_SANDBOX", "1") == "1"
-APNS_HOST = "https://api.sandbox.push.apple.com" if APNS_SANDBOX else "https://api.push.apple.com"
+APNS_HOSTS = {
+    "sandbox": "https://api.sandbox.push.apple.com",
+    "production": "https://api.push.apple.com",
+}
+# A token only works against one environment: development-signed builds
+# (Xcode/dev) use sandbox; ad-hoc / TestFlight / App Store builds use
+# production. We don't know which a given token is, so we try one and fall back
+# to the other on BadDeviceToken. APNS_SANDBOX just sets which to try first.
+APNS_FIRST = "sandbox" if os.environ.get("APNS_SANDBOX", "1") == "1" else "production"
 TOKEN_RE = re.compile(r"^[0-9a-fA-F]{32,200}$")
 
 
@@ -47,6 +57,9 @@ class Apns:
         self._jwt = None
         self._jwt_at = 0.0
         self.http = httpx.AsyncClient(http2=True, timeout=10)
+        # device token -> environment ("sandbox"/"production") last seen working,
+        # so we hit the right one first next time (in-memory; relearned on restart)
+        self.token_env: dict[str, str] = {}
 
     def _auth(self) -> str:
         # APNs accepts tokens for up to an hour; refresh at 45 minutes
@@ -57,9 +70,9 @@ class Apns:
             self._jwt_at = time.time()
         return self._jwt
 
-    async def push(self, device_token: str, payload: dict) -> int:
-        resp = await self.http.post(
-            f"{APNS_HOST}/3/device/{device_token}",
+    async def _post(self, env: str, device_token: str, payload: dict):
+        return await self.http.post(
+            f"{APNS_HOSTS[env]}/3/device/{device_token}",
             headers={
                 "authorization": f"bearer {self._auth()}",
                 "apns-topic": APNS_TOPIC,
@@ -67,9 +80,31 @@ class Apns:
                 "apns-priority": "10",
             },
             json=payload)
-        if resp.status_code != 200:
-            log.warning("APNs %s for %s…: %s", resp.status_code, device_token[:8], resp.text)
-        return resp.status_code
+
+    async def push(self, device_token: str, payload: dict) -> int:
+        # Try the env this token is known to use (else the configured default)
+        # first, then the other only if APNs says the token is for the wrong
+        # environment (400 BadDeviceToken). Cache whichever worked.
+        first = self.token_env.get(device_token, APNS_FIRST)
+        order = [first] + [e for e in APNS_HOSTS if e != first]
+        status = None
+        for env in order:
+            resp = await self._post(env, device_token, payload)
+            status = resp.status_code
+            if status == 200:
+                self.token_env[device_token] = env
+                return 200
+            reason = ""
+            try:
+                reason = resp.json().get("reason", "")
+            except Exception:
+                pass
+            if reason != "BadDeviceToken":
+                log.warning("APNs %s (%s) for %s…: %s", status, env, device_token[:8], resp.text)
+                return status
+            # wrong environment — fall through and try the other one
+        log.warning("APNs BadDeviceToken on all environments for %s…", device_token[:8])
+        return status
 
 
 class PushBot(slixmpp.ClientXMPP):

@@ -11,6 +11,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gecko-push-proxy
+  namespace: gecko
   labels:
     app: gecko-push-proxy
 spec:
@@ -30,7 +31,7 @@ spec:
         - name: regcred
       containers:
         - name: proxy
-          image: lax.vultrcr.com/mercury/gecko-push-proxy:v4
+          image: lax.vultrcr.com/mercury/gecko-push-proxy:v5
           envFrom:
             - secretRef:
                 name: gecko-push
@@ -40,7 +41,8 @@ spec:
             - name: APNS_TOPIC
               value: me.anemoneya.gecko
             - name: APNS_SANDBOX
-              value: "1"   # set to "0" for App Store / TestFlight builds
+              value: "1"   # which APNs env to try first; the other is tried on
+                           # BadDeviceToken, so dev + ad-hoc/TestFlight both work
           volumeMounts:
             - name: apns-key
               mountPath: /secrets
