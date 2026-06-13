@@ -121,14 +121,23 @@ def collect():
         f"name={info.get('DEVICE_NAME')}",
         flush=True,
     )
+    # Phase 2 of the OTA flow: the device processes our response to its POST.
+    # It expects a signed profile to install OR a redirect — returning page
+    # content makes it report "Invalid Profile" (even though phase 1 already
+    # captured the UDID). Redirect to a plain success page so the device hands
+    # off to Safari and ends cleanly. 303 forces a GET on the redirect target.
+    return Response(status=303, headers={"Location": f"https://{request.host}/done"})
+
+
+@app.get("/done")
+def done():
     return Response(
         f"<!doctype html><html><head><meta charset=utf-8>"
         f"<meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>Registered</title><style>{PAGE_STYLE}body{{text-align:center}}</style></head><body>"
         "<h2>✅ Registered</h2>"
         "<p>Thanks — your device is registered. You can close this page; the "
-        "profile removes itself automatically.</p>"
-        f"<p class=muted>UDID: <code>{udid}</code></p>"
+        "registration profile removes itself automatically.</p>"
         "</body></html>",
         mimetype="text/html",
     )
