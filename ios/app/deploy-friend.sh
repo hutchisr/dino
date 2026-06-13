@@ -4,8 +4,11 @@
 # Ad Hoc provisioning profile). Unlike deploy-phone.sh this never touches a
 # connected device — it produces files you host over HTTPS and share a link to.
 #
-# Usage: ./deploy-friend.sh [tester-UDID]
-#   Pass the tester's UDID to require profiles that cover it (recommended).
+# Usage: ./deploy-friend.sh [UDID]
+#   The IPA installs on EVERY device in the Ad Hoc profile it embeds, not just
+#   one. The UDID arg is optional: pass it to require/verify a profile that
+#   covers that device; omit it to use the broadest matching Ad Hoc profile.
+#   Add a device to a build by adding it to the Ad Hoc profile and re-running.
 #
 # Prerequisites (Apple Developer portal, one-time per tester):
 #   1. Devices → register the tester's UDID.
@@ -73,8 +76,10 @@ for p in paths:
     if udid and udid not in devices:
         continue
     has_groups = "com.apple.security.application-groups" in ents
-    # prefer a profile that also has App Groups and the freshest expiry
-    score = (has_groups, pl.get("ExpirationDate"))
+    exp = pl.get("ExpirationDate")
+    exp_ts = exp.timestamp() if exp else 0
+    # prefer App Groups, then the MOST devices (broadest coverage), then freshest
+    score = (has_groups, len(devices), exp_ts)
     if best is None or score > best[0]:
         best = (score, p)
 if best:
@@ -104,6 +109,16 @@ echo "identity:    $SIGN_IDENTITY"
 echo "team:        $TEAM_ID"
 echo "app profile: $PROFILE"
 echo "nse profile: $NSE_PROFILE"
+
+# The IPA installs on every device in the embedded (app) profile, not just one.
+python3 - "$PROFILE" <<'EOF'
+import plistlib, subprocess, sys
+pl = plistlib.loads(subprocess.run(["security", "cms", "-D", "-i", sys.argv[1]], capture_output=True).stdout)
+devs = pl.get("ProvisionedDevices") or []
+print(f"this build installs on {len(devs)} registered device(s):")
+for d in devs:
+    print(f"    {d}")
+EOF
 
 # --- build ----------------------------------------------------------------
 if [ -d "$ROOT/build-device-arm64" ]; then
