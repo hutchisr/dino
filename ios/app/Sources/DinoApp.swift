@@ -713,7 +713,7 @@ struct ChatView: View {
         // clipped against the trailing button group (bell + lock, plus
         // occupants in group chats), so cap its width to the space between
         // the two.
-        let reserved: CGFloat = 70 + (isGroupChat ? 165 : 120)
+        let reserved: CGFloat = 70 + (isGroupChat ? 190 : 120)
         return Button {
             showFullTitle = true
         } label: {
