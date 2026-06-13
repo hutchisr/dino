@@ -234,8 +234,8 @@ a.btn{display:inline-block;background:#16a34a;color:#fff;padding:.85rem 1.5rem;b
 .muted{color:#8e8e93;font-size:.9rem}</style></head><body>
 <h2>Install Gecko (v$SHORT_VER)</h2>
 <p>Open this page in <b>Safari</b> on your registered iPhone and tap below. iOS
-will ask to install — confirm, then trust the developer under
-Settings → General → VPN &amp; Device Management on first launch.</p>
+will ask to install — confirm, then just tap the Gecko icon on your home screen
+to open it. (No “trust developer” step is needed for this build.)</p>
 <p><a class=btn href="$INSTALL_URL">Install Gecko</a></p>
 <p class=muted>Build $SHORT_VER ($BUILD_VER).</p>
 </body></html>

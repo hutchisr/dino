@@ -37,8 +37,9 @@ Without `PUBLISH=1` it just produces the artifacts in
 ## Share
 
 Send the tester `https://dist.anemoneya.me/`. They open it in **Safari**, tap
-Install, and on first launch trust the developer under **Settings → General →
-VPN & Device Management**.
+Install, then tap the Gecko icon to launch it. (Ad-hoc / distribution-signed
+builds run directly — there's no "trust developer" step; that only applies to
+Development-signed apps.)
 
 ## Caveat: push
 
