@@ -23,14 +23,38 @@ class NotificationService: UNNotificationServiceExtension {
         }
         self.bestAttempt = content
 
-        // The on-device fetch (NSEFetcher) is temporarily disabled. Opening a
-        // full XMPP session from the extension had server-side side effects:
-        // because it works on a throwaway DB copy it can't mark the message
-        // handled, so the server keeps re-pushing (a notification loop), and
-        // its connect/disconnect churn disturbed the app's message delivery.
-        // Pass the generic push through unchanged until the fetch is
-        // redesigned to peek without those side effects.
-        contentHandler(content)
+        // Peek at the triggering message on-device: connect (without ever
+        // sending presence, so we don't consume offline delivery or re-trigger
+        // pushes), MAM-sync against a throwaway DB copy, and OMEMO-decrypt.
+        // Budget under the ~30s NSE limit so our callback wins the race against
+        // serviceExtensionTimeWillExpire.
+        NSEFetcher.fetch(timeoutMs: 24_000) { messages in
+            guard let latest = messages.last else {
+                // Couldn't resolve it — leave the generic alert as-is.
+                contentHandler(content)
+                return
+            }
+
+            if latest.isMuted {
+                // Phase 3 will drop this entirely (needs the filtering
+                // entitlement); until then, deliver the original generic alert
+                // rather than an enriched one for a muted conversation.
+                contentHandler(request.content)
+                return
+            }
+
+            if latest.isGroupchat {
+                content.title = latest.conversationName
+                content.body = "\(latest.sender): \(latest.body)"
+            } else {
+                content.title = latest.sender.isEmpty ? latest.conversationName : latest.sender
+                content.body = latest.body
+            }
+            if messages.count > 1 {
+                content.subtitle = "\(messages.count) new messages"
+            }
+            contentHandler(content)
+        }
     }
 
     /// Temporary verification breadcrumb (simulator banners show the static

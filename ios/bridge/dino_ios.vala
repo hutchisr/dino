@@ -118,6 +118,18 @@ private static void boot_core() throws Error {
 #endif
     app.stream_interactor.module_manager.initialize_account_modules.connect((account, list) => {
         list.add(new Xmpp.Xep.PushNotifications.Module());
+        if (nse_mode) {
+            // The extension must never advertise an "available" presence:
+            // doing so makes the server flush its offline-message queue to
+            // this throwaway session and re-trigger pushes when it drops (a
+            // notification loop). MAM catch-up still runs (it keys off stream
+            // negotiation, not presence), so the extension can read the
+            // triggering message without these side effects.
+            foreach (Xmpp.XmppStreamModule m in list) {
+                var pm = m as Xmpp.Presence.Module;
+                if (pm != null) pm.available_resource = false;
+            }
+        }
     });
 }
 
@@ -129,6 +141,7 @@ private static void boot_core() throws Error {
 // conversation, sender, decrypted body, the conversation's effective notify
 // setting, and whether it mentions the user.
 
+private static bool nse_mode = false;
 private static StringBuilder? nse_msgs = null;
 private static bool nse_done = false;
 private static bool nse_first = true;
@@ -167,6 +180,7 @@ public void nse_fetch(int timeout_ms, owned EventCb cb) {
     event_cb = (owned) cb;
     int hard_ms = timeout_ms;
     new Thread<bool>("dino-nse", () => {
+        nse_mode = true;
         nse_msgs = new StringBuilder("[");
         nse_done = false;
         nse_first = true;
