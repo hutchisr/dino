@@ -246,6 +246,7 @@ public void start(owned EventCb cb) {
         string? log_xmpp = Environment.get_variable("DINO_LOG_XMPP");
         if (log_xmpp != null) si.connection_manager.log_options = log_xmpp;
         si.connection_manager.connection_state_changed.connect((account, state) => {
+            if (state == Dino.ConnectionManager.ConnectionState.CONNECTED) enable_mam_archiving(account);
             emit(@"{\"type\":\"connection\",\"account\":\"$(esc(account.bare_jid.to_string()))\",\"state\":\"$(state_name(state))\"}");
         });
         si.connection_manager.connection_error.connect((account, error) => {
@@ -795,6 +796,23 @@ private static void sync_push_filters() {
     } catch (Error e) {
         warning("Could not sync push filters: %s", e.message);
     }
+}
+
+// Ask the server to archive ALL messages (XEP-0313 prefs, default=always).
+// prosody/xmpp.is otherwise only archives messages exchanged with roster
+// contacts; with an empty roster that means 1:1 history is never written to
+// MAM, so it never syncs when the app reconnects after being closed. Sent on
+// each connect (idempotent).
+private static void enable_mam_archiving(Account account) {
+    var stream = app.stream_interactor.get_stream(account);
+    if (stream == null) return;
+    var prefs = new Xmpp.StanzaNode.build("prefs", "urn:xmpp:mam:2").add_self_xmlns();
+    prefs.put_attribute("default", "always");
+    var iq = new Xmpp.Iq.Stanza.set(prefs);
+    stream.get_module(Xmpp.Iq.Module.IDENTITY).send_iq(stream, iq, (stream, result) => {
+        string type = result.stanza.get_attribute("type") ?? "?";
+        message("gecko: MAM default=always -> %s", type);
+    });
 }
 
 public void set_notify(int conversation_id, string setting) {
