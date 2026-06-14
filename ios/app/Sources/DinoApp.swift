@@ -1088,27 +1088,26 @@ struct OccupantsView: View {
     let onSelect: (String) -> Void
     @Environment(\.dismiss) private var dismiss
 
+    private var occupants: [Occupant] { model.occupants[conversationId] ?? [] }
+    private var me: Occupant? { occupants.first { $0.isSelf } }
+
     var body: some View {
         NavigationStack {
             List {
-                let list = model.occupants[conversationId] ?? []
-                if list.isEmpty {
+                if occupants.isEmpty {
                     Text("No participants visible.").foregroundStyle(.secondary)
                 }
-                ForEach(list) { occupant in
-                    if occupant.isSelf {
+                ForEach(occupants) { occupant in
+                    NavigationLink {
+                        MemberDetailView(conversationId: conversationId, occupant: occupant, me: me,
+                                         onMessage: { onSelect(occupant.nick) })
+                            .environmentObject(model)
+                    } label: {
                         occupantRow(occupant)
-                    } else {
-                        Button {
-                            onSelect(occupant.nick)
-                        } label: {
-                            occupantRow(occupant)
-                        }
-                        .buttonStyle(.plain)
                     }
                 }
             }
-            .navigationTitle("Participants (\((model.occupants[conversationId] ?? []).count))")
+            .navigationTitle("Participants (\(occupants.count))")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 Button("Close") { dismiss() }
@@ -1129,8 +1128,9 @@ struct OccupantsView: View {
             Spacer()
             if occupant.isSelf {
                 Text("you").font(.caption).foregroundStyle(.secondary)
-            } else {
-                Image(systemName: "message").foregroundStyle(.secondary)
+            }
+            if let badge = occupant.badge {
+                MemberBadge(text: badge, color: occupant.badgeColor, systemImage: occupant.badgeIcon)
             }
         }
         .contentShape(.rect)

@@ -40,6 +40,29 @@ struct Occupant: Identifiable {
     let jid: String        // full room jid (room@conf/nick), used for the avatar
     let realJid: String?   // bare real jid, known only in non-anonymous rooms
     let isSelf: Bool
+    var affiliation: String = "none"  // owner | admin | member | outcast | none
+    var role: String = "none"         // moderator | participant | visitor | none
+
+    var isOwner: Bool { affiliation == "owner" }
+    var isAdmin: Bool { affiliation == "admin" }
+    var isModerator: Bool { role == "moderator" }
+    var hasVoice: Bool { role == "moderator" || role == "participant" }
+    /// A visitor has had voice revoked (or never granted) in a moderated room —
+    /// i.e. they can't send messages.
+    var isMuted: Bool { role == "visitor" }
+
+    /// A short badge label for the row, or nil when there's nothing notable.
+    /// Staff always have voice, so "Muted" only ever applies to members/guests.
+    var badge: String? {
+        switch affiliation {
+        case "owner": return "Owner"
+        case "admin": return "Admin"
+        default:
+            if isModerator { return "Mod" }
+            if isMuted { return "Muted" }
+            return nil
+        }
+    }
 }
 
 struct RosterContact: Identifiable {
@@ -208,6 +231,29 @@ final class AppModel: ObservableObject {
         DinoCore.shared.startOccupantDM(id, nick: nick)
     }
 
+    func mucKick(_ id: Int32, nick: String) {
+        DinoCore.shared.mucKick(id, nick: nick)
+        refreshOccupantsSoon(id)
+    }
+
+    func mucSetAffiliation(_ id: Int32, nick: String, affiliation: String) {
+        DinoCore.shared.mucSetAffiliation(id, nick: nick, affiliation: affiliation)
+        refreshOccupantsSoon(id)
+    }
+
+    func mucSetRole(_ id: Int32, nick: String, role: String) {
+        DinoCore.shared.mucSetRole(id, nick: nick, role: role)
+        refreshOccupantsSoon(id)
+    }
+
+    /// Re-fetch the occupant list shortly after a moderation action so the UI
+    /// reflects the server's broadcast presence change.
+    private func refreshOccupantsSoon(_ id: Int32) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.requestOccupants(id)
+        }
+    }
+
     func requestOccupants(_ id: Int32) {
         DinoCore.shared.requestOccupants(id)
     }
@@ -358,7 +404,9 @@ final class AppModel: ObservableObject {
                         nick: nick,
                         jid: o["jid"] as? String ?? nick,
                         realJid: (real?.isEmpty ?? true) ? nil : real,
-                        isSelf: o["self"] as? Bool ?? false)
+                        isSelf: o["self"] as? Bool ?? false,
+                        affiliation: o["affiliation"] as? String ?? "none",
+                        role: o["role"] as? String ?? "none")
                 }.sorted { $0.nick.lowercased() < $1.nick.lowercased() }
             }
         case "open_conversation":

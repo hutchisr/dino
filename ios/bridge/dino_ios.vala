@@ -1268,14 +1268,68 @@ public void request_occupants(int conversation_id) {
                 // Push the occupant's avatar (keyed by their full room jid) so
                 // the list can show it.
                 push_avatar(c.account, occupant);
-                b.append("{\"nick\":\"%s\",\"self\":%s,\"jid\":\"%s\",\"real_jid\":\"%s\"}".printf(
+                b.append("{\"nick\":\"%s\",\"self\":%s,\"jid\":\"%s\",\"real_jid\":\"%s\",\"affiliation\":\"%s\",\"role\":\"%s\"}".printf(
                     esc(occupant.resourcepart), is_self ? "true" : "false",
                     esc(occupant.to_string()),
-                    esc(real != null ? real.bare_jid.to_string() : "")));
+                    esc(real != null ? real.bare_jid.to_string() : ""),
+                    affiliation_name(muc.get_affiliation(c.counterpart, occupant, c.account)),
+                    role_name(muc.get_role(occupant, c.account))));
             }
         }
         b.append("]}");
         emit(b.str);
+        return Source.REMOVE;
+    });
+}
+
+private static string affiliation_name(Xmpp.Xep.Muc.Affiliation? a) {
+    switch (a) {
+        case Xmpp.Xep.Muc.Affiliation.OWNER: return "owner";
+        case Xmpp.Xep.Muc.Affiliation.ADMIN: return "admin";
+        case Xmpp.Xep.Muc.Affiliation.MEMBER: return "member";
+        case Xmpp.Xep.Muc.Affiliation.OUTCAST: return "outcast";
+        default: return "none";
+    }
+}
+
+private static string role_name(Xmpp.Xep.Muc.Role? r) {
+    switch (r) {
+        case Xmpp.Xep.Muc.Role.MODERATOR: return "moderator";
+        case Xmpp.Xep.Muc.Role.PARTICIPANT: return "participant";
+        case Xmpp.Xep.Muc.Role.VISITOR: return "visitor";
+        default: return "none";
+    }
+}
+
+// --- MUC moderation (owner/admin/moderator actions on an occupant) --------
+// Each takes the groupchat conversation + the occupant's nick. After the
+// server applies the change it broadcasts updated presence; the UI re-requests
+// the occupant list to reflect it.
+public void muc_kick(int conversation_id, string nick) {
+    muc_occupant_action(conversation_id, nick, (muc, c, n) => muc.kick(c.account, c.counterpart, n));
+}
+
+// affiliation: "owner" | "admin" | "member" | "outcast" (ban) | "none"
+public void muc_set_affiliation(int conversation_id, string nick, string affiliation) {
+    string a = affiliation;
+    muc_occupant_action(conversation_id, nick, (muc, c, n) => muc.change_affiliation(c.account, c.counterpart, n, a));
+}
+
+// role: "moderator" | "participant" | "visitor" | "none"
+public void muc_set_role(int conversation_id, string nick, string role) {
+    string r = role;
+    muc_occupant_action(conversation_id, nick, (muc, c, n) => muc.change_role(c.account, c.counterpart, n, r));
+}
+
+private delegate void OccupantAction(Dino.MucManager muc, Conversation c, string nick);
+private void muc_occupant_action(int conversation_id, string nick, owned OccupantAction action) {
+    int cid = conversation_id;
+    string n = nick;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
+        action(muc, c, n);
         return Source.REMOVE;
     });
 }
