@@ -13,6 +13,7 @@ struct XmppConversation: Identifiable {
     let jid: String
     var name: String
     var encryption: String
+    var encryptionAvailable: Bool = false
     var kind: String = "chat"
     var unread: Int = 0
     var preview: String = ""
@@ -22,6 +23,14 @@ struct XmppConversation: Identifiable {
     var notifyEffective: String = "on"
 
     var isGroupchat: Bool { kind == "groupchat" }
+}
+
+/// A pending request to create a group chat the user tried to join but that
+/// doesn't exist yet.
+struct PendingMucCreate: Identifiable {
+    let id = UUID()
+    let jid: String
+    let nick: String?
 }
 
 struct RosterContact: Identifiable {
@@ -94,6 +103,9 @@ final class AppModel: ObservableObject {
     @Published var omemoDeviceId: Int = 0
     @Published var omemoFingerprint: String = ""
     @Published var passwordChanged = false
+    /// Set when a join targeted a room that doesn't exist yet; the UI asks the
+    /// user to confirm creating it.
+    @Published var pendingMucCreate: PendingMucCreate?
 
     private var pendingChatJid: String?
     private var requestedAvatars = Set<String>()
@@ -172,6 +184,10 @@ final class AppModel: ObservableObject {
 
     func joinMuc(jid: String, nick: String?) {
         DinoCore.shared.joinMuc(jid: jid, nick: nick)
+    }
+
+    func createMuc(jid: String, nick: String?) {
+        DinoCore.shared.createMuc(jid: jid, nick: nick)
     }
 
     func closeConversation(_ id: Int32) {
@@ -294,6 +310,7 @@ final class AppModel: ObservableObject {
                         id: Int32(id), account: c["account"] as? String ?? "",
                         jid: jid, name: c["name"] as? String ?? jid,
                         encryption: c["encryption"] as? String ?? "NONE",
+                        encryptionAvailable: c["encryption_available"] as? Bool ?? false,
                         kind: c["kind"] as? String ?? "chat",
                         unread: c["unread"] as? Int ?? 0,
                         preview: c["preview"] as? String ?? "",
@@ -307,6 +324,11 @@ final class AppModel: ObservableObject {
                     pendingChatJid = nil
                     navigation = [conv.id]
                 }
+            }
+        case "confirm_create_muc":
+            if let jid = e["jid"] as? String {
+                let nick = e["nick"] as? String
+                pendingMucCreate = PendingMucCreate(jid: jid, nick: (nick?.isEmpty ?? true) ? nil : nick)
             }
         case "push_state":
             NSLog("gecko-push: server push enabled=%@", String(describing: e["enabled"]))

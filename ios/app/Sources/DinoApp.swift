@@ -205,6 +205,18 @@ struct ConversationListView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .alert("Create channel?", isPresented: Binding(
+            get: { model.pendingMucCreate != nil },
+            set: { if !$0 { model.pendingMucCreate = nil } }
+        ), presenting: model.pendingMucCreate) { pending in
+            Button("Create") {
+                model.createMuc(jid: pending.jid, nick: pending.nick)
+                model.pendingMucCreate = nil
+            }
+            Button("Cancel", role: .cancel) { model.pendingMucCreate = nil }
+        } message: { pending in
+            Text("\(pending.jid) doesn't exist yet. Create it as a new channel?")
+        }
     }
 }
 
@@ -801,13 +813,17 @@ struct ChatView: View {
 
     private var lockButton: some View {
         let omemoOn: Bool = conversation?.encryption == "OMEMO"
+        // OMEMO needs a private (members-only, non-anonymous) room; the bridge
+        // reports whether it's possible so we can disable the toggle otherwise.
+        let available: Bool = conversation?.encryptionAvailable ?? false
         return Button {
             model.setEncryption(conversationId, omemo: !omemoOn)
         } label: {
-            Label(omemoOn ? "Encryption on" : "Encryption off",
-                  systemImage: omemoOn ? "lock.fill" : "lock.open")
-                .foregroundStyle(omemoOn ? Color.green : Color.secondary)
+            Label(available ? (omemoOn ? "Encryption on" : "Encryption off") : "Encryption unavailable",
+                  systemImage: available ? (omemoOn ? "lock.fill" : "lock.open") : "lock.slash")
+                .foregroundStyle(omemoOn && available ? Color.green : Color.secondary)
         }
+        .disabled(!available)
     }
 
     @ViewBuilder

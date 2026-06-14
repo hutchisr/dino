@@ -82,6 +82,7 @@ final class DinoCore {
     func sendFile(_ id: Int32, path: String) { dino_ios_send_file(id, path) }
     func downloadFile(_ id: Int32, item: Int32) { dino_ios_download_file(id, item) }
     func joinMuc(jid: String, nick: String?) { dino_ios_join_muc(jid, nick) }
+    func createMuc(jid: String, nick: String?) { dino_ios_create_muc(jid, nick) }
     func setReaction(_ id: Int32, item: Int32, emoji: String, add: Bool) { dino_ios_set_reaction(id, item, emoji, add ? 1 : 0) }
     func correctMessage(_ id: Int32, item: Int32, body: String) { dino_ios_correct_message(id, item, body) }
     func closeConversation(_ id: Int32) { dino_ios_close_conversation(id) }
