@@ -612,7 +612,10 @@ struct ChatView: View {
                         // BOTH first keystroke and delete-to-empty — relying on
                         // an implicit .animation(value:) didn't animate the
                         // structural removal on delete.
-                        withAnimation(.spring(response: 0.36, dampingFraction: 0.74)) {
+                        // Snappy so the button reaches its tappable position
+                        // fast — a slow morph leaves it briefly unresponsive
+                        // right after a send (while it animates back in).
+                        withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
                             showSend = !value.isEmpty
                         }
                     }

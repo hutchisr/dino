@@ -34,11 +34,17 @@ if [ -z "${DEVICE_ID:-}" ]; then
 fi
 
 # --- resolve identity and profile ----------------------------------------
+# Development profiles must be signed with an "Apple Development" cert — an
+# "Apple Distribution" cert here yields 0xe8008015 at install. Prefer the dev
+# cert (it may not sort first) and only fall back to the first identity.
+SIGN_IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning \
+  | sed -n 's/.*"\(Apple Development[^"]*\)".*/\1/p' | head -1)}"
 SIGN_IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(.*\)"/\1/p' | head -1)}"
 if [ -z "$SIGN_IDENTITY" ]; then
   echo "error: no codesigning identity found" >&2
   exit 1
 fi
+echo "identity: $SIGN_IDENTITY"
 
 if [ -z "${PROFILE:-}" ]; then
   PROFILE=$(python3 - "$DEVICE_UDID" <<'EOF'
