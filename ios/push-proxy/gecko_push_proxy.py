@@ -198,6 +198,18 @@ class PushBot(slixmpp.ClientXMPP):
         log.info("summary: count=%s sender=%s body=%s",
                  count, sender, "yes" if last_body else "no")
 
+        # Bodiless publishes are not messages worth waking the user for: chat
+        # states (XEP-0085 typing), delivery receipts (XEP-0184), and read
+        # markers (XEP-0333) never carry a body, and neither does the body-less
+        # twin the server emits alongside every real message. Real messages
+        # always summarise *with* a body — plaintext, or the OMEMO fallback
+        # ("[This message is OMEMO encrypted]") that every mainstream client
+        # includes. So drop anything bodiless; the body-ful twin of a genuine
+        # message still gets through, giving exactly one push per message.
+        if not last_body:
+            log.info("bodiless publish for %s… (chat state / receipt / twin) — dropping", node[:8])
+            return
+
         rules = self.filters.get(node.lower())
         if rules and sender:
             bare = sender.split("/")[0].lower()

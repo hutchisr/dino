@@ -163,22 +163,41 @@ class TestHandlePublish(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_count_still_pushes_generic_banner(self):
         bot = make_bot()
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(sender="x@y/r"))
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(sender="x@y/r", body="hi"))
         self.assertEqual(bot.apns.pushes[0][1]["aps"]["alert"]["body"], "New message")
 
     async def test_multiple_messages_banner(self):
         bot = make_bot()
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=3))
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=3, body="hi"))
         self.assertEqual(bot.apns.pushes[0][1]["aps"]["alert"]["body"], "3 new messages")
+
+    async def test_bodiless_chat_state_is_dropped(self):
+        # XEP-0085 typing / receipts / read markers carry no body, as does the
+        # body-less twin the server emits alongside every real message. Drop
+        # them: the body-ful twin still delivers the real one.
+        bot = make_bot()
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, sender="x@y/r"))
+        self.assertEqual(bot.apns.pushes, [])
+
+    async def test_real_message_twin_pair_yields_one_push(self):
+        # The real on-the-wire pattern: a body-less publish + a body-ful publish
+        # for one message. Only the body-ful one should wake the user.
+        bot = make_bot()
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1))            # body-less twin
+        await PushBot.handle_publish(
+            bot, HEX_TOKEN, make_iq(count=1, body="[This message is OMEMO encrypted]"))
+        self.assertEqual(len(bot.apns.pushes), 1)
 
     async def test_muted_conversation_is_dropped(self):
         bot = make_bot({HEX_TOKEN: {"muted": {"alice@example.com"}, "mention": {}}})
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, sender="alice@example.com/phone"))
+        await PushBot.handle_publish(
+            bot, HEX_TOKEN, make_iq(count=1, sender="alice@example.com/phone", body="hi"))
         self.assertEqual(bot.apns.pushes, [])
 
     async def test_unmuted_conversation_is_sent(self):
         bot = make_bot({HEX_TOKEN: {"muted": {"alice@example.com"}, "mention": {}}})
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, sender="bob@example.com/x"))
+        await PushBot.handle_publish(
+            bot, HEX_TOKEN, make_iq(count=1, sender="bob@example.com/x", body="hi"))
         self.assertEqual(len(bot.apns.pushes), 1)
 
     async def test_mention_only_without_mention_is_dropped(self):
@@ -193,12 +212,12 @@ class TestHandlePublish(unittest.IsolatedAsyncioTestCase):
             bot, HEX_TOKEN, make_iq(count=1, sender="room@muc/someone", body="hey Rachel!"))
         self.assertEqual(len(bot.apns.pushes), 1)
 
-    async def test_mention_only_without_body_is_delivered(self):
-        # The server didn't include a body, so we can't check for the mention —
-        # deliver rather than risk dropping a real one.
+    async def test_mention_only_without_body_is_dropped(self):
+        # A bodiless publish is dropped outright (chat state / receipt / twin)
+        # before the mention check ever runs — there's no message to mention in.
         bot = make_bot({HEX_TOKEN: {"muted": set(), "mention": {"room@muc": "rachel"}}})
         await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, sender="room@muc/someone"))
-        self.assertEqual(len(bot.apns.pushes), 1)
+        self.assertEqual(bot.apns.pushes, [])
 
     async def test_near_simultaneous_burst_is_collapsed(self):
         # The real pattern: one message arrives as a body-less + a body-ful
@@ -219,8 +238,8 @@ class TestHandlePublish(unittest.IsolatedAsyncioTestCase):
 
     async def test_distinct_tokens_are_not_collapsed(self):
         bot = make_bot()
-        await PushBot.handle_publish(bot, "aa" * 32, make_iq(count=1))
-        await PushBot.handle_publish(bot, "bb" * 32, make_iq(count=1))
+        await PushBot.handle_publish(bot, "aa" * 32, make_iq(count=1, body="hi"))
+        await PushBot.handle_publish(bot, "bb" * 32, make_iq(count=1, body="hi"))
         self.assertEqual(len(bot.apns.pushes), 2)
 
 
