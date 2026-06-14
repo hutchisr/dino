@@ -3,7 +3,7 @@
 Covers the two pieces most likely to regress and hardest to eyeball:
   * Apns.push()        — the sandbox/production fallback + per-token caching.
   * PushBot.handle_publish() — per-conversation mute / mention-only filtering,
-                         burst de-duplication, and the summary -> banner text.
+                         bodiless-publish dropping, and the summary -> banner text.
   * PushBot.on_message()     — parsing the client's filter payload.
 
 No network, no XMPP, no APNs: the async APNs HTTP call and the slixmpp stanzas
@@ -61,7 +61,7 @@ class FakeApns:
 
 def make_bot(filters=None):
     """Duck-typed stand-in for a PushBot — just the attributes the methods use."""
-    return SimpleNamespace(filters=filters or {}, last_push={}, apns=FakeApns())
+    return SimpleNamespace(filters=filters or {}, apns=FakeApns())
 
 
 HEX_TOKEN = "ab" * 32  # 64 hex chars, matches TOKEN_RE
@@ -145,7 +145,7 @@ class TestApnsFallback(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("tok", apns.token_env)
 
 
-# --- PushBot.handle_publish() filtering / dedup / summary -----------------
+# --- PushBot.handle_publish() filtering / bodiless-drop / summary ----------
 
 class TestHandlePublish(unittest.IsolatedAsyncioTestCase):
     async def test_non_token_node_is_ignored(self):
@@ -219,20 +219,12 @@ class TestHandlePublish(unittest.IsolatedAsyncioTestCase):
         await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, sender="room@muc/someone"))
         self.assertEqual(bot.apns.pushes, [])
 
-    async def test_near_simultaneous_burst_is_collapsed(self):
-        # The real pattern: one message arrives as a body-less + a body-ful
-        # publish ~100ms apart. Collapse to one push regardless of the differing
-        # summaries.
-        bot = make_bot()
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, body="New Message!"))
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1))   # body-less twin, ~instant
-        self.assertEqual(len(bot.apns.pushes), 1)
-
-    async def test_push_after_window_is_delivered(self):
-        # A genuinely new message arrives well after the de-dup window — deliver it.
+    async def test_two_rapid_distinct_messages_both_deliver(self):
+        # Two real messages back-to-back (each body-ful) must BOTH push. There is
+        # no time-window collapse: bodiless-drop already handles the per-message
+        # twin, so a second body-ful publish is a second message, not a dup.
         bot = make_bot()
         await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, body="first"))
-        bot.last_push[HEX_TOKEN] -= proxy.SIMUL_DEDUP_SECONDS + 1  # simulate elapsed window
         await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, body="second"))
         self.assertEqual(len(bot.apns.pushes), 2)
 

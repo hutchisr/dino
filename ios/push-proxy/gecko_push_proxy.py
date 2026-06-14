@@ -46,14 +46,6 @@ APNS_HOSTS = {
 APNS_FIRST = "sandbox" if os.environ.get("APNS_SANDBOX", "1") == "1" else "production"
 TOKEN_RE = re.compile(r"^[0-9a-fA-F]{32,200}$")
 
-# The server emits a single message as a burst of 2-3 near-simultaneous
-# publishes (a body-less copy + a body-ful copy, ~100ms apart). Collapse any
-# repeat publish for the same token within this short window — regardless of
-# summary, since the copies differ — into ONE push. That also means one NSE wake
-# per message instead of 2-3 racing each other (the loser times out and shows a
-# generic "New Message"). The window is far shorter than the gap between real
-# messages; the seconds-apart re-push is separately prevented by the NSE acking.
-SIMUL_DEDUP_SECONDS = 2.0
 
 
 class Apns:
@@ -123,9 +115,6 @@ class PushBot(slixmpp.ClientXMPP):
         # device token -> {"muted": set of bare jids,
         #                  "mention": {bare jid: nick}}
         self.filters: dict[str, dict] = {}
-        # device token -> monotonic time of the last push we sent, to collapse
-        # the burst of near-simultaneous publishes the server emits per message.
-        self.last_push: dict[str, float] = {}
         self.add_event_handler("session_start", self.on_start)
         self.add_event_handler("message", self.on_message)
         self.register_plugin("xep_0030")
@@ -224,20 +213,6 @@ class PushBot(slixmpp.ClientXMPP):
                 if last_body and nick.lower() not in last_body.lower():
                     log.info("mention-only %s without mention — dropping push", bare)
                     return
-
-        # Collapse the server's burst of near-simultaneous publishes for one
-        # message (body-less + body-ful, ~100ms apart) into a single push —
-        # regardless of summary, since the copies differ. One push -> one NSE
-        # wake, which decrypts cleanly instead of racing a second invocation into
-        # a generic fallback. Distinct messages are seconds apart, well outside
-        # this window; the seconds-apart re-push is handled by the NSE acking.
-        now = time.monotonic()
-        tok = node.lower()
-        last = self.last_push.get(tok)
-        if last is not None and now - last < SIMUL_DEDUP_SECONDS:
-            log.info("deduped near-simultaneous push for %s…", node[:8])
-            return
-        self.last_push[tok] = now
 
         body = "New message" if not count or count <= 1 else f"{count} new messages"
         payload = {
