@@ -61,7 +61,7 @@ class FakeApns:
 
 def make_bot(filters=None):
     """Duck-typed stand-in for a PushBot — just the attributes the methods use."""
-    return SimpleNamespace(filters=filters or {}, apns=FakeApns())
+    return SimpleNamespace(filters=filters or {}, last_push={}, apns=FakeApns())
 
 
 HEX_TOKEN = "ab" * 32  # 64 hex chars, matches TOKEN_RE
@@ -200,13 +200,27 @@ class TestHandlePublish(unittest.IsolatedAsyncioTestCase):
         await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, sender="room@muc/someone"))
         self.assertEqual(len(bot.apns.pushes), 1)
 
-    async def test_every_publish_is_forwarded(self):
-        # The proxy no longer dedups (the server's double-publish has no
-        # correlating field; the NSE clears it at the source). Each publish that
-        # passes the filters becomes one push.
+    async def test_identical_near_simultaneous_repeat_is_collapsed(self):
+        # A ghost session re-fires the same notification ~ms later; collapse it.
+        bot = make_bot()
+        iq = make_iq(count=1, body="New Message!")
+        await PushBot.handle_publish(bot, HEX_TOKEN, iq)
+        await PushBot.handle_publish(bot, HEX_TOKEN, iq)   # identical summary, same instant
+        self.assertEqual(len(bot.apns.pushes), 1)
+
+    async def test_distinct_bodies_are_both_delivered(self):
+        bot = make_bot()
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, body="first"))
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, body="second"))
+        self.assertEqual(len(bot.apns.pushes), 2)
+
+    async def test_mismatched_body_twin_is_not_collapsed_here(self):
+        # The body-less + body-ful seconds-apart re-push is the NSE's job to
+        # prevent at the source; the proxy can't tell it from a new message, so
+        # it forwards both rather than guess.
         bot = make_bot()
         await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1))
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, body="hi"))
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, body="New Message!"))
         self.assertEqual(len(bot.apns.pushes), 2)
 
 

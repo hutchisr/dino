@@ -46,6 +46,14 @@ APNS_HOSTS = {
 APNS_FIRST = "sandbox" if os.environ.get("APNS_SANDBOX", "1") == "1" else "production"
 TOKEN_RE = re.compile(r"^[0-9a-fA-F]{32,200}$")
 
+# A lingering/ghost session on the server re-fires the same notification, so one
+# message can arrive as two *identical* publishes a few milliseconds apart.
+# Collapse an identical repeat within this short window — long enough to cover
+# that near-simultaneous burst, far too short to merge two real messages (people
+# don't send distinct messages a few hundred ms apart). The seconds-apart
+# re-push is handled at the source by the NSE acking immediately, not here.
+SIMUL_DEDUP_SECONDS = 2.0
+
 
 class Apns:
     """Minimal APNs HTTP/2 client with JWT (token-based) auth."""
@@ -114,6 +122,9 @@ class PushBot(slixmpp.ClientXMPP):
         # device token -> {"muted": set of bare jids,
         #                  "mention": {bare jid: nick}}
         self.filters: dict[str, dict] = {}
+        # device token -> (summary signature, monotonic time) of the last push
+        # sent, to collapse a ghost session's identical near-simultaneous repeat.
+        self.last_push: dict[str, tuple] = {}
         self.add_event_handler("session_start", self.on_start)
         self.add_event_handler("message", self.on_message)
         self.register_plugin("xep_0030")
@@ -201,12 +212,19 @@ class PushBot(slixmpp.ClientXMPP):
                     log.info("mention-only %s without mention — dropping push", bare)
                     return
 
-        # No dedup here: the server double-publishes each message with no field
-        # that correlates the two copies or distinguishes a new message (count is
-        # always 1, sender empty, body empty-or-constant), so any proxy-side
-        # de-duplication is a guess that drops real messages. The fix lives in
-        # the NSE, which acks the message immediately so the server stops
-        # re-pushing it (see dino_ios.vala nse_fetch). The proxy just forwards.
+        # Collapse a ghost session's identical near-simultaneous repeat (same
+        # token + same summary within a couple of seconds). The mismatched-body
+        # seconds-apart re-push is handled by the NSE acking at the source, not
+        # here — the proxy can't tell that one apart from a new message.
+        now = time.monotonic()
+        tok = node.lower()
+        signature = (count, sender, last_body)
+        prev = self.last_push.get(tok)
+        if prev is not None and prev[0] == signature and now - prev[1] < SIMUL_DEDUP_SECONDS:
+            log.info("deduped near-simultaneous repeat for %s…", node[:8])
+            return
+        self.last_push[tok] = (signature, now)
+
         body = "New message" if not count or count <= 1 else f"{count} new messages"
         payload = {
             "aps": {
