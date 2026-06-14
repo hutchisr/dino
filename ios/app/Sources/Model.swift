@@ -147,6 +147,12 @@ final class AppModel: ObservableObject {
     @Published var chatStates: [Int32: String] = [:]    // conversation id -> XEP-0085 state
     @Published var occupants: [Int32: [Occupant]] = [:]
     @Published var roomInfo: [Int32: RoomInfo] = [:]
+    @Published var selfShow = "online"     // online | away | dnd | xa
+    @Published var selfStatus = ""
+    @Published var blockedContacts: [String] = []
+    @Published var blockingSupported = false
+    @Published var sendTyping = true
+    @Published var sendMarker = true
     @Published var viewerRequest: String?   // used by UI automation to open the image viewer
     @Published var accountAlias: String = ""
     @Published var omemoDeviceId: Int = 0
@@ -310,6 +316,29 @@ final class AppModel: ObservableObject {
         roster.first { $0.id == jid }?.show
     }
 
+    func setPresence(show: String, status: String) {
+        selfShow = show
+        selfStatus = status
+        DinoCore.shared.setPresence(show: show, status: status)
+    }
+
+    func requestSelfPresence() { DinoCore.shared.requestSelfPresence() }
+
+    func requestBlocklist() { DinoCore.shared.requestBlocklist() }
+    func blockContact(_ jid: String) {
+        if !blockedContacts.contains(jid) { blockedContacts = (blockedContacts + [jid]).sorted() }
+        DinoCore.shared.blockContact(jid)
+    }
+    func unblockContact(_ jid: String) {
+        blockedContacts.removeAll { $0 == jid }   // optimistic
+        DinoCore.shared.unblockContact(jid)
+    }
+    func isBlocked(_ jid: String) -> Bool { blockedContacts.contains(jid) }
+
+    func requestPrivacy() { DinoCore.shared.requestPrivacy() }
+    func setSendTyping(_ on: Bool) { sendTyping = on; DinoCore.shared.setSendTyping(on) }
+    func setSendMarker(_ on: Bool) { sendMarker = on; DinoCore.shared.setSendMarker(on) }
+
     func openChat(with jid: String) {
         if let existing = conversations.first(where: { $0.jid == jid }) {
             navigation = [existing.id]
@@ -444,6 +473,15 @@ final class AppModel: ObservableObject {
                         role: o["role"] as? String ?? "none")
                 }.sorted { $0.nick.lowercased() < $1.nick.lowercased() }
             }
+        case "self_presence":
+            selfShow = e["show"] as? String ?? "online"
+            selfStatus = e["status"] as? String ?? ""
+        case "blocklist":
+            blockingSupported = e["supported"] as? Bool ?? false
+            blockedContacts = (e["list"] as? [String] ?? []).sorted()
+        case "privacy":
+            sendTyping = e["send_typing"] as? Bool ?? true
+            sendMarker = e["send_marker"] as? Bool ?? true
         case "room_info":
             if let cid = e["conversation"] as? Int {
                 roomInfo[Int32(cid)] = RoomInfo(

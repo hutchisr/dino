@@ -75,6 +75,14 @@ final class DinoCore {
     func enablePush(proxyJid: String, node: String) { dino_ios_enable_push(proxyJid, node) }
     func setNotify(_ id: Int32, _ setting: String) { dino_ios_set_notify(id, setting) }
     func requestRoster() { dino_ios_request_roster() }
+    func setPresence(show: String, status: String) { dino_ios_set_presence(show, status) }
+    func requestSelfPresence() { dino_ios_request_self_presence() }
+    func requestBlocklist() { dino_ios_request_blocklist() }
+    func blockContact(_ jid: String) { dino_ios_block_contact(jid) }
+    func unblockContact(_ jid: String) { dino_ios_unblock_contact(jid) }
+    func requestPrivacy() { dino_ios_request_privacy() }
+    func setSendTyping(_ on: Bool) { dino_ios_set_send_typing(on ? 1 : 0) }
+    func setSendMarker(_ on: Bool) { dino_ios_set_send_marker(on ? 1 : 0) }
     func focusConversation(_ id: Int32) { dino_ios_focus_conversation(id) }
     func blurConversation(_ id: Int32) { dino_ios_blur_conversation(id) }
     func setTyping(_ id: Int32, _ typing: Bool) { dino_ios_set_typing(id, typing ? 1 : 0) }

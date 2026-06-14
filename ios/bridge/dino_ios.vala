@@ -340,7 +340,12 @@ public void start(owned EventCb cb) {
         string? log_xmpp = Environment.get_variable("DINO_LOG_XMPP");
         if (log_xmpp != null) si.connection_manager.log_options = log_xmpp;
         si.connection_manager.connection_state_changed.connect((account, state) => {
-            if (state == Dino.ConnectionManager.ConnectionState.CONNECTED) enable_mam_archiving(account);
+            if (state == Dino.ConnectionManager.ConnectionState.CONNECTED) {
+                enable_mam_archiving(account);
+                // Re-assert the user's chosen presence after Dino's initial
+                // available presence, so away/dnd + status survive reconnects.
+                if ((self_show ?? "online") != "online" || (self_status ?? "") != "") apply_self_presence();
+            }
             emit(@"{\"type\":\"connection\",\"account\":\"$(esc(account.bare_jid.to_string()))\",\"state\":\"$(state_name(state))\"}");
         });
         si.connection_manager.connection_error.connect((account, error) => {
@@ -728,6 +733,29 @@ public void add_account(string jid_str, string password) {
     });
 }
 
+// --- Privacy (typing notifications + read markers, XEP-0085/0333) ---------
+// These map to libdino's global Settings, which the send paths already honor.
+
+private static void emit_privacy() {
+    emit("{\"type\":\"privacy\",\"send_typing\":%s,\"send_marker\":%s}".printf(
+        app.settings.send_typing ? "true" : "false",
+        app.settings.send_marker ? "true" : "false"));
+}
+
+public void request_privacy() {
+    Idle.add(() => { emit_privacy(); return Source.REMOVE; });
+}
+
+public void set_send_typing(bool on) {
+    bool v = on;
+    Idle.add(() => { app.settings.send_typing = v; emit_privacy(); return Source.REMOVE; });
+}
+
+public void set_send_marker(bool on) {
+    bool v = on;
+    Idle.add(() => { app.settings.send_marker = v; emit_privacy(); return Source.REMOVE; });
+}
+
 // The roster gives bare jids, but presence is stored per resource (full jid),
 // so get_last_show(bare) is always null. Resolve the contact's resources and
 // return the most-available show: "online" | "away" | "xa" | "dnd" | "offline".
@@ -752,6 +780,111 @@ private static string roster_show(Dino.PresenceManager presence, Xmpp.Jid bare, 
         }
     }
     return best;
+}
+
+// The user's own chosen presence for this session (null/"online" means no
+// <show>). Re-applied after each (re)connect; resets to online on app restart.
+private static string? self_show = null;
+private static string? self_status = null;
+
+private static void apply_self_presence() {
+    string show = self_show ?? "online";
+    string status = self_status ?? "";
+    foreach (Account a in app.db.get_accounts()) {
+        if (!a.enabled) continue;
+        var stream = app.stream_interactor.connection_manager.get_stream(a);
+        if (stream == null) continue;
+        var presence = new Xmpp.Presence.Stanza();
+        presence.type_ = Xmpp.Presence.Stanza.TYPE_AVAILABLE;
+        if (show != "online" && show != "") presence.show = show;
+        if (status != "") presence.status = status;
+        stream.get_module(Xmpp.Presence.Module.IDENTITY).send_presence(stream, presence);
+    }
+}
+
+private static void emit_self_presence() {
+    emit("{\"type\":\"self_presence\",\"show\":\"%s\",\"status\":\"%s\"}".printf(
+        esc(self_show ?? "online"), esc(self_status ?? "")));
+}
+
+// show: "online" | "away" | "dnd" | "xa"
+public void set_presence(string show, string status) {
+    string sh = show;
+    string st = status;
+    Idle.add(() => {
+        self_show = sh;
+        self_status = st;
+        apply_self_presence();
+        emit_self_presence();
+        return Source.REMOVE;
+    });
+}
+
+public void request_self_presence() {
+    Idle.add(() => { emit_self_presence(); return Source.REMOVE; });
+}
+
+// --- Blocking (XEP-0191) --------------------------------------------------
+
+private static void emit_blocklist() {
+    var account = first_enabled_account();
+    var b = new StringBuilder("{\"type\":\"blocklist\",\"supported\":");
+    bool supported = account != null
+        && app.stream_interactor.get_module(Dino.BlockingManager.IDENTITY).is_supported(account);
+    b.append(supported ? "true" : "false");
+    b.append(",\"list\":[");
+    bool first = true;
+    if (account != null) {
+        var stream = app.stream_interactor.connection_manager.get_stream(account);
+        if (stream != null) {
+            var flag = stream.get_flag(Xmpp.Xep.BlockingCommand.Flag.IDENTITY);
+            if (flag != null && flag.blocklist != null) {
+                foreach (string jid in flag.blocklist) {
+                    if (!first) b.append_c(',');
+                    first = false;
+                    b.append("\"%s\"".printf(esc(jid)));
+                }
+            }
+        }
+    }
+    b.append("]}");
+    emit(b.str);
+}
+
+public void request_blocklist() {
+    Idle.add(() => { emit_blocklist(); return Source.REMOVE; });
+}
+
+public void block_contact(string jid_str) {
+    string j = jid_str;
+    Idle.add(() => {
+        var account = first_enabled_account();
+        if (account == null) return Source.REMOVE;
+        try {
+            app.stream_interactor.get_module(Dino.BlockingManager.IDENTITY).block(account, new Xmpp.Jid(j));
+        } catch (Error e) {
+            emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
+        }
+        // The server confirms via a block push that updates the flag; re-emit
+        // once it's likely arrived.
+        Timeout.add(600, () => { emit_blocklist(); return Source.REMOVE; });
+        return Source.REMOVE;
+    });
+}
+
+public void unblock_contact(string jid_str) {
+    string j = jid_str;
+    Idle.add(() => {
+        var account = first_enabled_account();
+        if (account == null) return Source.REMOVE;
+        try {
+            app.stream_interactor.get_module(Dino.BlockingManager.IDENTITY).unblock(account, new Xmpp.Jid(j));
+        } catch (Error e) {
+            emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
+        }
+        Timeout.add(600, () => { emit_blocklist(); return Source.REMOVE; });
+        return Source.REMOVE;
+    });
 }
 
 private static void push_roster() {

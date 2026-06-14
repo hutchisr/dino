@@ -426,14 +426,32 @@ struct ContactsView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                }
-                .onDelete { offsets in
-                    for i in offsets { model.removeContact(jid: filtered[i].id) }
+                    // No full-swipe: reveal the buttons and require a tap, so a
+                    // quick swipe can't accidentally block or remove someone.
+                    .swipeActions(allowsFullSwipe: false) {
+                        if model.isBlocked(contact.id) {
+                            Button { model.unblockContact(contact.id) } label: {
+                                Label("Unblock", systemImage: "hand.raised.slash")
+                            }
+                            .tint(.orange)
+                        } else {
+                            Button { model.blockContact(contact.id) } label: {
+                                Label("Block", systemImage: "nosign")
+                            }
+                            .tint(.red)
+                        }
+                        Button(role: .destructive) {
+                            model.removeContact(jid: contact.id)
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
+                    }
                 }
             }
             .searchable(text: $search, prompt: "Search contacts")
             .navigationTitle("Contacts")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear { model.requestBlocklist() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { isPresented = false }

@@ -8,6 +8,10 @@ struct AccountSettingsView: View {
     @State private var confirmPassword = ""
     @State private var showPhotoPicker = false
     @State private var aliasSaved = false
+    @State private var presenceShow = "online"
+    @State private var presenceStatus = ""
+
+    private let presenceOptions = [("online", "Online"), ("away", "Away"), ("dnd", "Do Not Disturb")]
 
     private var jid: String { model.accounts.first?.id ?? "" }
 
@@ -42,6 +46,23 @@ struct AccountSettingsView: View {
                     }
                 }
                 .listRowBackground(Color.clear)
+
+                Section("Status") {
+                    Picker("Availability", selection: $presenceShow) {
+                        ForEach(presenceOptions, id: \.0) { value, label in
+                            HStack {
+                                Circle().fill(presenceColor(value)).frame(width: 8, height: 8)
+                                Text(label)
+                            }
+                            .tag(value)
+                        }
+                    }
+                    TextField("Status message (optional)", text: $presenceStatus)
+                        .onSubmit { model.setPresence(show: presenceShow, status: presenceStatus) }
+                }
+                .onChange(of: presenceShow) { _, show in
+                    model.setPresence(show: show, status: presenceStatus)
+                }
 
                 Section("Display name") {
                     HStack {
@@ -83,6 +104,28 @@ struct AccountSettingsView: View {
                 }
 
                 Section {
+                    Toggle("Typing notifications", isOn: Binding(
+                        get: { model.sendTyping },
+                        set: { model.setSendTyping($0) }))
+                    Toggle("Read receipts", isOn: Binding(
+                        get: { model.sendMarker },
+                        set: { model.setSendMarker($0) }))
+                } header: {
+                    Text("Privacy")
+                } footer: {
+                    Text("When off, others won't see when you're typing or that you've read their messages.")
+                }
+
+                Section {
+                    NavigationLink {
+                        BlockedContactsView().environmentObject(model)
+                    } label: {
+                        LabeledContent("Blocked contacts",
+                                       value: model.blockedContacts.isEmpty ? "" : "\(model.blockedContacts.count)")
+                    }
+                }
+
+                Section {
                     Button(role: .destructive) {
                         isPresented = false
                         model.signOut()
@@ -103,11 +146,18 @@ struct AccountSettingsView: View {
             }
             .onAppear {
                 model.requestAccountDetails()
+                model.requestSelfPresence()
+                model.requestBlocklist()
+                model.requestPrivacy()
                 alias = model.accountAlias
+                presenceShow = model.selfShow
+                presenceStatus = model.selfStatus
             }
             .onChange(of: model.accountAlias) { _, value in
                 alias = value
             }
+            .onChange(of: model.selfShow) { _, value in presenceShow = value }
+            .onChange(of: model.selfStatus) { _, value in presenceStatus = value }
             .alert("Password changed", isPresented: $model.passwordChanged) {
                 Button("OK", role: .cancel) {}
             } message: {
