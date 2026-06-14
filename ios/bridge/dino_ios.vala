@@ -179,11 +179,21 @@ private static string nse_message_json(Dino.MessageItem mi, Conversation c) {
 // to anything new, so we leave the result empty (generic banner) rather than
 // resurrecting an old message as a notification.
 private const int64 NSE_FALLBACK_MAX_AGE_SEC = 600;
-private static void nse_append_latest_received() {
+// Tighter window for the *early* probe (below): a received message stored this
+// recently is almost certainly what this push is about, vs. a stale unread we
+// shouldn't resurrect. So we only short-circuit the budget on a clearly-fresh
+// one; the give-up case at the hard timeout uses the wider window above.
+private const int64 NSE_EARLY_MAX_AGE_SEC = 45;
+// How long to wait for a live delivery before the early probe checks the DB.
+private const uint NSE_EARLY_PROBE_MS = 6000;
+// Collect the latest received message from each unread conversation that landed
+// within `max_age_sec`, skipping anything the live path already emitted. Returns
+// whether it appended anything. (Per-conversation rather than a single global
+// latest: when messages arrived in several chats, surface them all instead of
+// dropping all but one to a generic banner.)
+private static bool nse_append_latest_received(int64 max_age_sec) {
     int64 now = GLib.get_real_time() / 1000000;
-    Dino.MessageItem? best_mi = null;
-    Conversation? best_conv = null;
-    int64 best_time = 0;
+    bool appended = false;
     var conv_mgr = app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY);
     var item_store = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY);
     var chat_interaction = app.stream_interactor.get_module(Dino.ChatInteraction.IDENTITY);
@@ -197,24 +207,29 @@ private static void nse_append_latest_received() {
             if (mi == null) continue;
             Message m = mi.message;
             if (m.direction != Message.DIRECTION_RECEIVED) continue;
-            if (display_body(m).strip() == "") continue;
+            string body = display_body(m);
+            if (body.strip() == "") continue;
             int64 t = m.time.to_unix();
-            if (now - t > NSE_FALLBACK_MAX_AGE_SEC) continue;
-            if (t > best_time) { best_time = t; best_mi = mi; best_conv = c; }
+            if (now - t > max_age_sec) continue;
+            // Dedupe against the live path (same key it uses) so a message the
+            // NSE already collected isn't appended a second time here.
+            string key = "%s|%lld|%s".printf(m.from.to_string(), t, body);
+            if (nse_seen.contains(key)) continue;
+            nse_seen.add(key);
+            if (!nse_first) nse_msgs.append_c(',');
+            nse_first = false;
+            nse_msgs.append(nse_message_json(mi, c));
+            appended = true;
         }
     }
-    if (best_mi != null && best_conv != null) {
-        if (!nse_first) nse_msgs.append_c(',');
-        nse_first = false;
-        nse_msgs.append(nse_message_json(best_mi, best_conv));
-    }
+    return appended;
 }
 
 private static void nse_finish() {
     if (nse_done) return;
     nse_done = true;
     if (nse_settle != 0) { Source.remove(nse_settle); nse_settle = 0; }
-    if (nse_first) nse_append_latest_received();
+    if (nse_first) nse_append_latest_received(NSE_FALLBACK_MAX_AGE_SEC);
     nse_msgs.append_c(']');
     string result = @"{\"type\":\"nse_result\",\"messages\":$(nse_msgs.str)}";
     // Close the XMPP session cleanly BEFORE signalling the extension is done.
@@ -336,6 +351,21 @@ public void nse_fetch(int timeout_ms, owned EventCb cb) {
             if (account.enabled) account.set_ephemeral_resource(nse_resource);
         }
         Timeout.add(hard_ms, () => { nse_finish(); return Source.REMOVE; });
+        // Early DB-fallback probe. If no live message has arrived a few seconds
+        // in, the triggering message was very likely delivered to the still-
+        // connected (backgrounded) app and is already in the shared DB. Surface
+        // it now — decrypted — and finish, instead of burning the whole budget
+        // waiting on a live/MAM copy that already arrived elsewhere. That also
+        // keeps us clear of the ~30s iOS deadline, which would otherwise fire
+        // serviceExtensionTimeWillExpire and deliver a generic banner. Only acts
+        // when the live path hasn't fired (nse_first) and only on a clearly-
+        // fresh message, so it never short-circuits a real incoming delivery.
+        Timeout.add(NSE_EARLY_PROBE_MS, () => {
+            if (!nse_done && nse_first && nse_append_latest_received(NSE_EARLY_MAX_AGE_SEC)) {
+                nse_finish();
+            }
+            return Source.REMOVE;
+        });
         app.hold();
         app.run();
         return true;
