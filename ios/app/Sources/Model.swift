@@ -681,16 +681,5 @@ final class AppModel: ObservableObject {
     }
 }
 
-/// gdk-pixbuf on iOS ships only the built-in PNG loader, so re-encode any picked
-/// image (JPEG/HEIC/…) to a PNG temp file before handing its path to the bridge
-/// for avatar publishing. Returns nil if the image can't be read or written.
-private func avatarPNG(from path: String) -> String? {
-    guard let image = UIImage(contentsOfFile: path), let data = image.pngData() else { return nil }
-    let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
-    do {
-        try data.write(to: dest)
-        return dest.path
-    } catch {
-        return nil
-    }
-}
+// avatarPNG(from:) lives in GeckoKit/Sources/GeckoKit/ImageEncoding.swift —
+// compiled into this app module by build-app.sh and tested on the iOS Simulator.
