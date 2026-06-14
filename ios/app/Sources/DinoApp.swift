@@ -1008,6 +1008,55 @@ private func linkifiedBody(_ text: String) -> AttributedString {
     return AttributedString(mutable)
 }
 
+/// Split a body into consecutive runs of quoted (leading `>`) and normal lines,
+/// so a multi-line quote shares one bar and adjacent normal lines stay together.
+private func messageRuns(_ text: String) -> [(isQuote: Bool, text: String)] {
+    var runs: [(isQuote: Bool, text: String)] = []
+    for rawLine in text.components(separatedBy: "\n") {
+        let isQuote = rawLine.hasPrefix(">")
+        var line = rawLine
+        if isQuote {
+            line = String(line.dropFirst())
+            if line.hasPrefix(" ") { line = String(line.dropFirst()) }
+        }
+        if let last = runs.last, last.isQuote == isQuote {
+            runs[runs.count - 1].text += "\n" + line
+        } else {
+            runs.append((isQuote, line))
+        }
+    }
+    return runs
+}
+
+/// Render a message body: lines starting with `>` become a blockquote (accent
+/// bar + muted text), everything else is normal linkified text.
+@ViewBuilder
+private func messageBody(_ text: String) -> some View {
+    if !text.hasPrefix(">") && !text.contains("\n>") {
+        Text(linkifiedBody(text)).tint(.accentColor)   // common path: no quotes
+    } else {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(messageRuns(text).enumerated()), id: \.offset) { _, run in
+                if run.isQuote {
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(Color.accentColor.opacity(0.5))
+                            .frame(width: 3)
+                        Text(linkifiedBody(run.text))
+                            .italic()
+                            .foregroundStyle(.secondary)
+                            .tint(.accentColor)
+                        Spacer(minLength: 0)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(linkifiedBody(run.text)).tint(.accentColor)
+                }
+            }
+        }
+    }
+}
+
 struct MessageBubble: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
@@ -1088,7 +1137,7 @@ struct MessageBubble: View {
                     if msg.isFile {
                         FileContent(conversationId: conversationId, msg: msg, onImageTap: onImageTap)
                     } else {
-                        Text(linkifiedBody(msg.body)).tint(.accentColor)
+                        messageBody(msg.body)
                     }
                     HStack(spacing: 4) {
                         if msg.encryption == "OMEMO" {
