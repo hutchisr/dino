@@ -195,6 +195,16 @@ class PushBot(slixmpp.ClientXMPP):
         # ("[This message is OMEMO encrypted]") that every mainstream client
         # includes. So drop anything bodiless; the body-ful twin of a genuine
         # message still gets through, giving exactly one push per message.
+        #
+        # ACCEPTED TRADEOFF: a real message *could* summarise bodiless — if a
+        # peer's client omits the OMEMO fallback <body>, or sends the encrypted
+        # payload as a stanza separate from any body-bearing copy. We'd drop its
+        # push and miss that notification. That's deliberate for now: the
+        # alternative (pushing on every bodiless publish) floods the user with
+        # "New message" spam for every keystroke and receipt. Once the filtering
+        # entitlement lands, the NSE can fetch + classify on-device and decide
+        # precisely, and this blunt drop can be relaxed. Until then, fewer-but-
+        # real pushes beats accurate-but-spammy. See [[gecko-push-duplication]].
         if not last_body:
             log.info("bodiless publish for %s… (chat state / receipt / twin) — dropping", node[:8])
             return
