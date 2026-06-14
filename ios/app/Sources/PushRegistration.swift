@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         pendingDisconnect?.cancel()
         beginBgTaskIfNeeded()
         let work = DispatchWorkItem { [weak self] in
-            DinoCore.shared.appBackgrounded()
+            GeckoCore.shared.appBackgrounded()
             self?.pendingDisconnect = nil
             // Let the flush-ack + stream close finish before releasing the
             // background assertion that keeps the process alive to do it.
@@ -130,7 +130,7 @@ enum PushRegistration {
     /// Idempotent; called when the token arrives and on every reconnect.
     static func enableOnServer() {
         guard let token = deviceToken else { return }
-        DinoCore.shared.enablePush(proxyJid: proxyJid, node: token)
+        GeckoCore.shared.enablePush(proxyJid: proxyJid, node: token)
     }
 
     /// Clears delivered banners and the badge — the app is open, so the

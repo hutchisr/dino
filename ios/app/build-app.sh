@@ -59,6 +59,7 @@ xcrun -sdk "$SDK" swiftc \
   $(printf -- '-Xcc %s ' $CFLAGS) -Xcc -I"$PREFIX/include" \
   $SIM_ENTS \
   "$HERE"/Sources/*.swift \
+  "$HERE"/GeckoKit/Sources/GeckoKit/*.swift \
   -L "$PREFIX/lib" -L "$PREFIX/lib/gio/modules" -L "$PREFIX/lib/dino/plugins" \
   -ldinoios -ldino -lxmpp-vala -lqlite -lcrypto-vala \
   -Xlinker -force_load -Xlinker "$PREFIX/lib/dino/plugins/omemo.a" \

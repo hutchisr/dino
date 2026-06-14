@@ -9,3 +9,6 @@ gschemas.compiled
 *.p8
 __pycache__/
 .sbom-tool/
+# SwiftPM build artifacts (GeckoKit test package)
+.build/
+.swiftpm/

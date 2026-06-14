@@ -6,6 +6,10 @@
 #  - trailing commas in multi-line literals are intentional (clean diffs)
 # The bug-catching rules (unused bindings/params, force casts, etc.) stay on.
 
+excluded:
+  - "**/.build"      # SwiftPM build dir (GeckoKit) — generated sources
+  - "**/.swiftpm"
+
 disabled_rules:
   - identifier_name
   - type_body_length

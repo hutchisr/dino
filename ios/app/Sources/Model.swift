@@ -173,99 +173,99 @@ final class AppModel: ObservableObject {
     func boot() {
         if booted { return }
         booted = true
-        DinoCore.shared.onEvent = { [weak self] e in self?.handle(e) }
-        DinoCore.shared.start()
+        GeckoCore.shared.onEvent = { [weak self] e in self?.handle(e) }
+        GeckoCore.shared.start()
     }
 
     func addAccount(jid: String, password: String) {
-        DinoCore.shared.addAccount(jid: jid, password: password)
+        GeckoCore.shared.addAccount(jid: jid, password: password)
     }
 
     func startConversation(jid: String) {
-        DinoCore.shared.startConversation(jid: jid)
+        GeckoCore.shared.startConversation(jid: jid)
     }
 
     func signOut() {
-        DinoCore.shared.signOut()
+        GeckoCore.shared.signOut()
     }
 
     func setAvatar(path: String) {
-        DinoCore.shared.setAvatar(path: avatarPNG(from: path) ?? path)
+        GeckoCore.shared.setAvatar(path: avatarPNG(from: path) ?? path)
         // re-request our own avatar once published
         if let jid = accounts.first?.id {
             requestedAvatars.remove(jid)
             avatars[jid] = nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                DinoCore.shared.requestAvatar(jid: jid)
+                GeckoCore.shared.requestAvatar(jid: jid)
             }
         }
     }
 
     func setAlias(_ alias: String) {
-        DinoCore.shared.setAlias(alias)
+        GeckoCore.shared.setAlias(alias)
     }
 
     func changePassword(_ pw: String) {
-        DinoCore.shared.changePassword(pw)
+        GeckoCore.shared.changePassword(pw)
     }
 
     func requestAccountDetails() {
-        DinoCore.shared.requestAccountDetails()
+        GeckoCore.shared.requestAccountDetails()
     }
 
     func requestState() {
-        DinoCore.shared.requestState()
+        GeckoCore.shared.requestState()
     }
 
     func focusConversation(_ id: Int32) {
-        DinoCore.shared.focusConversation(id)
+        GeckoCore.shared.focusConversation(id)
     }
 
     func blurConversation(_ id: Int32) {
-        DinoCore.shared.blurConversation(id)
+        GeckoCore.shared.blurConversation(id)
     }
 
     func setTyping(_ id: Int32, _ typing: Bool) {
-        DinoCore.shared.setTyping(id, typing)
+        GeckoCore.shared.setTyping(id, typing)
     }
 
     func sendFile(_ id: Int32, path: String) {
-        DinoCore.shared.sendFile(id, path: path)
+        GeckoCore.shared.sendFile(id, path: path)
     }
 
     func downloadFile(_ id: Int32, item: Int32) {
-        DinoCore.shared.downloadFile(id, item: item)
+        GeckoCore.shared.downloadFile(id, item: item)
     }
 
     func joinMuc(jid: String, nick: String?) {
-        DinoCore.shared.joinMuc(jid: jid, nick: nick)
+        GeckoCore.shared.joinMuc(jid: jid, nick: nick)
     }
 
     func createMuc(jid: String, nick: String?) {
-        DinoCore.shared.createMuc(jid: jid, nick: nick)
+        GeckoCore.shared.createMuc(jid: jid, nick: nick)
     }
 
     func closeConversation(_ id: Int32) {
-        DinoCore.shared.closeConversation(id)
+        GeckoCore.shared.closeConversation(id)
         if navigation.contains(id) { navigation = [] }
     }
 
     func startOccupantDM(_ id: Int32, nick: String) {
-        DinoCore.shared.startOccupantDM(id, nick: nick)
+        GeckoCore.shared.startOccupantDM(id, nick: nick)
     }
 
     func mucKick(_ id: Int32, nick: String) {
-        DinoCore.shared.mucKick(id, nick: nick)
+        GeckoCore.shared.mucKick(id, nick: nick)
         refreshOccupantsSoon(id)
     }
 
     func mucSetAffiliation(_ id: Int32, nick: String, affiliation: String) {
-        DinoCore.shared.mucSetAffiliation(id, nick: nick, affiliation: affiliation)
+        GeckoCore.shared.mucSetAffiliation(id, nick: nick, affiliation: affiliation)
         refreshOccupantsSoon(id)
     }
 
     func mucSetRole(_ id: Int32, nick: String, role: String) {
-        DinoCore.shared.mucSetRole(id, nick: nick, role: role)
+        GeckoCore.shared.mucSetRole(id, nick: nick, role: role)
         refreshOccupantsSoon(id)
     }
 
@@ -277,38 +277,38 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func requestRoomInfo(_ id: Int32) { DinoCore.shared.requestRoomInfo(id) }
-    func setRoomSubject(_ id: Int32, _ subject: String) { DinoCore.shared.mucSetSubject(id, subject: subject) }
-    func inviteToRoom(_ id: Int32, jid: String) { DinoCore.shared.mucInvite(id, jid: jid) }
-    func setRoomName(_ id: Int32, _ name: String) { DinoCore.shared.mucSetName(id, name: name) }
+    func requestRoomInfo(_ id: Int32) { GeckoCore.shared.requestRoomInfo(id) }
+    func setRoomSubject(_ id: Int32, _ subject: String) { GeckoCore.shared.mucSetSubject(id, subject: subject) }
+    func inviteToRoom(_ id: Int32, jid: String) { GeckoCore.shared.mucInvite(id, jid: jid) }
+    func setRoomName(_ id: Int32, _ name: String) { GeckoCore.shared.mucSetName(id, name: name) }
     func setRoomPrivate(_ id: Int32, _ priv: Bool) {
         roomInfo[id]?.isPrivate = priv   // optimistic; bridge re-emits room_info to confirm
-        DinoCore.shared.mucSetPrivate(id, priv)
+        GeckoCore.shared.mucSetPrivate(id, priv)
     }
     func setRoomModerated(_ id: Int32, _ moderated: Bool) {
         roomInfo[id]?.isModerated = moderated
-        DinoCore.shared.mucSetModerated(id, moderated)
+        GeckoCore.shared.mucSetModerated(id, moderated)
     }
     func setRoomAvatar(_ id: Int32, path: String) {
-        DinoCore.shared.mucSetAvatar(id, path: avatarPNG(from: path) ?? path)
+        GeckoCore.shared.mucSetAvatar(id, path: avatarPNG(from: path) ?? path)
     }
 
     func requestOccupants(_ id: Int32) {
-        DinoCore.shared.requestOccupants(id)
+        GeckoCore.shared.requestOccupants(id)
     }
 
     func setReaction(_ id: Int32, item: Int32, emoji: String, add: Bool) {
-        DinoCore.shared.setReaction(id, item: item, emoji: emoji, add: add)
+        GeckoCore.shared.setReaction(id, item: item, emoji: emoji, add: add)
     }
 
     func correctMessage(_ id: Int32, item: Int32, body: String) {
-        DinoCore.shared.correctMessage(id, item: item, body: body)
+        GeckoCore.shared.correctMessage(id, item: item, body: body)
     }
 
     func ensureAvatar(for jid: String) {
         if avatars[jid] == nil && !requestedAvatars.contains(jid) {
             requestedAvatars.insert(jid)
-            DinoCore.shared.requestAvatar(jid: jid)
+            GeckoCore.shared.requestAvatar(jid: jid)
         }
     }
 
@@ -322,25 +322,25 @@ final class AppModel: ObservableObject {
     func setPresence(show: String, status: String) {
         selfShow = show
         selfStatus = status
-        DinoCore.shared.setPresence(show: show, status: status)
+        GeckoCore.shared.setPresence(show: show, status: status)
     }
 
-    func requestSelfPresence() { DinoCore.shared.requestSelfPresence() }
+    func requestSelfPresence() { GeckoCore.shared.requestSelfPresence() }
 
-    func requestBlocklist() { DinoCore.shared.requestBlocklist() }
+    func requestBlocklist() { GeckoCore.shared.requestBlocklist() }
     func blockContact(_ jid: String) {
         if !blockedContacts.contains(jid) { blockedContacts = (blockedContacts + [jid]).sorted() }
-        DinoCore.shared.blockContact(jid)
+        GeckoCore.shared.blockContact(jid)
     }
     func unblockContact(_ jid: String) {
         blockedContacts.removeAll { $0 == jid }   // optimistic
-        DinoCore.shared.unblockContact(jid)
+        GeckoCore.shared.unblockContact(jid)
     }
     func isBlocked(_ jid: String) -> Bool { blockedContacts.contains(jid) }
 
-    func requestPrivacy() { DinoCore.shared.requestPrivacy() }
-    func setSendTyping(_ on: Bool) { sendTyping = on; DinoCore.shared.setSendTyping(on) }
-    func setSendMarker(_ on: Bool) { sendMarker = on; DinoCore.shared.setSendMarker(on) }
+    func requestPrivacy() { GeckoCore.shared.requestPrivacy() }
+    func setSendTyping(_ on: Bool) { sendTyping = on; GeckoCore.shared.setSendTyping(on) }
+    func setSendMarker(_ on: Bool) { sendMarker = on; GeckoCore.shared.setSendMarker(on) }
 
     func openChat(with jid: String) {
         if let existing = conversations.first(where: { $0.jid == jid }) {
@@ -352,39 +352,39 @@ final class AppModel: ObservableObject {
     }
 
     func addContact(jid: String, alias: String?) {
-        DinoCore.shared.addContact(jid: jid, alias: alias)
+        GeckoCore.shared.addContact(jid: jid, alias: alias)
     }
 
     func removeContact(jid: String) {
-        DinoCore.shared.removeContact(jid: jid)
+        GeckoCore.shared.removeContact(jid: jid)
     }
 
     func respondSubscription(jid: String, approve: Bool) {
-        DinoCore.shared.respondSubscription(jid: jid, approve: approve)
+        GeckoCore.shared.respondSubscription(jid: jid, approve: approve)
         subscriptionRequests.removeAll { $0 == jid }
     }
 
     func openConversation(_ id: Int32) {
-        DinoCore.shared.requestMessages(conversation: id)
+        GeckoCore.shared.requestMessages(conversation: id)
     }
 
     func send(_ id: Int32, _ body: String, replyTo: Int32 = 0) {
-        DinoCore.shared.sendText(conversation: id, body: body, replyTo: replyTo)
+        GeckoCore.shared.sendText(conversation: id, body: body, replyTo: replyTo)
     }
 
     func setEncryption(_ id: Int32, omemo: Bool) {
-        DinoCore.shared.setEncryption(conversation: id, omemo: omemo)
+        GeckoCore.shared.setEncryption(conversation: id, omemo: omemo)
     }
 
     func setNotify(_ id: Int32, _ setting: String) {
-        DinoCore.shared.setNotify(id, setting)
+        GeckoCore.shared.setNotify(id, setting)
     }
 
     private func handle(_ e: [String: Any]) {
         switch e["type"] as? String {
         case "ready":
             ready = true
-            DinoCore.shared.requestState()
+            GeckoCore.shared.requestState()
             runAutomation()
         case "accounts":
             if let list = e["list"] as? [[String: Any]] {
@@ -394,7 +394,7 @@ final class AppModel: ObservableObject {
                 }
             }
         case "account_added":
-            DinoCore.shared.requestState()
+            GeckoCore.shared.requestState()
         case "account_details":
             accountAlias = e["alias"] as? String ?? ""
             omemoDeviceId = e["omemo_device_id"] as? Int ?? 0
@@ -408,7 +408,7 @@ final class AppModel: ObservableObject {
             navigation = []
             roster = []
             subscriptionRequests = []
-            DinoCore.shared.requestState()
+            GeckoCore.shared.requestState()
         case "connection":
             if let jid = e["account"] as? String, let state = e["state"] as? String {
                 if let i = accounts.firstIndex(where: { $0.id == jid }) {
@@ -426,7 +426,7 @@ final class AppModel: ObservableObject {
                     // pass was still mid-join).
                     for delay in [3.0, 7.0] {
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                            DinoCore.shared.rejoinActiveRooms()
+                            GeckoCore.shared.rejoinActiveRooms()
                         }
                     }
                 }

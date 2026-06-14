@@ -3,7 +3,7 @@ import UIKit
 import PhotosUI
 
 @main
-struct DinoApp: App {
+struct GeckoApp: App {
     @StateObject private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -25,7 +25,7 @@ struct DinoApp: App {
                 appDelegate.cancelBackgroundDisconnect()
                 PushRegistration.clearDelivered()
                 if model.ready && model.hasAccount {
-                    DinoCore.shared.appForegrounded()
+                    GeckoCore.shared.appForegrounded()
                 }
             case .background:
                 // Cleanly disconnect (after a short grace delay) so iOS doesn't
@@ -998,40 +998,9 @@ struct ChatView: View {
     }
 }
 
-private let messageLinkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-
-/// Message text with tappable links (URLs, emails); falls back to plain text.
-private func linkifiedBody(_ text: String) -> AttributedString {
-    guard !text.isEmpty, let detector = messageLinkDetector else { return AttributedString(text) }
-    let mutable = NSMutableAttributedString(string: text)
-    let range = NSRange(location: 0, length: (text as NSString).length)
-    detector.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
-        if let url = match?.url, let matchRange = match?.range {
-            mutable.addAttribute(.link, value: url, range: matchRange)
-        }
-    }
-    return AttributedString(mutable)
-}
-
-/// Split a body into consecutive runs of quoted (leading `>`) and normal lines,
-/// so a multi-line quote shares one bar and adjacent normal lines stay together.
-private func messageRuns(_ text: String) -> [(isQuote: Bool, text: String)] {
-    var runs: [(isQuote: Bool, text: String)] = []
-    for rawLine in text.components(separatedBy: "\n") {
-        let isQuote = rawLine.hasPrefix(">")
-        var line = rawLine
-        if isQuote {
-            line = String(line.dropFirst())
-            if line.hasPrefix(" ") { line = String(line.dropFirst()) }
-        }
-        if let last = runs.last, last.isQuote == isQuote {
-            runs[runs.count - 1].text += "\n" + line
-        } else {
-            runs.append((isQuote, line))
-        }
-    }
-    return runs
-}
+// linkifiedBody(_:) and messageRuns(_:) live in GeckoKit/Sources/GeckoKit/
+// MessageFormatting.swift — compiled into this app module by build-app.sh and
+// unit-tested via `swift test` in the GeckoKit package.
 
 /// Render a message body: lines starting with `>` become a blockquote (accent
 /// bar + muted text), everything else is normal linkified text.

@@ -8,7 +8,7 @@ import Foundation
 /// single `nse_result` line and ignore anything else.
 final class NSEFetcher {
     /// Retained for the lifetime of the call and released by the bridge's
-    /// destroy-notify, mirroring DinoCore's trampoline ownership.
+    /// destroy-notify, mirroring GeckoCore's trampoline ownership.
     private let completion: ([NSEMessage]) -> Void
     private var fired = false
 

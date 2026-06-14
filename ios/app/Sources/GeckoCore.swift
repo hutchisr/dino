@@ -3,8 +3,8 @@ import Foundation
 /// Swift wrapper around the libdino iOS bridge (dinoios.h). All bridge calls
 /// are fire-and-forget; results and events come back as JSON dictionaries on
 /// the main queue via `onEvent`.
-final class DinoCore {
-    static let shared = DinoCore()
+final class GeckoCore {
+    static let shared = GeckoCore()
     var onEvent: (([String: Any]) -> Void)?
 
     private init() {}
@@ -18,7 +18,7 @@ final class DinoCore {
         // GLib's XDG dirs default to $HOME/.local/... — the container root is
         // not writable on a real device, so point them at the App Group
         // container (shared with the NSE), falling back to Library/Caches.
-        let dirs = DinoCore.storageDirs()
+        let dirs = GeckoCore.storageDirs()
         setenv("XDG_DATA_HOME", dirs.data, 1)
         setenv("XDG_CONFIG_HOME", dirs.config, 1)
         setenv("XDG_CACHE_HOME", dirs.cache, 1)
@@ -39,7 +39,7 @@ final class DinoCore {
                       cache: caches.appendingPathComponent("xdg-cache"))
 
         guard let container = fm.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) else {
-            NSLog("DinoCore: App Group unavailable, using per-app storage")
+            NSLog("GeckoCore: App Group unavailable, using per-app storage")
             return (legacy.data.path, legacy.config.path, legacy.cache.path)
         }
         let shared = (data: container.appendingPathComponent("xdg-data"),
@@ -58,9 +58,9 @@ final class DinoCore {
         do {
             try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fm.moveItem(at: from, to: to)
-            NSLog("DinoCore: migrated %@ -> %@", from.path, to.path)
+            NSLog("GeckoCore: migrated %@ -> %@", from.path, to.path)
         } catch {
-            NSLog("DinoCore: storage migration failed for %@: %@", from.path, error.localizedDescription)
+            NSLog("GeckoCore: storage migration failed for %@: %@", from.path, error.localizedDescription)
         }
     }
 
@@ -120,7 +120,7 @@ final class DinoCore {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data),
               let dict = obj as? [String: Any] else {
-            NSLog("DinoCore: undecodable event: %@", json)
+            NSLog("GeckoCore: undecodable event: %@", json)
             return
         }
         DispatchQueue.main.async { self.onEvent?(dict) }
@@ -129,10 +129,10 @@ final class DinoCore {
 
 private func eventTrampoline(json: UnsafePointer<CChar>?, userData: gpointer?) {
     guard let json, let userData else { return }
-    Unmanaged<DinoCore>.fromOpaque(userData).takeUnretainedValue().emit(String(cString: json))
+    Unmanaged<GeckoCore>.fromOpaque(userData).takeUnretainedValue().emit(String(cString: json))
 }
 
 private func releaseContext(userData: gpointer?) {
     guard let userData else { return }
-    Unmanaged<DinoCore>.fromOpaque(userData).release()
+    Unmanaged<GeckoCore>.fromOpaque(userData).release()
 }
