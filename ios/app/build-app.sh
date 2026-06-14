@@ -29,8 +29,14 @@ XCODE_BUILD="$(xcodebuild -version | awk 'NR==2{print $3}')"
 MACHINE_BUILD="$(sw_vers -buildVersion)"
 DT_XCODE="$(echo "$XCODE_VER" | awk -F. '{printf "%02d%d%d", $1, $2, ($3==""?0:$3)}')"
 APP_SHORT_VER="$(plutil -extract CFBundleShortVersionString raw "$HERE/Info.plist")"
+case "$SDK" in
+  iphoneos)        PLATFORM_NAME="iPhoneOS" ;;
+  iphonesimulator) PLATFORM_NAME="iPhoneSimulator" ;;
+  *)               PLATFORM_NAME="iPhoneOS" ;;
+esac
 
 add_build_metadata() {  # $1 = path to an Info.plist inside a built bundle
+  plutil -replace CFBundleSupportedPlatforms -json "[\"$PLATFORM_NAME\"]" "$1"
   plutil -replace DTPlatformName -string "$SDK" "$1"
   plutil -replace DTPlatformVersion -string "$SDK_VER" "$1"
   plutil -replace DTSDKName -string "${SDK}${SDK_VER}" "$1"
