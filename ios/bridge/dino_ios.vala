@@ -31,6 +31,7 @@ public class Application : GLib.Application, Dino.Application {
 }
 
 private static Application? app = null;
+private static MainLoop? nse_loop = null;
 private static EventCb? event_cb = null;
 private static string? push_proxy_jid = null;
 private static string? push_token = null;
@@ -242,7 +243,7 @@ private static async void nse_shutdown() {
     } catch (Error e) {
         warning("nse shutdown error: %s", e.message);
     }
-    if (app != null) app.quit();
+    if (nse_loop != null) nse_loop.quit();
 }
 
 public void nse_fetch(int timeout_ms, owned EventCb cb) {
@@ -285,41 +286,40 @@ public void nse_fetch(int timeout_ms, owned EventCb cb) {
             if (nse_settle != 0) Source.remove(nse_settle);
             nse_settle = Timeout.add(2500, () => { nse_settle = 0; nse_finish(); return Source.REMOVE; });
         });
-        // Connect enabled accounts explicitly: the app relies on the
-        // GApplication `startup` signal (-> restore) to do this, but that path
-        // doesn't drive the connection inside the extension, so trigger it
-        // ourselves once the loop is running.
+        // Connect enabled accounts explicitly once the loop is running (we run
+        // a plain MainLoop, not GApplication.run(), so the startup -> restore()
+        // path that would normally connect them never fires).
         Idle.add(() => {
             int n = 0;
             foreach (Account account in app.db.get_accounts()) {
                 if (account.enabled) {
-                    // Resource was already set to the stable "gecko-nse" before
-                    // app.run() (so restore() bound it correctly); this explicit
-                    // connect is a backstop in case restore() didn't fire.
                     app.stream_interactor.connect_account(account);
                     n++;
                 }
             }
             return Source.REMOVE;
         });
-        // Force a STABLE, per-install, app-distinct resource BEFORE app.run()
-        // fires the `startup` signal -> restore() -> add_connection(), which
-        // would otherwise bind with the db-stored (and periodically
-        // regenerated) "gecko.<hex>" resource. A fresh random resource per wake
+        // Force a STABLE, per-install, app-distinct resource BEFORE the connect
+        // above runs, otherwise it would bind with the db-stored (and
+        // periodically regenerated) "gecko.<hex>" resource. A fresh random
+        // resource per wake
         // left a new server-side session each time; with resume/push that
         // orphans a push-enabled session that re-pushes forever. The resource
         // must be STABLE across wakes (so a repeat wake resource-conflict-
         // *replaces* its own previous session instead of orphaning a new one)
         // and UNIQUE per install (so multiple installs' extensions don't kick
         // each other). Swift hands us a per-install id via GECKO_NSE_RESOURCE.
-        // db.get_accounts() returns cached instances, so restore() sees these.
+        // db.get_accounts() returns cached instances, so the connect sees these.
         string nse_resource = Environment.get_variable("GECKO_NSE_RESOURCE") ?? "gecko-nse";
         foreach (Account account in app.db.get_accounts()) {
             if (account.enabled) account.set_ephemeral_resource(nse_resource);
         }
         Timeout.add(hard_ms, () => { nse_finish(); return Source.REMOVE; });
-        app.hold();
-        app.run();
+        // Run a plain MainLoop rather than GApplication.run() — same reason as
+        // the main app (start()): app.run() pumped the GLib context from a
+        // second thread, racing libdino's state. nse_shutdown quits this loop.
+        nse_loop = new MainLoop(null, false);
+        nse_loop.run();
         return true;
     });
 }
