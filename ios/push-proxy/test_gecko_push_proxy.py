@@ -61,7 +61,7 @@ class FakeApns:
 
 def make_bot(filters=None):
     """Duck-typed stand-in for a PushBot — just the attributes the methods use."""
-    return SimpleNamespace(filters=filters or {}, last_push={}, apns=FakeApns())
+    return SimpleNamespace(filters=filters or {}, apns=FakeApns())
 
 
 HEX_TOKEN = "ab" * 32  # 64 hex chars, matches TOKEN_RE
@@ -200,40 +200,13 @@ class TestHandlePublish(unittest.IsolatedAsyncioTestCase):
         await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, sender="room@muc/someone"))
         self.assertEqual(len(bot.apns.pushes), 1)
 
-    async def test_identical_publish_is_deduplicated(self):
-        # The server can deliver the same notification twice; collapse the repeat.
+    async def test_every_publish_is_forwarded(self):
+        # The proxy no longer dedups (the server's double-publish has no
+        # correlating field; the NSE clears it at the source). Each publish that
+        # passes the filters becomes one push.
         bot = make_bot()
-        iq = make_iq(count=1, sender="x@y/r", body="hi")
-        await PushBot.handle_publish(bot, HEX_TOKEN, iq)
-        await PushBot.handle_publish(bot, HEX_TOKEN, iq)   # identical summary, same window
-        self.assertEqual(len(bot.apns.pushes), 1)
-
-    async def test_server_double_publish_collapses(self):
-        # The real pattern: a body-less copy, then ~2s later one with the body.
-        bot = make_bot()
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1))               # body-less
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, body="hello"))  # twin with body
-        self.assertEqual(len(bot.apns.pushes), 1)
-
-    async def test_double_publish_collapses_regardless_of_order(self):
-        bot = make_bot()
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, body="hello"))  # body first
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1))               # body-less twin
-        self.assertEqual(len(bot.apns.pushes), 1)
-
-    async def test_distinct_messages_same_token_are_delivered(self):
-        # A genuinely new message (incremented count / different body) must NOT
-        # be swallowed by dedup — prompt delivery over de-duplication.
-        bot = make_bot()
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, sender="x@y/r", body="first"))
-        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=2, sender="x@y/r", body="second"))
-        self.assertEqual(len(bot.apns.pushes), 2)
-
-    async def test_distinct_tokens_not_deduplicated(self):
-        bot = make_bot()
-        iq = make_iq(count=1, sender="x@y/r", body="hi")
-        await PushBot.handle_publish(bot, "aa" * 32, iq)
-        await PushBot.handle_publish(bot, "bb" * 32, iq)
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1))
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, body="hi"))
         self.assertEqual(len(bot.apns.pushes), 2)
 
 

@@ -281,6 +281,16 @@ public void nse_fetch(int timeout_ms, owned EventCb cb) {
             if (!nse_first) nse_msgs.append_c(',');
             nse_first = false;
             nse_msgs.append(nse_message_json(mi, conversation));
+            // Ack received stanzas NOW (XEP-0198), not just at shutdown: the
+            // server clears its push-pending state when it sees our <a/>, so
+            // acking immediately beats its re-push grace timer. Acking only on
+            // shutdown (after the 2.5s settle) lets that timer fire first and
+            // emit a second "ghost" push for the same message.
+            var ack_stream = app.stream_interactor.connection_manager.get_stream(conversation.account);
+            if (ack_stream != null) {
+                var ack_sm = ack_stream.get_module(Xmpp.Xep.StreamManagement.Module.IDENTITY);
+                if (ack_sm != null) ack_sm.flush_ack.begin(ack_stream);
+            }
             // return shortly after the burst of MAM-synced messages settles
             if (nse_settle != 0) Source.remove(nse_settle);
             nse_settle = Timeout.add(2500, () => { nse_settle = 0; nse_finish(); return Source.REMOVE; });

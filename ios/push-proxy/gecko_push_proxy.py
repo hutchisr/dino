@@ -46,13 +46,6 @@ APNS_HOSTS = {
 APNS_FIRST = "sandbox" if os.environ.get("APNS_SANDBOX", "1") == "1" else "production"
 TOKEN_RE = re.compile(r"^[0-9a-fA-F]{32,200}$")
 
-# Window for collapsing the server's double-publish of a single message: it
-# sends a body-less notification followed ~2s later by one carrying the body.
-# Long enough to cover that gap with margin, short enough to keep delivery
-# prompt (two *different* messages carry different bodies, so they're never
-# collapsed regardless of this window).
-DEDUP_WINDOW_SECONDS = 3.0
-
 
 class Apns:
     """Minimal APNs HTTP/2 client with JWT (token-based) auth."""
@@ -121,10 +114,6 @@ class PushBot(slixmpp.ClientXMPP):
         # device token -> {"muted": set of bare jids,
         #                  "mention": {bare jid: nick}}
         self.filters: dict[str, dict] = {}
-        # device token -> (last pushed body or None, monotonic time). Used to
-        # collapse the server's body-less + body-ful double-publish of a single
-        # message (see handle_publish) without dropping distinct messages.
-        self.last_push: dict[str, tuple] = {}
         self.add_event_handler("session_start", self.on_start)
         self.add_event_handler("message", self.on_message)
         self.register_plugin("xep_0030")
@@ -212,23 +201,12 @@ class PushBot(slixmpp.ClientXMPP):
                     log.info("mention-only %s without mention — dropping push", bare)
                     return
 
-        # Collapse the server's double-publish: each message arrives as a
-        # body-less copy and, ~2s later, a copy with the body. (count and sender
-        # don't distinguish them — both are e.g. count=1, sender=None.) Treat a
-        # publish as the twin of the last one we pushed (same token, within the
-        # window) when the bodies match or either side is body-less, and suppress
-        # it. Two genuinely different messages carry two different bodies, so
-        # they're always delivered. Order-independent.
-        now = time.monotonic()
-        tok = node.lower()
-        prev = self.last_push.get(tok)
-        if prev is not None and now - prev[1] < DEDUP_WINDOW_SECONDS:
-            prev_body = prev[0]
-            if last_body == prev_body or last_body is None or prev_body is None:
-                log.info("deduped twin publish for %s…", node[:8])
-                return
-        self.last_push[tok] = (last_body, now)
-
+        # No dedup here: the server double-publishes each message with no field
+        # that correlates the two copies or distinguishes a new message (count is
+        # always 1, sender empty, body empty-or-constant), so any proxy-side
+        # de-duplication is a guess that drops real messages. The fix lives in
+        # the NSE, which acks the message immediately so the server stops
+        # re-pushing it (see dino_ios.vala nse_fetch). The proxy just forwards.
         body = "New message" if not count or count <= 1 else f"{count} new messages"
         payload = {
             "aps": {
