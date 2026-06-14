@@ -19,6 +19,29 @@ case "$TARGET" in
 esac
 SDKPATH="$(xcrun --sdk "$SDK" --show-sdk-path)"
 
+# Build-metadata Info.plist keys that Xcode injects automatically but raw
+# swiftc does not. The App Store rejects bundles without them (DTPlatformName,
+# the arm64 device capability, etc.); harmless on the simulator / ad-hoc.
+SDK_VER="$(xcrun --sdk "$SDK" --show-sdk-version)"
+SDK_BUILD="$(xcrun --sdk "$SDK" --show-sdk-build-version)"
+XCODE_VER="$(xcodebuild -version | awk 'NR==1{print $2}')"
+XCODE_BUILD="$(xcodebuild -version | awk 'NR==2{print $3}')"
+MACHINE_BUILD="$(sw_vers -buildVersion)"
+DT_XCODE="$(echo "$XCODE_VER" | awk -F. '{printf "%02d%d%d", $1, $2, ($3==""?0:$3)}')"
+APP_SHORT_VER="$(plutil -extract CFBundleShortVersionString raw "$HERE/Info.plist")"
+
+add_build_metadata() {  # $1 = path to an Info.plist inside a built bundle
+  plutil -replace DTPlatformName -string "$SDK" "$1"
+  plutil -replace DTPlatformVersion -string "$SDK_VER" "$1"
+  plutil -replace DTSDKName -string "${SDK}${SDK_VER}" "$1"
+  plutil -replace DTSDKBuild -string "$SDK_BUILD" "$1"
+  plutil -replace DTXcode -string "$DT_XCODE" "$1"
+  plutil -replace DTXcodeBuild -string "$XCODE_BUILD" "$1"
+  plutil -replace DTCompiler -string "com.apple.compilers.llvm.clang.1_0" "$1"
+  plutil -replace BuildMachineOSBuild -string "$MACHINE_BUILD" "$1"
+  plutil -replace UIRequiredDeviceCapabilities -json '["arm64"]' "$1"
+}
+
 export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig:$PREFIX/lib/gio/modules/pkgconfig"
 CFLAGS="$(pkg-config --cflags gio-2.0 gee-0.8 gdk-pixbuf-2.0)"
 LIBS="$(pkg-config --libs --static libsoup-3.0 gee-0.8 gdk-pixbuf-2.0 gioopenssl libgcrypt libomemo-c libsrtp2)"
@@ -68,11 +91,34 @@ xcrun -sdk "$SDK" swiftc \
   -o "$APP/Gecko"
 
 cp "$HERE/Info.plist" "$APP/Info.plist"
-# app icon sizes from the master image
+add_build_metadata "$APP/Info.plist"
+# App icon: compile an asset catalog (actool) so the bundle ships Assets.car +
+# CFBundleIconName, which the App Store requires (loose PNGs aren't accepted). A
+# single 1024px universal icon lets actool rasterize every size it needs.
 if [ -f "$HERE/AppIcon.png" ]; then
-  sips -z 120 120 "$HERE/AppIcon.png" --out "$APP/AppIcon60x60@2x.png" >/dev/null
-  sips -z 180 180 "$HERE/AppIcon.png" --out "$APP/AppIcon60x60@3x.png" >/dev/null
-  sips -z 152 152 "$HERE/AppIcon.png" --out "$APP/AppIcon76x76@2x~ipad.png" >/dev/null
+  ICONSET="$BUILD/AppIcon.xcassets/AppIcon.appiconset"
+  rm -rf "$BUILD/AppIcon.xcassets"; mkdir -p "$ICONSET"
+  sips -s format png -z 1024 1024 "$HERE/AppIcon.png" --out "$ICONSET/icon-1024.png" >/dev/null
+  cat > "$ICONSET/Contents.json" <<'EOF_ICON'
+{
+  "images" : [
+    { "filename" : "icon-1024.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}
+EOF_ICON
+  actool "$BUILD/AppIcon.xcassets" \
+    --compile "$APP" \
+    --app-icon AppIcon \
+    --platform "$SDK" \
+    --minimum-deployment-target "$MIN_IOS" \
+    --target-device iphone \
+    --output-partial-info-plist "$BUILD/icon-partial.plist" \
+    --output-format human-readable-text >/dev/null
+  /usr/libexec/PlistBuddy -c "Merge $BUILD/icon-partial.plist" "$APP/Info.plist"
+  # actool only nests CFBundleIconName under CFBundleIcons; the App Store also
+  # wants it as a top-level key.
+  plutil -replace CFBundleIconName -string AppIcon "$APP/Info.plist"
 fi
 
 # ---- Notification Service Extension ----
@@ -127,6 +173,10 @@ xcrun -sdk "$SDK" swiftc \
   $LIBS \
   -o "$APPEX/NotificationService"
 cp "$ROOT/nse/Info.plist" "$APPEX/Info.plist"
+add_build_metadata "$APPEX/Info.plist"
+# The extension's marketing version must match the host app's, or the App Store
+# rejects the upload.
+plutil -replace CFBundleShortVersionString -string "$APP_SHORT_VER" "$APPEX/Info.plist"
 codesign --force --sign - "$APPEX"
 echo "built $APPEX"
 

@@ -20,27 +20,8 @@
 	<string>0.1</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>CFBundleIcons</key>
-	<dict>
-		<key>CFBundlePrimaryIcon</key>
-		<dict>
-			<key>CFBundleIconFiles</key>
-			<array>
-				<string>AppIcon60x60</string>
-			</array>
-		</dict>
-	</dict>
-	<key>CFBundleIcons~ipad</key>
-	<dict>
-		<key>CFBundlePrimaryIcon</key>
-		<dict>
-			<key>CFBundleIconFiles</key>
-			<array>
-				<string>AppIcon60x60</string>
-				<string>AppIcon76x76</string>
-			</array>
-		</dict>
-	</dict>
+	<!-- CFBundleIcons / CFBundleIconName are injected at build time by
+	     build-app.sh from the compiled asset catalog (actool). -->
 	<key>MinimumOSVersion</key>
 	<string>26.0</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
@@ -48,7 +29,6 @@
 	<key>UIDeviceFamily</key>
 	<array>
 		<integer>1</integer>
-		<integer>2</integer>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
