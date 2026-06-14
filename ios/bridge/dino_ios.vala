@@ -94,6 +94,11 @@ private static string esc(string? s) {
 // once the stack is built.
 private static void boot_core() throws Error {
     app = new Application();
+    // GLib's NetworkMonitor misreads iOS connectivity (reads offline/flapping),
+    // which otherwise drives the ConnectionManager to force every account
+    // DISCONNECTED right after it connects — breaking sends and MUC joins.
+    // iOS connectivity is handled by the app lifecycle + reconnect timers.
+    app.stream_interactor.connection_manager.use_network_monitor = false;
     // identify as Gecko (mobile client) to servers and other clients
     Dino.ModuleManager.client_identity_name = "Gecko";
     Dino.ModuleManager.client_identity_type = "phone";
@@ -386,8 +391,16 @@ public void start(owned EventCb cb) {
         message("gecko: ready");
         emit("{\"type\":\"ready\"}");
 
-        app.hold();
-        app.run();
+        // Connect enabled accounts ourselves: GApplication's startup -> restore()
+        // path is skipped because we run our own MainLoop rather than app.run().
+        foreach (Account account in app.db.get_accounts()) {
+            if (account.enabled) app.stream_interactor.connect_account(account);
+        }
+        // Run a plain MainLoop on this (dino-main) thread instead of
+        // GApplication.run(). app.run() pulled in GApplication's main-loop
+        // machinery that pumped the context from a second thread, racing the
+        // ConnectionManager's map. A plain loop keeps every source on one thread.
+        new MainLoop(null, false).run();
         return true;
     });
 }
@@ -552,10 +565,30 @@ private static string conversation_json(Conversation c) {
     }
     long last_time = c.last_active != null ? (long) c.last_active.to_unix() : 0;
     string kind = c.type_ == Conversation.Type.GROUPCHAT ? "groupchat" : "chat";
-    return "{\"id\":%d,\"account\":\"%s\",\"jid\":\"%s\",\"name\":\"%s\",\"encryption\":\"%s\",\"kind\":\"%s\",\"unread\":%d,\"preview\":\"%s\",\"preview_direction\":\"%s\",\"time\":%ld,\"notify\":\"%s\",\"notify_effective\":\"%s\"}".printf(
+    return "{\"id\":%d,\"account\":\"%s\",\"jid\":\"%s\",\"name\":\"%s\",\"encryption\":\"%s\",\"encryption_available\":%s,\"kind\":\"%s\",\"unread\":%d,\"preview\":\"%s\",\"preview_direction\":\"%s\",\"time\":%ld,\"notify\":\"%s\",\"notify_effective\":\"%s\"}".printf(
         c.id, esc(c.account.bare_jid.to_string()), esc(c.counterpart.to_string()), esc(name), enc_name(c.encryption),
+        encryption_available(c) ? "true" : "false",
         kind, unread, esc(preview), preview_direction, last_time,
         notify_name(c.notify_setting), notify_name(c.get_notification_setting(app.stream_interactor)));
+}
+
+// Whether OMEMO can be turned on for this conversation. In a group chat it
+// requires a private room (members-only + non-anonymous) so occupants' real
+// JIDs are visible to fetch their device keys; a groupchat PM can't be
+// encrypted; 1:1 chats always can.
+private static bool encryption_available(Conversation c) {
+#if WITH_OMEMO
+    switch (c.type_) {
+        case Conversation.Type.GROUPCHAT:
+            return app.stream_interactor.get_module(Dino.MucManager.IDENTITY).is_private_room(c.account, c.counterpart);
+        case Conversation.Type.GROUPCHAT_PM:
+            return false;
+        default:
+            return true;
+    }
+#else
+    return false;
+#endif
 }
 
 private static void push_avatar(Account account, Xmpp.Jid jid) {
@@ -1121,21 +1154,87 @@ public void join_muc(string jid_str, string? nick) {
             var account = first_enabled_account();
             if (account == null) return Source.REMOVE;
             var jid = new Xmpp.Jid(j).bare_jid;
-            var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
-            muc.join.begin(account, jid, n, null, false, null, (_, res) => {
-                var result = muc.join.end(res);
-                if (result == null) {
-                    emit("{\"type\":\"error\",\"message\":\"Could not join: not connected\"}");
-                } else if (result.nick == null) {
-                    emit(@"{\"type\":\"error\",\"message\":\"Could not join $(esc(j))\"}");
+            // Probe whether the room already exists via disco#info. Joining a
+            // non-existent JID would have the server create it (see
+            // do_join_muc) — fine if intended, but a typo would silently spawn
+            // a real persistent room, so ask the UI to confirm creation first.
+            var entity_info = app.stream_interactor.get_module(Dino.EntityInfo.IDENTITY);
+            entity_info.get_identities.begin(account, jid, (_, res) => {
+                var identities = entity_info.get_identities.end(res);
+                bool exists = identities != null && identities.size > 0;
+                if (exists) {
+                    do_join_muc(account, jid, n);
                 } else {
-                    push_conversations();
+                    emit(@"{\"type\":\"confirm_create_muc\",\"jid\":\"$(esc(jid.to_string()))\",\"nick\":\"$(esc(n ?? ""))\"}");
                 }
             });
         } catch (Error e) {
             emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
         }
         return Source.REMOVE;
+    });
+}
+
+// Confirmed creation of a room the user opted into (after join_muc found it
+// didn't exist). Same join path — the server creates the room and we finalise.
+public void create_muc(string jid_str, string? nick) {
+    string j = jid_str;
+    string? n = nick == null || nick == "" ? null : nick;
+    Idle.add(() => {
+        try {
+            var account = first_enabled_account();
+            if (account == null) return Source.REMOVE;
+            var jid = new Xmpp.Jid(j).bare_jid;
+            do_join_muc(account, jid, n);
+        } catch (Error e) {
+            emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
+        }
+        return Source.REMOVE;
+    });
+}
+
+private void do_join_muc(Account account, Xmpp.Jid jid, string? nick) {
+    var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
+    muc.join.begin(account, jid, nick, null, false, null, (_, res) => {
+        var result = muc.join.end(res);
+        if (result == null) {
+            emit("{\"type\":\"error\",\"message\":\"Could not join: not connected\"}");
+        } else if (result.nick == null) {
+            emit(@"{\"type\":\"error\",\"message\":\"Could not join $(esc(jid.to_string()))\"}");
+        } else if (result.newly_created) {
+            // The room didn't exist, so the server created it locked
+            // (XEP-0045 §10.1): nobody — not even us — can send until the owner
+            // submits a config form, and it's not persistent until then either.
+            // Finalise it so the room is actually usable and lasting.
+            finalize_created_muc(account, jid);
+        } else {
+            push_conversations();
+        }
+    });
+}
+
+// Unlock and persist a room we just created by joining a non-existent JID.
+// Submitting the owner config form unlocks the room; flipping the persistent
+// flag on means it survives after everyone leaves (so a second person joining
+// the same JID enters OUR room instead of creating their own).
+private void finalize_created_muc(Account account, Xmpp.Jid jid) {
+    var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
+    muc.get_config_form.begin(account, jid, (_, res) => {
+        var form = muc.get_config_form.end(res);
+        if (form == null) {
+            // No config form (server auto-unlocked); the room is already usable.
+            push_conversations();
+            return;
+        }
+        foreach (var field in form.fields) {
+            if (field.var == "muc#roomconfig_persistentroom") {
+                field.set_value_string("1");
+            }
+        }
+        muc.set_config_form.begin(account, jid, form, (_, res2) => {
+            muc.set_config_form.end(res2);
+            push_conversations();
+        });
     });
 }
 

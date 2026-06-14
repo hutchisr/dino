@@ -28,6 +28,11 @@ public class ConnectionManager : Object {
     private Login1Manager? login1;
     private ModuleManager module_manager;
     public string? log_options;
+    // GLib's NetworkMonitor doesn't understand some platforms' network stacks
+    // (notably iOS, where it reads unavailable/flapping); set this false there
+    // so its bogus "offline" reports don't force every account DISCONNECTED.
+    // Connectivity is then driven by the app lifecycle + reconnect timers.
+    public bool use_network_monitor = true;
 
     public class ConnectionError {
 
@@ -370,6 +375,7 @@ public class ConnectionManager : Object {
     }
 
     private void on_network_changed() {
+        if (!use_network_monitor) return;
         if (network_is_online()) {
             debug("NetworkMonitor: Network reported online");
             check_reconnects();
