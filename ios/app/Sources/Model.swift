@@ -417,6 +417,15 @@ final class AppModel: ObservableObject {
                     PushRegistration.start()
                     PushRegistration.enableOnServer()
                     runConnectedAutomation()
+                    // The libdino auto-rejoin runs on a worker thread where it's
+                    // unreliable; drive it from here once the rejoins should
+                    // have had a chance to settle (and again, in case the first
+                    // pass was still mid-join).
+                    for delay in [3.0, 7.0] {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                            DinoCore.shared.rejoinActiveRooms()
+                        }
+                    }
                 }
             }
         case "connection_error":
@@ -473,6 +482,8 @@ final class AppModel: ObservableObject {
                         role: o["role"] as? String ?? "none")
                 }.sorted { $0.nick.lowercased() < $1.nick.lowercased() }
             }
+        case "diag":
+            NSLog("Gecko-diag: %@", e["message"] as? String ?? "?")
         case "self_presence":
             selfShow = e["show"] as? String ?? "online"
             selfStatus = e["status"] as? String ?? ""

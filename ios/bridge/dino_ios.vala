@@ -1399,6 +1399,8 @@ private void do_join_muc(Account account, Xmpp.Jid jid, string? nick) {
             finalize_created_muc(account, jid);
         } else {
             push_conversations();
+            // Settle the Room Details view after a (re)join.
+            refresh_room_after_join(account, jid);
         }
     });
 }
@@ -1555,6 +1557,52 @@ private void muc_occupant_action(int conversation_id, string nick, owned Occupan
 }
 
 // --- Room-wide settings ---------------------------------------------------
+
+// After a join the room's features, affiliations and occupants settle
+// asynchronously over a second or two; re-push room info + occupants a couple
+// times so the UI reliably reflects the settled state (rather than depending on
+// incidental signals like the disco result or the subject message).
+private static void refresh_room_after_join(Account account, Xmpp.Jid jid) {
+    Timeout.add(700, () => { reemit_room(account, jid); return Source.REMOVE; });
+    Timeout.add(2200, () => { reemit_room(account, jid); return Source.REMOVE; });
+}
+
+private static void reemit_room(Account account, Xmpp.Jid jid) {
+    var conv = app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY)
+        .get_conversation(jid.bare_jid, account, Conversation.Type.GROUPCHAT);
+    if (conv != null) { emit_room_info(conv); emit_occupants(conv); }
+}
+
+// Re-push every joined group chat (used a few seconds after connect, once the
+// auto-rejoins have settled, so Room Details is correct on startup/reconnect).
+// Driven from Swift (a reliable main-thread timer) after connect, because the
+// libdino auto-rejoin runs on a worker thread where async/timers don't fire
+// here. Idle.add lands us on the dino-main loop where joins actually work.
+public void rejoin_active_rooms() {
+    Idle.add(() => { refresh_all_rooms(); return Source.REMOVE; });
+}
+
+private static void refresh_all_rooms() {
+    var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
+    var cm = app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY);
+    foreach (Conversation c in cm.get_active_conversations()) {
+        if (c.type_ != Conversation.Type.GROUPCHAT) continue;
+        if (!muc.is_joined(c.counterpart, c.account)) {
+            // libdino's bookmark-based auto-rejoin (on_stream_negotiated) doesn't
+            // complete on iOS: its async continuation lands on a GLib worker
+            // thread that never finishes the join. Drive the join here instead,
+            // then re-surface the room once it settles.
+            Account a = c.account;
+            Xmpp.Jid jid = c.counterpart;
+            muc.join.begin(a, jid, c.nickname, null, true, null, (_, res) => {
+                muc.join.end(res);
+                refresh_room_after_join(a, jid);
+            });
+        }
+        emit_room_info(c);
+        emit_occupants(c);
+    }
+}
 
 private static void emit_room_info(Conversation c) {
     var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);

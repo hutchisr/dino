@@ -80,6 +80,7 @@ final class DinoCore {
     func requestBlocklist() { dino_ios_request_blocklist() }
     func blockContact(_ jid: String) { dino_ios_block_contact(jid) }
     func unblockContact(_ jid: String) { dino_ios_unblock_contact(jid) }
+    func rejoinActiveRooms() { dino_ios_rejoin_active_rooms() }
     func requestPrivacy() { dino_ios_request_privacy() }
     func setSendTyping(_ on: Bool) { dino_ios_set_send_typing(on ? 1 : 0) }
     func setSendMarker(_ on: Bool) { dino_ios_set_send_marker(on ? 1 : 0) }
