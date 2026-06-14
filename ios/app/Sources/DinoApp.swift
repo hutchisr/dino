@@ -152,6 +152,9 @@ struct ConversationListView: View {
                             .padding(3)
                             .glassEffect(.regular.tint(accountStatusColor(account.state)).interactive(), in: Circle())
                             .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                            // Include the glass ring around the avatar in the
+                            // tap target, not just the opaque avatar image.
+                            .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -594,6 +597,8 @@ struct ChatView: View {
                         .foregroundStyle(.primary)
                         .frame(width: composerControlHeight, height: composerControlHeight)
                         .glassEffect(.regular.interactive(), in: Circle())
+                        // Make the whole circle tappable, not just the glyph.
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
 
@@ -640,6 +645,9 @@ struct ChatView: View {
                             .frame(width: composerControlHeight, height: composerControlHeight)
                             .glassEffect(.regular.tint(.blue).interactive(), in: Circle())
                             .glassEffectID("composerSend", in: composerGlass)
+                            // Without this the hit area is just the glyph, not
+                            // the full circle — taps off the icon did nothing.
+                            .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
                 }
