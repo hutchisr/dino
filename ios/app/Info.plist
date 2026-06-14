@@ -22,6 +22,8 @@
 	<string>1</string>
 	<!-- CFBundleIcons / CFBundleIconName are injected at build time by
 	     build-app.sh from the compiled asset catalog (actool). -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>MinimumOSVersion</key>
 	<string>26.0</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
