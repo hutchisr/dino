@@ -278,6 +278,8 @@ echo
 echo "Send the tester this page:  $DIST_BASE_URL/"
 echo "Direct install link:        $INSTALL_URL"
 echo
-echo "NOTE: ad-hoc builds use PRODUCTION APNs. The push proxy currently runs in"
-echo "sandbox mode (APNS_SANDBOX=1), so push won't reach this build until the"
-echo "proxy also serves production. Messaging/everything else works regardless."
+echo "NOTE: ad-hoc builds use PRODUCTION APNs. The push proxy handles this on its"
+echo "own — APNS_SANDBOX only sets which environment it tries first; on a"
+echo "BadDeviceToken it falls back to the other and caches whichever worked. So a"
+echo "production token still gets delivered (one extra sandbox attempt on the"
+echo "first push per token); no proxy change needed."
