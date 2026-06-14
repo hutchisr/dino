@@ -749,6 +749,19 @@ struct ChatView: View {
             // away if they've scrolled up into history).
             if isAtBottom { DispatchQueue.main.async { scrollToBottom(animated: false) } }
         }
+        .onAppear {
+            // LazyVStack row heights are estimated until laid out; on a very long
+            // chat .defaultScrollAnchor(.bottom) resolves against that
+            // over-estimate and lands past the real end (empty space below),
+            // only clamping on a user scroll. Re-assert the bottom once layout
+            // settles: the first pass realizes the bottom rows (accurate
+            // heights), the second lands correctly. No-op for short chats.
+            for delay in [0.05, 0.35] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    scrollToBottom(animated: false)
+                }
+            }
+        }
     }
 
     private func scrollDownButton() -> some View {
