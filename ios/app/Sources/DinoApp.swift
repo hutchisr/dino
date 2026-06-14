@@ -506,53 +506,67 @@ struct ChatView: View {
 
     @ViewBuilder
     private var composerArea: some View {
-        if model.chatStates[conversationId] == "composing" {
-            HStack {
-                Text("typing…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 2)
-                Spacer()
+        // Explicit VStack so the banners stack above the input bar in order;
+        // without it the banners (a bare ViewBuilder tuple) laid out wrong and
+        // the reply preview ended up under the input.
+        VStack(spacing: 0) {
+            if model.chatStates[conversationId] == "composing" {
+                HStack {
+                    Text("typing…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 2)
             }
-        }
-        if editing != nil {
-            HStack {
-                Image(systemName: "pencil").font(.caption)
-                Text("Editing message").font(.caption)
-                Spacer()
-                Button {
+            if editing != nil {
+                composerBanner(icon: "pencil", cancelLabel: "Cancel edit") {
                     editing = nil
                     draft = ""
                 } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    Text("Editing message").font(.caption)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 6)
-        }
-        if let replyingTo {
-            HStack {
-                Image(systemName: "arrowshape.turn.up.left").font(.caption)
-                VStack(alignment: .leading) {
-                    Text("Replying to \(replyingTo.fromDisplay.isEmpty ? replyingTo.from : replyingTo.fromDisplay)")
-                        .font(.caption.bold())
-                    Text(replyingTo.isFile ? replyingTo.fileName : replyingTo.body)
-                        .font(.caption)
-                        .lineLimit(1)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button {
+            if let replyingTo {
+                composerBanner(icon: "arrowshape.turn.up.left", cancelLabel: "Cancel reply") {
                     self.replyingTo = nil
                 } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    VStack(alignment: .leading) {
+                        Text("Replying to \(replyingTo.fromDisplay.isEmpty ? replyingTo.from : replyingTo.fromDisplay)")
+                            .font(.caption.bold())
+                        Text(replyingTo.isFile ? replyingTo.fileName : replyingTo.body)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .accessibilityLabel("Cancel reply")
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 6)
+            inputBar
         }
+    }
+
+    /// A dismissable banner (typing reply/edit context) shown above the input.
+    private func composerBanner<Label: View>(
+        icon: String,
+        cancelLabel: String,
+        onCancel: @escaping () -> Void,
+        @ViewBuilder label: () -> Label
+    ) -> some View {
+        HStack {
+            Image(systemName: icon).font(.caption)
+            label()
+            Spacer()
+            Button(action: onCancel) {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            }
+            .accessibilityLabel(cancelLabel)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 6)
+    }
+
+    private var inputBar: some View {
         GlassEffectContainer(spacing: 6) {
             HStack(spacing: 12) {
                 Menu {
