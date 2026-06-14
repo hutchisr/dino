@@ -28,8 +28,21 @@ APNS_SANDBOX=1 \
 venv/bin/python gecko_push_proxy.py
 ```
 
-`APNS_SANDBOX=1` for development-signed builds (sideloaded with a dev
-certificate, or the iOS Simulator); `0` for App Store / TestFlight builds.
+`APNS_SANDBOX` only sets which APNs environment to try *first* (`1` =
+sandbox, for development-signed/Simulator builds; `0` = production, for
+ad-hoc / TestFlight / App Store). It is not a hard switch: a token for the
+other environment is retried automatically on `BadDeviceToken` and the working
+environment is cached per token, so one proxy serves both kinds of build.
+
+## Tests
+
+Pure-logic unit tests (APNs fallback + caching, mute / mention-only filtering,
+burst de-duplication, filter parsing). No network or XMPP — everything external
+is faked.
+
+```sh
+venv/bin/python -m unittest test_gecko_push_proxy -v
+```
 
 ## Docker / Kubernetes
 
