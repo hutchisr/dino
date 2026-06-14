@@ -594,8 +594,13 @@ struct ChatView: View {
             label()
             Spacer()
             Button(action: onCancel) {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
             }
+            .buttonStyle(.plain)
             .accessibilityLabel(cancelLabel)
         }
         .padding(.horizontal, 14)
