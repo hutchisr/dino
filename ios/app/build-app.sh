@@ -203,5 +203,6 @@ if [ "$ACTION" = "run" ] && [ "$TARGET" = "sim-arm64" ]; then
   xcrun simctl boot "iPhone 17" 2>/dev/null || true
   open -a Simulator
   xcrun simctl install booted "$APP"
-  xcrun simctl launch booted im.dino.ios.poc
+  BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")"
+  xcrun simctl launch booted "$BUNDLE_ID"
 fi
