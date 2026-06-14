@@ -25,6 +25,9 @@
 #   BUNDLE_ID       app bundle id (default me.anemoneya.gecko)
 #   DIST_BASE_URL   HTTPS base where you'll host the IPA + manifest
 #                   (default https://dist.anemoneya.me)
+#   BUILD_NUMBER    CFBundleVersion to stamp (default: current UTC timestamp).
+#                   Always bumped so a new build installs OVER the old one
+#                   without the tester having to delete it first.
 set -euo pipefail
 
 TESTER_UDID="${1:-}"
@@ -35,6 +38,10 @@ NSE_BUNDLE_ID="${BUNDLE_ID}.NotificationService"
 APP_GROUP="group.me.anemoneya.gecko"
 DIST_BASE_URL="${DIST_BASE_URL:-https://dist.anemoneya.me}"
 DIST_BASE_URL="${DIST_BASE_URL%/}"
+# A monotonically increasing build number lets the OTA install replace an
+# already-installed copy in place (iOS needs CFBundleVersion >= the installed
+# one); a wall-clock UTC stamp is always larger than the previous build's.
+BUILD_NUMBER="${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"
 
 # --- resolve a distribution signing identity ------------------------------
 SIGN_IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning \
@@ -109,6 +116,7 @@ echo "identity:    $SIGN_IDENTITY"
 echo "team:        $TEAM_ID"
 echo "app profile: $PROFILE"
 echo "nse profile: $NSE_PROFILE"
+echo "build:       $BUILD_NUMBER"
 
 # The IPA installs on every device in the embedded (app) profile, not just one.
 python3 - "$PROFILE" <<'EOF'
@@ -133,6 +141,7 @@ APP="$STAGE/Gecko.app"
 rm -rf "$STAGE" && mkdir -p "$STAGE"
 cp -R "$HERE/build-device-arm64/Gecko.app" "$STAGE/"
 plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP/Info.plist"
+plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP/Info.plist"
 cp "$PROFILE" "$APP/embedded.mobileprovision"
 
 # Distribution entitlements: get-task-allow FALSE, and (ad-hoc) production APNs.
@@ -164,6 +173,7 @@ EOF
 APPEX="$APP/PlugIns/NotificationService.appex"
 if [ -d "$APPEX" ]; then
   plutil -replace CFBundleIdentifier -string "$NSE_BUNDLE_ID" "$APPEX/Info.plist"
+  plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APPEX/Info.plist"
   cp "$NSE_PROFILE" "$APPEX/embedded.mobileprovision"
   cat > "$STAGE/nse-entitlements.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
