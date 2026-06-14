@@ -46,10 +46,11 @@ APNS_HOSTS = {
 APNS_FIRST = "sandbox" if os.environ.get("APNS_SANDBOX", "1") == "1" else "production"
 TOKEN_RE = re.compile(r"^[0-9a-fA-F]{32,200}$")
 
-# How long to suppress an *identical* repeat of the same push summary — the
-# server can deliver a notification twice (e.g. a mediated + direct copy). Kept
-# short, and a genuinely new message carries a different summary anyway, so this
-# never delays a real message.
+# Window for collapsing the server's double-publish of a single message: it
+# sends a body-less notification followed ~2s later by one carrying the body.
+# Long enough to cover that gap with margin, short enough to keep delivery
+# prompt (two *different* messages carry different bodies, so they're never
+# collapsed regardless of this window).
 DEDUP_WINDOW_SECONDS = 3.0
 
 
@@ -120,10 +121,9 @@ class PushBot(slixmpp.ClientXMPP):
         # device token -> {"muted": set of bare jids,
         #                  "mention": {bare jid: nick}}
         self.filters: dict[str, dict] = {}
-        # device token -> (summary signature, monotonic time) of the last push
-        # sent, so we can collapse an identical repeat (the server sometimes
-        # delivers the same notification twice) without ever suppressing a
-        # distinct message.
+        # device token -> (last pushed body or None, monotonic time). Used to
+        # collapse the server's body-less + body-ful double-publish of a single
+        # message (see handle_publish) without dropping distinct messages.
         self.last_push: dict[str, tuple] = {}
         self.add_event_handler("session_start", self.on_start)
         self.add_event_handler("message", self.on_message)
@@ -212,18 +212,22 @@ class PushBot(slixmpp.ClientXMPP):
                     log.info("mention-only %s without mention — dropping push", bare)
                     return
 
-        # Collapse only a genuinely duplicate publish: same token, same summary,
-        # within a short window. A new message carries a different summary (at
-        # least an incremented message-count), so it is delivered right away
-        # instead of being swallowed by a blanket per-token window.
+        # Collapse the server's double-publish: each message arrives as a
+        # body-less copy and, ~2s later, a copy with the body. (count and sender
+        # don't distinguish them — both are e.g. count=1, sender=None.) Treat a
+        # publish as the twin of the last one we pushed (same token, within the
+        # window) when the bodies match or either side is body-less, and suppress
+        # it. Two genuinely different messages carry two different bodies, so
+        # they're always delivered. Order-independent.
         now = time.monotonic()
         tok = node.lower()
-        signature = (count, sender, last_body)
         prev = self.last_push.get(tok)
-        if prev is not None and prev[0] == signature and now - prev[1] < DEDUP_WINDOW_SECONDS:
-            log.info("deduped duplicate publish for %s…", node[:8])
-            return
-        self.last_push[tok] = (signature, now)
+        if prev is not None and now - prev[1] < DEDUP_WINDOW_SECONDS:
+            prev_body = prev[0]
+            if last_body == prev_body or last_body is None or prev_body is None:
+                log.info("deduped twin publish for %s…", node[:8])
+                return
+        self.last_push[tok] = (last_body, now)
 
         body = "New message" if not count or count <= 1 else f"{count} new messages"
         payload = {

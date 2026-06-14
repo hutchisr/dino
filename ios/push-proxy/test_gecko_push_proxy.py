@@ -208,6 +208,19 @@ class TestHandlePublish(unittest.IsolatedAsyncioTestCase):
         await PushBot.handle_publish(bot, HEX_TOKEN, iq)   # identical summary, same window
         self.assertEqual(len(bot.apns.pushes), 1)
 
+    async def test_server_double_publish_collapses(self):
+        # The real pattern: a body-less copy, then ~2s later one with the body.
+        bot = make_bot()
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1))               # body-less
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, body="hello"))  # twin with body
+        self.assertEqual(len(bot.apns.pushes), 1)
+
+    async def test_double_publish_collapses_regardless_of_order(self):
+        bot = make_bot()
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, body="hello"))  # body first
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1))               # body-less twin
+        self.assertEqual(len(bot.apns.pushes), 1)
+
     async def test_distinct_messages_same_token_are_delivered(self):
         # A genuinely new message (incremented count / different body) must NOT
         # be swallowed by dedup — prompt delivery over de-duplication.
