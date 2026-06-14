@@ -435,30 +435,6 @@ struct ContactsView: View {
     }
 }
 
-/// Grabs the enclosing UIScrollView so scroll-to-bottom can use
-/// setContentOffset, which reaches the true bottom regardless of which lazy
-/// rows are materialised (unlike ScrollViewReader.scrollTo here) and interrupts
-/// ongoing deceleration.
-final class ScrollViewHolder {
-    weak var view: UIScrollView?
-}
-
-struct ScrollViewGrabber: UIViewRepresentable {
-    let holder: ScrollViewHolder
-    func makeUIView(context: Context) -> UIView {
-        let v = UIView()
-        DispatchQueue.main.async { [weak v] in
-            var candidate: UIView? = v?.superview
-            while candidate != nil && !(candidate is UIScrollView) {
-                candidate = candidate?.superview
-            }
-            holder.view = candidate as? UIScrollView
-        }
-        return v
-    }
-    func updateUIView(_ view: UIView, context: Context) {}
-}
-
 struct ChatView: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
@@ -475,37 +451,23 @@ struct ChatView: View {
     @State private var actionMsg: ChatMessage?
     @State private var showFullTitle = false
     @State private var isAtBottom = true
-    @State private var scrollHolder = ScrollViewHolder()
+    /// Drives scroll-to-bottom via the native edge API: scrolling to the
+    /// `.bottom` content edge is clamped to the real scrollable range, so it
+    /// reaches the last message without overshooting into empty space (unlike
+    /// hand-computed setContentOffset against a transiently mis-estimated
+    /// LazyVStack contentSize).
+    @State private var scrollPosition = ScrollPosition(edge: .bottom)
     @State private var viewerItem: ImageViewerItem?
 
-    /// Scrolls to the bottom anchor, retried across several frames. A LazyVStack
-    /// only measures tall rows (e.g. a run of images) as they materialise, and
-    /// the floating composer's bottom safeAreaInset settles a few frames after
-    /// appear — both move the true bottom, so a single scroll can land short.
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        // proxy.scrollTo to the bottom anchor is unreliable here (LazyVStack +
-        // defaultScrollAnchor + the floating-composer inset), so drive the
-        // underlying UIScrollView directly: it reaches the true bottom whatever
-        // is materialised and interrupts any ongoing deceleration.
-        if let last = model.messages[conversationId]?.last {
-            proxy.scrollTo(last.id, anchor: .bottom)
-        }
-        DispatchQueue.main.async { pinToBottom(passesLeft: 14, lastY: -1) }
-    }
-
-    /// Snap the scroll view to the true content bottom, re-reading the target
-    /// each frame until it settles (lazy rows materialising, or the composer's
-    /// bottom safeAreaInset landing a few frames after appear).
-    private func pinToBottom(passesLeft: Int, lastY: CGFloat) {
-        guard passesLeft > 0, let sv = scrollHolder.view else { return }
-        let height = sv.contentSize.height
-        let y = max(-sv.adjustedContentInset.top,
-                    height - sv.bounds.height + sv.adjustedContentInset.bottom)
-        sv.setContentOffset(CGPoint(x: 0, y: y), animated: false)
-        if abs(y - lastY) > 0.5 || passesLeft > 11 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
-                pinToBottom(passesLeft: passesLeft - 1, lastY: y)
+    /// Scroll to the newest message. `animated` drives the on-screen scroll-down
+    /// button (a smooth glide); the implicit scrolls on new content snap.
+    private func scrollToBottom(animated: Bool) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.3)) {
+                scrollPosition.scrollTo(edge: .bottom)
             }
+        } else {
+            scrollPosition.scrollTo(edge: .bottom)
         }
     }
 
@@ -690,40 +652,37 @@ struct ChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(ScrollViewGrabber(holder: scrollHolder))
     }
 
-    private func scrollContent(outer: GeometryProxy, proxy: ScrollViewProxy) -> some View {
+    private func scrollContent(outer: GeometryProxy) -> some View {
         ScrollView {
             messageStack
         }
+        .scrollPosition($scrollPosition)
         .defaultScrollAnchor(.bottom)
         .coordinateSpace(name: "chatScroll")
         .overlay(alignment: .bottomTrailing) {
             if !isAtBottom {
-                scrollDownButton(proxy: proxy)
+                scrollDownButton()
             }
         }
-        .onAppear {
-            // wait a tick so the lazy rows exist before scrolling
-            DispatchQueue.main.async { scrollToBottom(proxy) }
-        }
         .onChange(of: model.messages[conversationId]?.count ?? 0) { _ in
-            DispatchQueue.main.async { scrollToBottom(proxy) }
+            // A new message landed — snap to it (defaultScrollAnchor handles the
+            // initial appear).
+            DispatchQueue.main.async { scrollToBottom(animated: false) }
         }
         .onChange(of: chatMessages.reduce(0) { $0 + $1.reactions.count }) { _ in
             // A reaction chip appearing grows its message row; keep the latest
             // in view if we're already pinned to the bottom (don't yank the user
             // away if they've scrolled up into history).
-            if isAtBottom { DispatchQueue.main.async { scrollToBottom(proxy) } }
+            if isAtBottom { DispatchQueue.main.async { scrollToBottom(animated: false) } }
         }
     }
 
-    private func scrollDownButton(proxy: ScrollViewProxy) -> some View {
+    private func scrollDownButton() -> some View {
         Button {
-            // Reuse the settling scroll so tall image runs reach the true
-            // bottom instead of stopping at the underestimated contentSize.
-            scrollToBottom(proxy)
+            // Smooth glide back to the newest message.
+            scrollToBottom(animated: true)
         } label: {
             Image(systemName: "chevron.down")
                 .font(.system(size: 17, weight: .semibold))
@@ -865,9 +824,7 @@ struct ChatView: View {
 
     var body: some View {
         GeometryReader { outer in
-            ScrollViewReader { proxy in
-                scrollContent(outer: outer, proxy: proxy)
-            }
+            scrollContent(outer: outer)
         }
         .safeAreaInset(edge: .bottom) {
             composerArea
