@@ -65,6 +65,22 @@ struct Occupant: Identifiable {
     }
 }
 
+/// Room-wide settings/state for a group chat, fetched on demand.
+struct RoomInfo {
+    var subject: String = ""
+    var isPrivate: Bool = false
+    var isModerated: Bool = false
+    var myAffiliation: String = "none"
+    var myRole: String = "none"
+
+    var iAmOwner: Bool { myAffiliation == "owner" }
+    var canEditSubject: Bool {
+        // Moderators (and owners/admins, who hold the role) can set the subject;
+        // many open rooms also let participants. Show it for anyone with voice.
+        myRole == "moderator" || myAffiliation == "owner" || myAffiliation == "admin"
+    }
+}
+
 struct RosterContact: Identifiable {
     let id: String   // bare jid
     let account: String
@@ -130,6 +146,7 @@ final class AppModel: ObservableObject {
     @Published var avatars: [String: String] = [:]      // bare jid -> file path
     @Published var chatStates: [Int32: String] = [:]    // conversation id -> XEP-0085 state
     @Published var occupants: [Int32: [Occupant]] = [:]
+    @Published var roomInfo: [Int32: RoomInfo] = [:]
     @Published var viewerRequest: String?   // used by UI automation to open the image viewer
     @Published var accountAlias: String = ""
     @Published var omemoDeviceId: Int = 0
@@ -252,6 +269,19 @@ final class AppModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             self?.requestOccupants(id)
         }
+    }
+
+    func requestRoomInfo(_ id: Int32) { DinoCore.shared.requestRoomInfo(id) }
+    func setRoomSubject(_ id: Int32, _ subject: String) { DinoCore.shared.mucSetSubject(id, subject: subject) }
+    func inviteToRoom(_ id: Int32, jid: String) { DinoCore.shared.mucInvite(id, jid: jid) }
+    func setRoomName(_ id: Int32, _ name: String) { DinoCore.shared.mucSetName(id, name: name) }
+    func setRoomPrivate(_ id: Int32, _ priv: Bool) {
+        roomInfo[id]?.isPrivate = priv   // optimistic; bridge re-emits room_info to confirm
+        DinoCore.shared.mucSetPrivate(id, priv)
+    }
+    func setRoomModerated(_ id: Int32, _ moderated: Bool) {
+        roomInfo[id]?.isModerated = moderated
+        DinoCore.shared.mucSetModerated(id, moderated)
     }
 
     func requestOccupants(_ id: Int32) {
@@ -408,6 +438,15 @@ final class AppModel: ObservableObject {
                         affiliation: o["affiliation"] as? String ?? "none",
                         role: o["role"] as? String ?? "none")
                 }.sorted { $0.nick.lowercased() < $1.nick.lowercased() }
+            }
+        case "room_info":
+            if let cid = e["conversation"] as? Int {
+                roomInfo[Int32(cid)] = RoomInfo(
+                    subject: e["subject"] as? String ?? "",
+                    isPrivate: e["is_private"] as? Bool ?? false,
+                    isModerated: e["is_moderated"] as? Bool ?? false,
+                    myAffiliation: e["my_affiliation"] as? String ?? "none",
+                    myRole: e["my_role"] as? String ?? "none")
             }
         case "open_conversation":
             if let id = e["id"] as? Int, navigation.last != Int32(id) {

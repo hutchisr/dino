@@ -371,6 +371,19 @@ public void start(owned EventCb cb) {
         si.get_module(Dino.ConversationManager.IDENTITY).conversation_activated.connect((conversation) => {
             push_conversations();
         });
+        // Re-emit room state when the server broadcasts a change (subject, or a
+        // config/feature update) so an open Room Details screen updates live
+        // with fresh data — the values we'd read right after set_config_form are
+        // still cached/stale.
+        var muc_mod = si.get_module(Dino.MucManager.IDENTITY);
+        muc_mod.subject_set.connect((account, jid, subject) => {
+            var conv = si.get_module(Dino.ConversationManager.IDENTITY).get_conversation(jid, account, Conversation.Type.GROUPCHAT);
+            if (conv != null) emit_room_info(conv);
+        });
+        muc_mod.room_info_updated.connect((account, jid) => {
+            var conv = si.get_module(Dino.ConversationManager.IDENTITY).get_conversation(jid, account, Conversation.Type.GROUPCHAT);
+            if (conv != null) { emit_room_info(conv); push_conversations(); }
+        });
         si.get_module(Dino.MessageCorrection.IDENTITY).received_correction.connect((item) => {
             re_emit_item(item.id);
         });
@@ -1332,6 +1345,108 @@ private void muc_occupant_action(int conversation_id, string nick, owned Occupan
         action(muc, c, n);
         return Source.REMOVE;
     });
+}
+
+// --- Room-wide settings ---------------------------------------------------
+
+private static void emit_room_info(Conversation c) {
+    var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
+    Xmpp.Jid? own = muc.get_own_jid(c.counterpart, c.account);
+    string subject = muc.get_groupchat_subject(c.counterpart, c.account) ?? "";
+    string my_aff = own != null ? affiliation_name(muc.get_affiliation(c.counterpart, own, c.account)) : "none";
+    string my_role = own != null ? role_name(muc.get_role(own, c.account)) : "none";
+    emit("{\"type\":\"room_info\",\"conversation\":%d,\"subject\":\"%s\",\"is_private\":%s,\"is_moderated\":%s,\"my_affiliation\":\"%s\",\"my_role\":\"%s\"}".printf(
+        c.id, esc(subject),
+        muc.is_private_room(c.account, c.counterpart) ? "true" : "false",
+        muc.is_moderated_room(c.account, c.counterpart) ? "true" : "false",
+        my_aff, my_role));
+}
+
+public void request_room_info(int conversation_id) {
+    int cid = conversation_id;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c != null) emit_room_info(c);
+        return Source.REMOVE;
+    });
+}
+
+public void muc_set_subject(int conversation_id, string subject) {
+    int cid = conversation_id;
+    string s = subject;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        app.stream_interactor.get_module(Dino.MucManager.IDENTITY).change_subject(c.account, c.counterpart, s);
+        return Source.REMOVE;
+    });
+}
+
+public void muc_invite(int conversation_id, string jid_str) {
+    int cid = conversation_id;
+    string j = jid_str;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        try {
+            app.stream_interactor.get_module(Dino.MucManager.IDENTITY).invite(c.account, c.counterpart, new Xmpp.Jid(j));
+        } catch (Error e) {
+            emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
+        }
+        return Source.REMOVE;
+    });
+}
+
+// Owner-only config edits: fetch the room config form, mutate fields, submit.
+private static void set_form_field(Xmpp.Xep.DataForms.DataForm form, string var_name, string value) {
+    foreach (var field in form.fields) {
+        if (field.var == var_name) { field.set_value_string(value); return; }
+    }
+}
+
+private delegate void ConfigMutator(Xmpp.Xep.DataForms.DataForm form);
+private void muc_configure(int conversation_id, owned ConfigMutator mutate) {
+    int cid = conversation_id;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
+        muc.get_config_form.begin(c.account, c.counterpart, (_, res) => {
+            var form = muc.get_config_form.end(res);
+            if (form == null) {
+                emit("{\"type\":\"error\",\"message\":\"Couldn't load room settings (owner only).\"}");
+                return;
+            }
+            mutate(form);
+            muc.set_config_form.begin(c.account, c.counterpart, form, (_, res2) => {
+                muc.set_config_form.end(res2);
+                // Don't emit_room_info here: the room's disco features are still
+                // cached/stale right after submit, which would revert the
+                // optimistic UI. The room_info_updated signal re-emits with
+                // fresh data once the server confirms.
+            });
+        });
+        return Source.REMOVE;
+    });
+}
+
+public void muc_set_name(int conversation_id, string name) {
+    string n = name;
+    muc_configure(conversation_id, (form) => set_form_field(form, "muc#roomconfig_roomname", n));
+}
+
+public void muc_set_private(int conversation_id, bool private_room) {
+    bool p = private_room;
+    muc_configure(conversation_id, (form) => {
+        set_form_field(form, "muc#roomconfig_membersonly", p ? "1" : "0");
+        // Non-anonymous when private so members see real jids (needed for OMEMO).
+        set_form_field(form, "muc#roomconfig_whois", p ? "anyone" : "moderators");
+    });
+}
+
+public void muc_set_moderated(int conversation_id, bool moderated) {
+    bool m = moderated;
+    muc_configure(conversation_id, (form) => set_form_field(form, "muc#roomconfig_moderatedroom", m ? "1" : "0"));
 }
 
 // Open a direct chat with a MUC occupant. In a non-anonymous room we know

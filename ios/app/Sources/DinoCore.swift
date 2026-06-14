@@ -91,6 +91,12 @@ final class DinoCore {
     func mucKick(_ id: Int32, nick: String) { dino_ios_muc_kick(id, nick) }
     func mucSetAffiliation(_ id: Int32, nick: String, affiliation: String) { dino_ios_muc_set_affiliation(id, nick, affiliation) }
     func mucSetRole(_ id: Int32, nick: String, role: String) { dino_ios_muc_set_role(id, nick, role) }
+    func requestRoomInfo(_ id: Int32) { dino_ios_request_room_info(id) }
+    func mucSetSubject(_ id: Int32, subject: String) { dino_ios_muc_set_subject(id, subject) }
+    func mucInvite(_ id: Int32, jid: String) { dino_ios_muc_invite(id, jid) }
+    func mucSetName(_ id: Int32, name: String) { dino_ios_muc_set_name(id, name) }
+    func mucSetPrivate(_ id: Int32, _ priv: Bool) { dino_ios_muc_set_private(id, priv ? 1 : 0) }
+    func mucSetModerated(_ id: Int32, _ moderated: Bool) { dino_ios_muc_set_moderated(id, moderated ? 1 : 0) }
     func addContact(jid: String, alias: String?) { dino_ios_add_contact(jid, alias) }
     func removeContact(jid: String) { dino_ios_remove_contact(jid) }
     func respondSubscription(jid: String, approve: Bool) { dino_ios_respond_subscription(jid, approve ? 1 : 0) }

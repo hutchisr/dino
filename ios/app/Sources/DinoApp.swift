@@ -909,7 +909,7 @@ struct ChatView: View {
                 model.startOccupantDM(conversationId, nick: nick)
             }
         }) {
-            OccupantsView(conversationId: conversationId) { nick in
+            RoomDetailsView(conversationId: conversationId) { nick in
                 occupantDMNick = nick
                 showOccupants = false
             }
@@ -1069,7 +1069,7 @@ struct MessageBubble: View {
                     guard abs(value.translation.width) > abs(value.translation.height) else { return }
                     dragOffset = max(0, min(value.translation.width, 90))
                 }
-                .onEnded { value in
+                .onEnded { _ in
                     if dragOffset > 55 {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         onReply?(msg)
@@ -1077,63 +1077,6 @@ struct MessageBubble: View {
                     dragOffset = 0
                 }
         )
-    }
-}
-
-struct OccupantsView: View {
-    @EnvironmentObject var model: AppModel
-    let conversationId: Int32
-    /// Called with the tapped participant's nick; the parent dismisses the
-    /// sheet and (on dismiss) opens the DM.
-    let onSelect: (String) -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    private var occupants: [Occupant] { model.occupants[conversationId] ?? [] }
-    private var me: Occupant? { occupants.first { $0.isSelf } }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if occupants.isEmpty {
-                    Text("No participants visible.").foregroundStyle(.secondary)
-                }
-                ForEach(occupants) { occupant in
-                    NavigationLink {
-                        MemberDetailView(conversationId: conversationId, occupant: occupant, me: me,
-                                         onMessage: { onSelect(occupant.nick) })
-                            .environmentObject(model)
-                    } label: {
-                        occupantRow(occupant)
-                    }
-                }
-            }
-            .navigationTitle("Participants (\(occupants.count))")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                Button("Close") { dismiss() }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func occupantRow(_ occupant: Occupant) -> some View {
-        HStack(spacing: 10) {
-            AvatarView(jid: occupant.jid, name: occupant.nick, isGroup: false, size: 32)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(occupant.nick).foregroundStyle(.primary)
-                if let real = occupant.realJid {
-                    Text(real).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            Spacer()
-            if occupant.isSelf {
-                Text("you").font(.caption).foregroundStyle(.secondary)
-            }
-            if let badge = occupant.badge {
-                MemberBadge(text: badge, color: occupant.badgeColor, systemImage: occupant.badgeIcon)
-            }
-        }
-        .contentShape(.rect)
     }
 }
 
