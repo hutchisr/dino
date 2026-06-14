@@ -105,7 +105,7 @@ struct AccountSettingsView: View {
                 model.requestAccountDetails()
                 alias = model.accountAlias
             }
-            .onChange(of: model.accountAlias) { value in
+            .onChange(of: model.accountAlias) { _, value in
                 alias = value
             }
             .alert("Password changed", isPresented: $model.passwordChanged) {

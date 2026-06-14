@@ -99,7 +99,7 @@ struct AccountSetupView: View {
         }
         .navigationTitle("Log In")
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: model.lastError) { error in
+        .onChange(of: model.lastError) { _, error in
             if error != nil { submitting = false }
         }
     }
@@ -536,6 +536,7 @@ struct ChatView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                 }
+                .accessibilityLabel("Cancel reply")
             }
             .padding(.horizontal, 14)
             .padding(.top, 6)
@@ -563,6 +564,7 @@ struct ChatView: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Attach")
 
                 TextField("Message", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -570,7 +572,7 @@ struct ChatView: View {
                     .frame(minHeight: composerControlHeight)
                     .glassEffect(.regular, in: Capsule())
                     .glassEffectID("composerField", in: composerGlass)
-                    .onChange(of: draft) { value in
+                    .onChange(of: draft) { _, value in
                         if editing == nil {
                             model.setTyping(conversationId, !value.isEmpty)
                         }
@@ -612,6 +614,7 @@ struct ChatView: View {
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(editing != nil ? "Save edit" : "Send")
                 }
             }
             .padding(.horizontal, 10)
@@ -639,13 +642,15 @@ struct ChatView: View {
 
     private var messageStack: some View {
         LazyVStack(spacing: 6) {
-            ForEach(chatMessages.indices, id: \.self) { index in
+            // Key by the stable message id (not the array index) so inserts and
+            // deletes keep each row's identity, animations, and state.
+            ForEach(chatMessages.enumerated(), id: \.element.id) { index, _ in
                 messageRow(index: index)
             }
-            // Bottom anchor: target for scroll-to-bottom, and its on-screen
-            // visibility is the source of truth for `isAtBottom` (robust against
-            // the floating composer's safeAreaInset, unlike offset math).
-            Color.clear.frame(height: 1).id("chatBottom")
+            // Bottom anchor: its on-screen visibility is the source of truth for
+            // `isAtBottom` (robust against the floating composer's safeAreaInset,
+            // unlike offset math).
+            Color.clear.frame(height: 1)
                 .onScrollVisibilityChange(threshold: 0.01) { visible in
                     isAtBottom = visible
                 }
@@ -654,7 +659,7 @@ struct ChatView: View {
         .padding(.vertical, 8)
     }
 
-    private func scrollContent(outer: GeometryProxy) -> some View {
+    private var scrollContent: some View {
         ScrollView {
             messageStack
         }
@@ -666,12 +671,12 @@ struct ChatView: View {
                 scrollDownButton()
             }
         }
-        .onChange(of: model.messages[conversationId]?.count ?? 0) { _ in
+        .onChange(of: model.messages[conversationId]?.count ?? 0) {
             // A new message landed — snap to it (defaultScrollAnchor handles the
             // initial appear).
             DispatchQueue.main.async { scrollToBottom(animated: false) }
         }
-        .onChange(of: chatMessages.reduce(0) { $0 + $1.reactions.count }) { _ in
+        .onChange(of: chatMessages.reduce(0) { $0 + $1.reactions.count }) {
             // A reaction chip appearing grows its message row; keep the latest
             // in view if we're already pinned to the bottom (don't yank the user
             // away if they've scrolled up into history).
@@ -690,6 +695,7 @@ struct ChatView: View {
                 .frame(width: 44, height: 44)
         }
         .glassEffect(.regular.interactive(), in: .circle)
+        .accessibilityLabel("Scroll to latest messages")
         .padding(.trailing, 14)
         .padding(.bottom, 10)
     }
@@ -730,11 +736,11 @@ struct ChatView: View {
 
     private var titleButton: some View {
         let name: String = conversation?.name ?? "Chat"
-        // Sits in the leading toolbar slot, immediately right of the back
-        // chevron (left-aligned, not centred). Cap its width to the space
-        // before the trailing button group (bell + lock, plus occupants in
-        // group chats) so a long name truncates instead of colliding.
-        let reserved: CGFloat = 70 + (isGroupChat ? 190 : 120)
+        // Plain left-aligned title (no glass bubble). It lives in the .principal
+        // slot, which spans the whole region between the back chevron and the
+        // trailing buttons; maxWidth: .infinity + leading alignment makes it
+        // hug the back button on the left and use all the space up to the
+        // trailing buttons, truncating only there.
         return Button {
             showFullTitle = true
         } label: {
@@ -743,8 +749,9 @@ struct ChatView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .foregroundStyle(Color.primary)
-                .frame(maxWidth: UIScreen.main.bounds.width - reserved, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .buttonStyle(.plain)
         .popover(isPresented: $showFullTitle, arrowEdge: .top) {
             titlePopover
         }
@@ -777,7 +784,7 @@ struct ChatView: View {
             }
             notifyOption("Off", "off")
         } label: {
-            Image(systemName: bellIcon)
+            Label("Notifications", systemImage: bellIcon)
         }
     }
 
@@ -786,7 +793,9 @@ struct ChatView: View {
             model.requestOccupants(conversationId)
             showOccupants = true
         } label: {
-            Image(systemName: "person.2")
+            // Label (not a bare Image) so the overflow menu shows a text title
+            // beside the icon; the bar still renders icon-only inline.
+            Label("Participants", systemImage: "person.2")
         }
     }
 
@@ -795,7 +804,8 @@ struct ChatView: View {
         return Button {
             model.setEncryption(conversationId, omemo: !omemoOn)
         } label: {
-            Image(systemName: omemoOn ? "lock.fill" : "lock.open")
+            Label(omemoOn ? "Encryption on" : "Encryption off",
+                  systemImage: omemoOn ? "lock.fill" : "lock.open")
                 .foregroundStyle(omemoOn ? Color.green : Color.secondary)
         }
     }
@@ -823,9 +833,7 @@ struct ChatView: View {
     }
 
     var body: some View {
-        GeometryReader { outer in
-            scrollContent(outer: outer)
-        }
+        scrollContent
         .safeAreaInset(edge: .bottom) {
             composerArea
         }
@@ -845,12 +853,15 @@ struct ChatView: View {
                 if scoped { url.stopAccessingSecurityScopedResource() }
             }
         }
-        .navigationTitle(conversation?.name ?? "Chat")
+        // Blank: the left-aligned title lives in the leading toolbar item; a
+        // navigationTitle here would render a second, centred copy.
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .principal) {
                 titleButton
             }
+            .sharedBackgroundVisibility(.hidden)
             ToolbarItemGroup(placement: .primaryAction) {
                 bellMenu
                 if isGroupChat {
@@ -869,7 +880,7 @@ struct ChatView: View {
         .sheet(item: $actionMsg) { m in
             reactionSheet(for: m)
         }
-        .onChange(of: model.viewerRequest) { path in
+        .onChange(of: model.viewerRequest) { _, path in
             if let path {
                 viewerItem = ImageViewerItem(id: path)
                 model.viewerRequest = nil
