@@ -231,6 +231,48 @@ private static void nse_finish() {
     });
 }
 
+// Cross-process XMPP lock. The app and each Notification Service Extension wake
+// are separate processes; two NSE wakes share the same gecko-nse resource, so if
+// they connect at once they kick each other off the server — one push decrypts,
+// the other times out into a generic "New Message". An flock on a file in the
+// shared App Group container serialises whoever holds an XMPP session. The kernel
+// drops the lock automatically when the process exits (even if iOS reaps it
+// mid-flight), so a crash can never wedge it.
+// flock() isn't in Vala's posix vapi (only the fcntl flock struct), so bind it.
+[CCode (cname = "flock", cheader_filename = "sys/file.h")]
+private extern int c_flock(int fd, int operation);
+[CCode (cname = "LOCK_EX", cheader_filename = "sys/file.h")]
+private extern const int C_LOCK_EX;
+[CCode (cname = "LOCK_NB", cheader_filename = "sys/file.h")]
+private extern const int C_LOCK_NB;
+[CCode (cname = "LOCK_UN", cheader_filename = "sys/file.h")]
+private extern const int C_LOCK_UN;
+
+private static int xmpp_lock_fd = -1;
+
+private static bool acquire_xmpp_lock(int timeout_ms) {
+    if (xmpp_lock_fd >= 0) return true;
+    string dir = Environment.get_variable("XDG_DATA_HOME") ?? Environment.get_tmp_dir();
+    string path = Path.build_filename(dir, "gecko-xmpp.lock");
+    int fd = Posix.open(path, Posix.O_CREAT | Posix.O_RDWR, Posix.S_IRUSR | Posix.S_IWUSR);
+    if (fd < 0) return false;
+    int waited = 0;
+    while (c_flock(fd, C_LOCK_EX | C_LOCK_NB) != 0) {
+        if (waited >= timeout_ms) { Posix.close(fd); return false; }
+        Thread.usleep(50000);  // 50ms
+        waited += 50;
+    }
+    xmpp_lock_fd = fd;
+    return true;
+}
+
+private static void release_xmpp_lock() {
+    if (xmpp_lock_fd < 0) return;
+    c_flock(xmpp_lock_fd, C_LOCK_UN);
+    Posix.close(xmpp_lock_fd);
+    xmpp_lock_fd = -1;
+}
+
 private static async void nse_shutdown() {
     try {
         var cm = app.stream_interactor.connection_manager;
@@ -248,6 +290,7 @@ private static async void nse_shutdown() {
     } catch (Error e) {
         warning("nse shutdown error: %s", e.message);
     }
+    release_xmpp_lock();
     // app.quit() happens in nse_finish's callback, after we emit the result —
     // so the clean teardown above always completes before the extension is told
     // it's done (and iOS can reap it).
@@ -262,6 +305,10 @@ public void nse_fetch(int timeout_ms, owned EventCb cb) {
         nse_first = true;
         nse_settle = 0;
         nse_seen = new Gee.HashSet<string>();
+        // Serialise with any other XMPP session (a concurrent NSE wake) before
+        // connecting, so we don't fight over the gecko-nse resource. Wait up to
+        // most of our budget; if it never frees, proceed best-effort anyway.
+        acquire_xmpp_lock(int.max(1000, hard_ms - 5000));
         // Don't request XEP-0198 resumption: the extension's session is
         // short-lived, and a resumable (hibernated) session left on the server
         // re-pushes its held message forever. Without resumption the session

@@ -12,7 +12,7 @@ sources = files(
     'ios_tls_database.c',
     'tls_glue.c',
 )
-vala_args = []
+vala_args = ['--pkg', 'posix']   # flock-based cross-process XMPP lock
 if get_option('plugin-omemo').enabled()
     dependencies += [dep_omemo, dep_libomemo_c]
     vala_args += ['-D', 'WITH_OMEMO', '--vapidir', meson.project_source_root() / 'plugins/omemo/vapi']
