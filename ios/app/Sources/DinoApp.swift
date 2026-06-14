@@ -475,6 +475,7 @@ struct ChatView: View {
     @State private var showFileImporter = false
     @State private var showOccupants = false
     @State private var occupantDMNick: String?
+    @State private var showEncryptionHelp = false
     @State private var editing: ChatMessage?
     @State private var replyingTo: ChatMessage?
     @State private var actionMsg: ChatMessage?
@@ -847,14 +848,19 @@ struct ChatView: View {
         // OMEMO needs a private (members-only, non-anonymous) room; the bridge
         // reports whether it's possible so we can disable the toggle otherwise.
         let available: Bool = conversation?.encryptionAvailable ?? false
+        // When unavailable, stay tappable and explain why (and offer a fix for
+        // owners) instead of being an inert disabled button.
         return Button {
-            model.setEncryption(conversationId, omemo: !omemoOn)
+            if available {
+                model.setEncryption(conversationId, omemo: !omemoOn)
+            } else {
+                showEncryptionHelp = true
+            }
         } label: {
             Label(available ? (omemoOn ? "Encryption on" : "Encryption off") : "Encryption unavailable",
                   systemImage: available ? (omemoOn ? "lock.fill" : "lock.open") : "lock.slash")
                 .foregroundStyle(omemoOn && available ? Color.green : Color.secondary)
         }
-        .disabled(!available)
     }
 
     @ViewBuilder
@@ -946,9 +952,25 @@ struct ChatView: View {
         .onAppear {
             model.openConversation(conversationId)
             model.focusConversation(conversationId)
+            // So the encryption-help dialog knows whether you're the owner.
+            if isGroupChat { model.requestRoomInfo(conversationId) }
         }
         .onDisappear {
             model.blurConversation(conversationId)
+        }
+        .confirmationDialog("Encryption unavailable", isPresented: $showEncryptionHelp, titleVisibility: .visible) {
+            if model.roomInfo[conversationId]?.iAmOwner == true {
+                Button("Make room private") { model.setRoomPrivate(conversationId, true) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if model.roomInfo[conversationId]?.iAmOwner == true {
+                Text("End-to-end encryption needs a private room (members-only, with member addresses visible). "
+                     + "Make it private to enable encryption, then tap the lock.")
+            } else {
+                Text("End-to-end encryption needs a private room (members-only, with member addresses visible). "
+                     + "Ask a room owner to make it private.")
+            }
         }
     }
 }

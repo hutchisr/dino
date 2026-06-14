@@ -591,6 +591,19 @@ private static string conversation_json(Conversation c) {
         notify_name(c.notify_setting), notify_name(c.get_notification_setting(app.stream_interactor)));
 }
 
+// A private room is members-only + non-anonymous. We read this from the MUC
+// flag (refreshed by the room's config-change disco) rather than
+// MucManager.is_private_room, which reads EntityInfo's separate caps cache that
+// only catches up later — that lag made the Private toggle revert after a set.
+private static bool room_is_private(Conversation c) {
+    var stream = app.stream_interactor.connection_manager.get_stream(c.account);
+    if (stream == null) return false;
+    var flag = stream.get_flag(Xmpp.Xep.Muc.Flag.IDENTITY);
+    if (flag == null) return false;
+    return flag.has_room_feature(c.counterpart, Xmpp.Xep.Muc.Feature.MEMBERS_ONLY)
+        && flag.has_room_feature(c.counterpart, Xmpp.Xep.Muc.Feature.NON_ANONYMOUS);
+}
+
 // Whether OMEMO can be turned on for this conversation. In a group chat it
 // requires a private room (members-only + non-anonymous) so occupants' real
 // JIDs are visible to fetch their device keys; a groupchat PM can't be
@@ -599,7 +612,7 @@ private static bool encryption_available(Conversation c) {
 #if WITH_OMEMO
     switch (c.type_) {
         case Conversation.Type.GROUPCHAT:
-            return app.stream_interactor.get_module(Dino.MucManager.IDENTITY).is_private_room(c.account, c.counterpart);
+            return room_is_private(c);
         case Conversation.Type.GROUPCHAT_PM:
             return false;
         default:
@@ -1418,7 +1431,7 @@ private static void emit_room_info(Conversation c) {
     string my_role = own != null ? role_name(muc.get_role(own, c.account)) : "none";
     emit("{\"type\":\"room_info\",\"conversation\":%d,\"subject\":\"%s\",\"is_private\":%s,\"is_moderated\":%s,\"my_affiliation\":\"%s\",\"my_role\":\"%s\"}".printf(
         c.id, esc(subject),
-        muc.is_private_room(c.account, c.counterpart) ? "true" : "false",
+        room_is_private(c) ? "true" : "false",
         muc.is_moderated_room(c.account, c.counterpart) ? "true" : "false",
         my_aff, my_role));
 }
@@ -1498,10 +1511,39 @@ public void muc_set_name(int conversation_id, string name) {
 
 public void muc_set_private(int conversation_id, bool private_room) {
     bool p = private_room;
+    // Making the room private locks it to the current group, and OMEMO encrypts
+    // to the member list — so grant membership to everyone present first
+    // (queued before the config IQ, so they're members before members-only
+    // applies and aren't dropped). Otherwise an open room's non-member
+    // participants can't be encrypted to.
+    if (p) grant_membership_to_occupants(conversation_id);
     muc_configure(conversation_id, (form) => {
         set_form_field(form, "muc#roomconfig_membersonly", p ? "1" : "0");
         // Non-anonymous when private so members see real jids (needed for OMEMO).
         set_form_field(form, "muc#roomconfig_whois", p ? "anyone" : "moderators");
+    });
+}
+
+private void grant_membership_to_occupants(int conversation_id) {
+    int cid = conversation_id;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
+        var occupants = muc.get_occupants(c.counterpart, c.account);
+        Xmpp.Jid? own = muc.get_own_jid(c.counterpart, c.account);
+        if (occupants != null) {
+            foreach (Xmpp.Jid occ in occupants) {
+                if (occ.resourcepart == null) continue;
+                if (own != null && own.equals(occ)) continue;
+                var aff = muc.get_affiliation(c.counterpart, occ, c.account);
+                // Promote only plain participants; leave existing staff/members.
+                if (aff == null || aff == Xmpp.Xep.Muc.Affiliation.NONE) {
+                    muc.change_affiliation(c.account, c.counterpart, occ.resourcepart, "member");
+                }
+            }
+        }
+        return Source.REMOVE;
     });
 }
 
