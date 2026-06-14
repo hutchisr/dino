@@ -216,13 +216,19 @@ private static void nse_finish() {
     if (nse_settle != 0) { Source.remove(nse_settle); nse_settle = 0; }
     if (nse_first) nse_append_latest_received();
     nse_msgs.append_c(']');
-    emit(@"{\"type\":\"nse_result\",\"messages\":$(nse_msgs.str)}");
-    // Tear the XMPP session down cleanly before quitting: ack everything we
-    // received (XEP-0198) so the server clears its pending-push queue, then
-    // send unavailable presence + close the stream. An abrupt app.quit() left
-    // the delivered message unacked, so xmpp.is re-queued and re-pushed it
-    // forever — the "New Message" loop.
-    nse_shutdown.begin();
+    string result = @"{\"type\":\"nse_result\",\"messages\":$(nse_msgs.str)}";
+    // Close the XMPP session cleanly BEFORE signalling the extension is done.
+    // emit() drives the NSE's contentHandler, after which iOS can suspend/kill
+    // the extension at any instant. If that happens before our ack +
+    // unavailable presence + </stream:stream> are written, the session closes
+    // UNCLEANLY and the server hibernates it into a "ghost" that re-fires a push
+    // for every later message — one extra push per leaked session (the
+    // escalating-duplicates bug). So tear down first, emit second.
+    nse_shutdown.begin((_, res) => {
+        nse_shutdown.end(res);
+        emit(result);
+        if (app != null) app.quit();
+    });
 }
 
 private static async void nse_shutdown() {
@@ -242,7 +248,9 @@ private static async void nse_shutdown() {
     } catch (Error e) {
         warning("nse shutdown error: %s", e.message);
     }
-    if (app != null) app.quit();
+    // app.quit() happens in nse_finish's callback, after we emit the result —
+    // so the clean teardown above always completes before the extension is told
+    // it's done (and iOS can reap it).
 }
 
 public void nse_fetch(int timeout_ms, owned EventCb cb) {
