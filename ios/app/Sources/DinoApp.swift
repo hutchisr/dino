@@ -730,20 +730,20 @@ struct ChatView: View {
 
     private var titleButton: some View {
         let name: String = conversation?.name ?? "Chat"
-        // The principal item sits just right of the back chevron and is not
-        // clipped against the trailing button group (bell + lock, plus
-        // occupants in group chats), so cap its width to the space between
-        // the two.
+        // Sits in the leading toolbar slot, immediately right of the back
+        // chevron (left-aligned, not centred). Cap its width to the space
+        // before the trailing button group (bell + lock, plus occupants in
+        // group chats) so a long name truncates instead of colliding.
         let reserved: CGFloat = 70 + (isGroupChat ? 190 : 120)
         return Button {
             showFullTitle = true
         } label: {
             Text(name)
-                .font(.subheadline.weight(.semibold))
+                .font(.headline)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .foregroundStyle(Color.primary)
-                .frame(maxWidth: UIScreen.main.bounds.width - reserved)
+                .frame(maxWidth: UIScreen.main.bounds.width - reserved, alignment: .leading)
         }
         .popover(isPresented: $showFullTitle, arrowEdge: .top) {
             titlePopover
@@ -848,7 +848,7 @@ struct ChatView: View {
         .navigationTitle(conversation?.name ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .principal) {
+            ToolbarItem(placement: .topBarLeading) {
                 titleButton
             }
             ToolbarItemGroup(placement: .primaryAction) {
