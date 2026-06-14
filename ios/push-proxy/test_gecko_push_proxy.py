@@ -193,12 +193,28 @@ class TestHandlePublish(unittest.IsolatedAsyncioTestCase):
             bot, HEX_TOKEN, make_iq(count=1, sender="room@muc/someone", body="hey Rachel!"))
         self.assertEqual(len(bot.apns.pushes), 1)
 
-    async def test_burst_is_deduplicated(self):
+    async def test_mention_only_without_body_is_delivered(self):
+        # The server didn't include a body, so we can't check for the mention —
+        # deliver rather than risk dropping a real one.
+        bot = make_bot({HEX_TOKEN: {"muted": set(), "mention": {"room@muc": "rachel"}}})
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, sender="room@muc/someone"))
+        self.assertEqual(len(bot.apns.pushes), 1)
+
+    async def test_identical_publish_is_deduplicated(self):
+        # The server can deliver the same notification twice; collapse the repeat.
         bot = make_bot()
         iq = make_iq(count=1, sender="x@y/r", body="hi")
         await PushBot.handle_publish(bot, HEX_TOKEN, iq)
-        await PushBot.handle_publish(bot, HEX_TOKEN, iq)   # same token, well within 5s
+        await PushBot.handle_publish(bot, HEX_TOKEN, iq)   # identical summary, same window
         self.assertEqual(len(bot.apns.pushes), 1)
+
+    async def test_distinct_messages_same_token_are_delivered(self):
+        # A genuinely new message (incremented count / different body) must NOT
+        # be swallowed by dedup — prompt delivery over de-duplication.
+        bot = make_bot()
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=1, sender="x@y/r", body="first"))
+        await PushBot.handle_publish(bot, HEX_TOKEN, make_iq(count=2, sender="x@y/r", body="second"))
+        self.assertEqual(len(bot.apns.pushes), 2)
 
     async def test_distinct_tokens_not_deduplicated(self):
         bot = make_bot()

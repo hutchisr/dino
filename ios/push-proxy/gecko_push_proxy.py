@@ -46,6 +46,12 @@ APNS_HOSTS = {
 APNS_FIRST = "sandbox" if os.environ.get("APNS_SANDBOX", "1") == "1" else "production"
 TOKEN_RE = re.compile(r"^[0-9a-fA-F]{32,200}$")
 
+# How long to suppress an *identical* repeat of the same push summary — the
+# server can deliver a notification twice (e.g. a mediated + direct copy). Kept
+# short, and a genuinely new message carries a different summary anyway, so this
+# never delays a real message.
+DEDUP_WINDOW_SECONDS = 3.0
+
 
 class Apns:
     """Minimal APNs HTTP/2 client with JWT (token-based) auth."""
@@ -114,12 +120,11 @@ class PushBot(slixmpp.ClientXMPP):
         # device token -> {"muted": set of bare jids,
         #                  "mention": {bare jid: nick}}
         self.filters: dict[str, dict] = {}
-        # device token -> monotonic time of the last push actually sent.
-        # The user's server publishes the same message several times in a
-        # burst (one per accumulated push registration, plus a known
-        # double-publish), which would surface as several identical banners.
-        # Collapse a burst to a single push per token.
-        self.last_push: dict[str, float] = {}
+        # device token -> (summary signature, monotonic time) of the last push
+        # sent, so we can collapse an identical repeat (the server sometimes
+        # delivers the same notification twice) without ever suppressing a
+        # distinct message.
+        self.last_push: dict[str, tuple] = {}
         self.add_event_handler("session_start", self.on_start)
         self.add_event_handler("message", self.on_message)
         self.register_plugin("xep_0030")
@@ -200,18 +205,25 @@ class PushBot(slixmpp.ClientXMPP):
                 return
             if bare in rules["mention"]:
                 nick = rules["mention"][bare]
-                if not last_body or nick.lower() not in last_body.lower():
+                # Suppress only when we can see the body and the nick isn't in
+                # it. If the server sent no body we can't tell, so deliver rather
+                # than risk swallowing a real mention.
+                if last_body and nick.lower() not in last_body.lower():
                     log.info("mention-only %s without mention — dropping push", bare)
                     return
 
-        # Collapse a burst of identical publishes (the server emits one per
-        # registration, plus a double-publish) into a single banner.
+        # Collapse only a genuinely duplicate publish: same token, same summary,
+        # within a short window. A new message carries a different summary (at
+        # least an incremented message-count), so it is delivered right away
+        # instead of being swallowed by a blanket per-token window.
         now = time.monotonic()
         tok = node.lower()
-        if now - self.last_push.get(tok, 0.0) < 5.0:
-            log.info("deduped burst push for %s…", node[:8])
+        signature = (count, sender, last_body)
+        prev = self.last_push.get(tok)
+        if prev is not None and prev[0] == signature and now - prev[1] < DEDUP_WINDOW_SECONDS:
+            log.info("deduped duplicate publish for %s…", node[:8])
             return
-        self.last_push[tok] = now
+        self.last_push[tok] = (signature, now)
 
         body = "New message" if not count or count <= 1 else f"{count} new messages"
         payload = {
