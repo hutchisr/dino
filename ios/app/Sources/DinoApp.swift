@@ -236,12 +236,24 @@ func jidColor(_ jid: String) -> Color {
     return palette[abs(hash) % palette.count]
 }
 
+/// Maps an XMPP presence "show" to a status-dot colour.
+func presenceColor(_ show: String) -> Color {
+    switch show {
+    case "online", "chat": return .green
+    case "away", "xa": return .yellow
+    case "dnd": return .red
+    default: return Color(.systemGray4)  // offline / unknown
+    }
+}
+
 struct AvatarView: View {
     @EnvironmentObject var model: AppModel
     let jid: String
     let name: String
     let isGroup: Bool
     var size: CGFloat = 44
+    /// XMPP "show" for a status dot, or nil to draw no dot (groups, occupants…).
+    var presence: String?
 
     private var initial: String {
         String((name.isEmpty ? jid : name).prefix(1)).uppercased()
@@ -275,6 +287,14 @@ struct AvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+        .overlay(alignment: .bottomTrailing) {
+            if let presence {
+                Circle()
+                    .fill(presenceColor(presence))
+                    .frame(width: size * 0.28, height: size * 0.28)
+                    .overlay(Circle().stroke(Color(.systemBackground), lineWidth: max(1.5, size * 0.045)))
+            }
+        }
         .onAppear { model.ensureAvatar(for: jid) }
     }
 }
@@ -299,7 +319,8 @@ struct ConversationRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            AvatarView(jid: conv.jid, name: conv.name, isGroup: conv.isGroupchat)
+            AvatarView(jid: conv.jid, name: conv.name, isGroup: conv.isGroupchat,
+                       presence: conv.isGroupchat ? nil : model.presence(for: conv.jid))
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(conv.name)
@@ -390,13 +411,8 @@ struct ContactsView: View {
                         model.openChat(with: contact.id)
                     } label: {
                         HStack {
-                            AvatarView(jid: contact.id, name: contact.displayName, isGroup: false, size: 36)
-                                .overlay(alignment: .bottomTrailing) {
-                                    Circle()
-                                        .fill(contact.online ? .green : Color(.systemGray4))
-                                        .frame(width: 10, height: 10)
-                                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
-                                }
+                            AvatarView(jid: contact.id, name: contact.displayName, isGroup: false, size: 36,
+                                       presence: contact.show)
                             VStack(alignment: .leading) {
                                 Text(contact.displayName)
                                 HStack(spacing: 4) {

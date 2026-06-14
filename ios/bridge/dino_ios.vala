@@ -377,11 +377,13 @@ public void start(owned EventCb cb) {
         // still cached/stale.
         var muc_mod = si.get_module(Dino.MucManager.IDENTITY);
         muc_mod.subject_set.connect((account, jid, subject) => {
-            var conv = si.get_module(Dino.ConversationManager.IDENTITY).get_conversation(jid, account, Conversation.Type.GROUPCHAT);
+            // jid is the sender (room@conf/nick); the conversation is keyed by
+            // the bare room jid.
+            var conv = si.get_module(Dino.ConversationManager.IDENTITY).get_conversation(jid.bare_jid, account, Conversation.Type.GROUPCHAT);
             if (conv != null) emit_room_info(conv);
         });
         muc_mod.room_info_updated.connect((account, jid) => {
-            var conv = si.get_module(Dino.ConversationManager.IDENTITY).get_conversation(jid, account, Conversation.Type.GROUPCHAT);
+            var conv = si.get_module(Dino.ConversationManager.IDENTITY).get_conversation(jid.bare_jid, account, Conversation.Type.GROUPCHAT);
             if (conv != null) { emit_room_info(conv); push_conversations(); }
         });
         si.get_module(Dino.MessageCorrection.IDENTITY).received_correction.connect((item) => {
@@ -395,8 +397,20 @@ public void start(owned EventCb cb) {
         });
         si.get_module(Dino.RosterManager.IDENTITY).updated_roster_item.connect(() => push_roster());
         si.get_module(Dino.RosterManager.IDENTITY).removed_roster_item.connect(() => push_roster());
-        si.get_module(Dino.PresenceManager.IDENTITY).show_received.connect(() => push_roster());
-        si.get_module(Dino.PresenceManager.IDENTITY).received_offline_presence.connect(() => push_roster());
+        si.get_module(Dino.PresenceManager.IDENTITY).show_received.connect((jid, account) => {
+            push_roster();
+            // A MUC occupant came online (joined / presence change) — refresh
+            // the participant list live.
+            if (si.get_module(Dino.MucManager.IDENTITY).is_groupchat(jid.bare_jid, account)) {
+                schedule_occupants_refresh(account, jid.bare_jid);
+            }
+        });
+        si.get_module(Dino.PresenceManager.IDENTITY).received_offline_presence.connect((jid, account) => {
+            push_roster();
+            if (si.get_module(Dino.MucManager.IDENTITY).is_groupchat(jid.bare_jid, account)) {
+                schedule_occupants_refresh(account, jid.bare_jid);  // occupant left
+            }
+        });
         si.get_module(Dino.PresenceManager.IDENTITY).received_subscription_request.connect((jid, account) => {
             emit(@"{\"type\":\"subscription_request\",\"account\":\"$(esc(account.bare_jid.to_string()))\",\"jid\":\"$(esc(jid.bare_jid.to_string()))\"}");
         });
@@ -701,6 +715,32 @@ public void add_account(string jid_str, string password) {
     });
 }
 
+// The roster gives bare jids, but presence is stored per resource (full jid),
+// so get_last_show(bare) is always null. Resolve the contact's resources and
+// return the most-available show: "online" | "away" | "xa" | "dnd" | "offline".
+private static string roster_show(Dino.PresenceManager presence, Xmpp.Jid bare, Account a) {
+    var resources = presence.get_full_jids(bare, a);
+    if (resources == null || resources.size == 0) return "offline";
+    string best = "offline";
+    int best_rank = -1;
+    foreach (Xmpp.Jid full in resources) {
+        string s = presence.get_last_show(full, a) ?? "";  // "" == available
+        int rank;
+        switch (s) {
+            case "": case "chat": rank = 4; break;  // online
+            case "dnd": rank = 3; break;
+            case "away": rank = 2; break;
+            case "xa": rank = 1; break;
+            default: rank = 0; break;
+        }
+        if (rank > best_rank) {
+            best_rank = rank;
+            best = (s == "" || s == "chat") ? "online" : s;
+        }
+    }
+    return best;
+}
+
 private static void push_roster() {
     var b = new StringBuilder("{\"type\":\"roster\",\"list\":[");
     bool first = true;
@@ -711,10 +751,9 @@ private static void push_roster() {
             if (item.jid == null) continue;
             if (!first) b.append_c(',');
             first = false;
-            string? show = presence.get_last_show(item.jid, a);
             b.append("{\"account\":\"%s\",\"jid\":\"%s\",\"name\":\"%s\",\"subscription\":\"%s\",\"show\":\"%s\"}".printf(
                 esc(a.bare_jid.to_string()), esc(item.jid.to_string()), esc(item.name ?? ""),
-                esc(item.subscription ?? ""), esc(show ?? "offline")));
+                esc(item.subscription ?? ""), esc(roster_show(presence, item.jid, a))));
         }
     }
     b.append("]}");
@@ -1263,34 +1302,56 @@ public void request_occupants(int conversation_id) {
     int cid = conversation_id;
     Idle.add(() => {
         Conversation? c = conversation_by_id(cid);
-        if (c == null) return Source.REMOVE;
-        var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
-        var occupants = muc.get_occupants(c.counterpart, c.account);
-        Xmpp.Jid? own = muc.get_own_jid(c.counterpart, c.account);
-        var b = new StringBuilder();
-        b.append_printf("{\"type\":\"occupants\",\"conversation\":%d,\"list\":[", cid);
-        bool first = true;
-        if (occupants != null) {
-            foreach (Xmpp.Jid occupant in occupants) {
-                if (occupant.resourcepart == null) continue;
-                if (!first) b.append_c(',');
-                first = false;
-                bool is_self = own != null && own.equals(occupant);
-                // Real bare jid is known only in non-anonymous rooms; "" otherwise.
-                Xmpp.Jid? real = muc.get_real_jid(occupant, c.account);
-                // Push the occupant's avatar (keyed by their full room jid) so
-                // the list can show it.
-                push_avatar(c.account, occupant);
-                b.append("{\"nick\":\"%s\",\"self\":%s,\"jid\":\"%s\",\"real_jid\":\"%s\",\"affiliation\":\"%s\",\"role\":\"%s\"}".printf(
-                    esc(occupant.resourcepart), is_self ? "true" : "false",
-                    esc(occupant.to_string()),
-                    esc(real != null ? real.bare_jid.to_string() : ""),
-                    affiliation_name(muc.get_affiliation(c.counterpart, occupant, c.account)),
-                    role_name(muc.get_role(occupant, c.account))));
-            }
+        if (c != null) emit_occupants(c);
+        return Source.REMOVE;
+    });
+}
+
+private static void emit_occupants(Conversation c) {
+    var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
+    var occupants = muc.get_occupants(c.counterpart, c.account);
+    Xmpp.Jid? own = muc.get_own_jid(c.counterpart, c.account);
+    var b = new StringBuilder();
+    b.append_printf("{\"type\":\"occupants\",\"conversation\":%d,\"list\":[", c.id);
+    bool first = true;
+    if (occupants != null) {
+        foreach (Xmpp.Jid occupant in occupants) {
+            if (occupant.resourcepart == null) continue;
+            if (!first) b.append_c(',');
+            first = false;
+            bool is_self = own != null && own.equals(occupant);
+            // Real bare jid is known only in non-anonymous rooms; "" otherwise.
+            Xmpp.Jid? real = muc.get_real_jid(occupant, c.account);
+            // Push the occupant's avatar (keyed by their full room jid) so
+            // the list can show it.
+            push_avatar(c.account, occupant);
+            b.append("{\"nick\":\"%s\",\"self\":%s,\"jid\":\"%s\",\"real_jid\":\"%s\",\"affiliation\":\"%s\",\"role\":\"%s\"}".printf(
+                esc(occupant.resourcepart), is_self ? "true" : "false",
+                esc(occupant.to_string()),
+                esc(real != null ? real.bare_jid.to_string() : ""),
+                affiliation_name(muc.get_affiliation(c.counterpart, occupant, c.account)),
+                role_name(muc.get_role(occupant, c.account))));
         }
-        b.append("]}");
-        emit(b.str);
+    }
+    b.append("]}");
+    emit(b.str);
+}
+
+// Coalesce presence bursts (a join can arrive as several stanzas) into one
+// occupant re-push per room, ~350ms after the last change.
+private static Gee.HashMap<string, uint>? occ_refresh_timers = null;
+private static void schedule_occupants_refresh(Account account, Xmpp.Jid room_bare) {
+    Conversation? c = app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY)
+        .get_conversation(room_bare, account, Conversation.Type.GROUPCHAT);
+    if (c == null) return;
+    if (occ_refresh_timers == null) occ_refresh_timers = new Gee.HashMap<string, uint>();
+    string key = room_bare.to_string();
+    if (occ_refresh_timers.has_key(key)) Source.remove(occ_refresh_timers[key]);
+    int cid = c.id;
+    occ_refresh_timers[key] = Timeout.add(350, () => {
+        occ_refresh_timers.unset(key);
+        Conversation? cc = conversation_by_id(cid);
+        if (cc != null) emit_occupants(cc);
         return Source.REMOVE;
     });
 }

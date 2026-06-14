@@ -305,6 +305,11 @@ final class AppModel: ObservableObject {
 
     /// Start (or open) a chat with a contact and navigate into it once the
     /// conversation id arrives with the next conversations push.
+    /// XMPP "show" for a 1:1 contact from the roster (nil if not a known contact).
+    func presence(for jid: String) -> String? {
+        roster.first { $0.id == jid }?.show
+    }
+
     func openChat(with jid: String) {
         if let existing = conversations.first(where: { $0.jid == jid }) {
             navigation = [existing.id]
