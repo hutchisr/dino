@@ -373,6 +373,12 @@ public void start(owned EventCb cb) {
         si.get_module(Dino.AvatarManager.IDENTITY).received_avatar.connect((jid, account) => {
             push_avatar(account, jid);
         });
+        // A newly-announced avatar isn't on disk yet — get_avatar_file kicks off
+        // an async fetch and returns null. fetched_avatar fires once it lands, so
+        // push again then (otherwise e.g. a freshly-set room avatar never shows).
+        si.get_module(Dino.AvatarManager.IDENTITY).fetched_avatar.connect((jid, account) => {
+            push_avatar(account, jid);
+        });
         si.get_module(Dino.ConversationManager.IDENTITY).conversation_activated.connect((conversation) => {
             push_conversations();
         });
@@ -975,6 +981,55 @@ public void set_avatar(string path) {
         var account = first_enabled_account();
         if (account == null) return Source.REMOVE;
         app.stream_interactor.get_module(Dino.AvatarManager.IDENTITY).publish(account, p);
+        return Source.REMOVE;
+    });
+}
+
+// Publish a room avatar (XEP-0153 vCard-temp PHOTO on the room jid). Only owners
+// may set it — the UI gates on that and the service rejects it otherwise. After
+// the set, the service broadcasts the new photo hash in room presence and the
+// normal avatar pipeline picks it up; we also write the scaled PNG to a temp
+// file and push it straight away so the owner sees the change without waiting.
+public void muc_set_avatar(int conversation_id, string path) {
+    int cid = conversation_id;
+    string p = path;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null || c.type_ != Conversation.Type.GROUPCHAT) return Source.REMOVE;
+        var stream = app.stream_interactor.get_stream(c.account);
+        if (stream == null) return Source.REMOVE;
+        try {
+            var pixbuf = new Gdk.Pixbuf.from_file(p);
+            const int MAX = 192;
+            if (pixbuf.width > MAX || pixbuf.height > MAX) {
+                int w, h;
+                if (pixbuf.width >= pixbuf.height) {
+                    w = MAX; h = (int) ((float) MAX / pixbuf.width * pixbuf.height);
+                } else {
+                    h = MAX; w = (int) ((float) MAX / pixbuf.height * pixbuf.width);
+                }
+                pixbuf = pixbuf.scale_simple(w, h, Gdk.InterpType.BILINEAR);
+            }
+            uint8[] buffer;
+            pixbuf.save_to_buffer(out buffer, "png");
+
+            var photo = new Xmpp.StanzaNode.build("PHOTO", "vcard-temp");
+            photo.put_node(new Xmpp.StanzaNode.build("TYPE", "vcard-temp").put_node(new Xmpp.StanzaNode.text("image/png")));
+            photo.put_node(new Xmpp.StanzaNode.build("BINVAL", "vcard-temp").put_node(new Xmpp.StanzaNode.text(Base64.encode(buffer))));
+            var vcard = new Xmpp.StanzaNode.build("vCard", "vcard-temp").add_self_xmlns();
+            vcard.put_node(photo);
+            var iq = new Xmpp.Iq.Stanza.set(vcard) { to = c.counterpart };
+            stream.get_module(Xmpp.Iq.Module.IDENTITY).send_iq(stream, iq, (stream, result) => {
+                message("gecko: MUC vCard avatar set -> %s", result.stanza.get_attribute("type") ?? "?");
+            });
+
+            string tmp = Path.build_filename(Environment.get_tmp_dir(),
+                "gecko-room-avatar-%u.png".printf(c.counterpart.to_string().hash()));
+            FileUtils.set_data(tmp, buffer);
+            emit(@"{\"type\":\"avatar\",\"jid\":\"$(esc(c.counterpart.to_string()))\",\"path\":\"$(esc(tmp))\"}");
+        } catch (Error e) {
+            warning("gecko: muc_set_avatar failed: %s", e.message);
+        }
         return Source.REMOVE;
     });
 }

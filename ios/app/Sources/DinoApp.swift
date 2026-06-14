@@ -993,6 +993,21 @@ struct ChatView: View {
     }
 }
 
+private let messageLinkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+/// Message text with tappable links (URLs, emails); falls back to plain text.
+private func linkifiedBody(_ text: String) -> AttributedString {
+    guard !text.isEmpty, let detector = messageLinkDetector else { return AttributedString(text) }
+    let mutable = NSMutableAttributedString(string: text)
+    let range = NSRange(location: 0, length: (text as NSString).length)
+    detector.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
+        if let url = match?.url, let matchRange = match?.range {
+            mutable.addAttribute(.link, value: url, range: matchRange)
+        }
+    }
+    return AttributedString(mutable)
+}
+
 struct MessageBubble: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
@@ -1073,7 +1088,7 @@ struct MessageBubble: View {
                     if msg.isFile {
                         FileContent(conversationId: conversationId, msg: msg, onImageTap: onImageTap)
                     } else {
-                        Text(msg.body)
+                        Text(linkifiedBody(msg.body)).tint(.accentColor)
                     }
                     HStack(spacing: 4) {
                         if msg.encryption == "OMEMO" {
@@ -1157,32 +1172,42 @@ struct FileContent: View {
                 .onTapGesture {
                     onImageTap?(msg.path)
                 }
+        } else if msg.fileState == "complete", !msg.path.isEmpty {
+            // No inline preview for this type (video, pdf, …) — hand it to the
+            // share sheet so the user can open it in any app that handles it,
+            // save it to Files, etc.
+            ShareLink(item: URL(fileURLWithPath: msg.path)) { fileRow }
+                .buttonStyle(.plain)
         } else {
-            HStack(spacing: 8) {
-                switch msg.fileState {
-                case "in_progress":
-                    ProgressView().controlSize(.small)
-                case "failed":
-                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.red)
-                case "complete":
-                    Image(systemName: "doc.fill").foregroundStyle(.secondary)
-                default:
-                    Image(systemName: "arrow.down.circle").font(.title3)
-                }
-                VStack(alignment: .leading) {
-                    Text(msg.fileName.isEmpty ? "File" : msg.fileName).lineLimit(1)
-                    HStack(spacing: 4) {
-                        if !sizeLabel.isEmpty { Text(sizeLabel) }
-                        if msg.fileState == "failed" { Text("failed") }
-                        if msg.fileState == "in_progress" { Text(msg.direction == "out" ? "uploading…" : "downloading…") }
+            fileRow
+                .onTapGesture {
+                    if msg.fileState == "not_started" || msg.fileState == "failed" {
+                        model.downloadFile(conversationId, item: msg.id)
                     }
-                    .font(.caption2).foregroundStyle(.secondary)
                 }
+        }
+    }
+
+    private var fileRow: some View {
+        HStack(spacing: 8) {
+            switch msg.fileState {
+            case "in_progress":
+                ProgressView().controlSize(.small)
+            case "failed":
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.red)
+            case "complete":
+                Image(systemName: msg.isImage ? "photo" : "doc.fill").foregroundStyle(.secondary)
+            default:
+                Image(systemName: "arrow.down.circle").font(.title3)
             }
-            .onTapGesture {
-                if msg.fileState == "not_started" || msg.fileState == "failed" {
-                    model.downloadFile(conversationId, item: msg.id)
+            VStack(alignment: .leading) {
+                Text(msg.fileName.isEmpty ? "File" : msg.fileName).lineLimit(1)
+                HStack(spacing: 4) {
+                    if !sizeLabel.isEmpty { Text(sizeLabel) }
+                    if msg.fileState == "failed" { Text("failed") }
+                    if msg.fileState == "in_progress" { Text(msg.direction == "out" ? "uploading…" : "downloading…") }
                 }
+                .font(.caption2).foregroundStyle(.secondary)
             }
         }
     }

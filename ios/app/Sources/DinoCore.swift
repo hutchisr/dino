@@ -106,6 +106,7 @@ final class DinoCore {
     func mucSetName(_ id: Int32, name: String) { dino_ios_muc_set_name(id, name) }
     func mucSetPrivate(_ id: Int32, _ priv: Bool) { dino_ios_muc_set_private(id, priv ? 1 : 0) }
     func mucSetModerated(_ id: Int32, _ moderated: Bool) { dino_ios_muc_set_moderated(id, moderated ? 1 : 0) }
+    func mucSetAvatar(_ id: Int32, path: String) { dino_ios_muc_set_avatar(id, path) }
     func addContact(jid: String, alias: String?) { dino_ios_add_contact(jid, alias) }
     func removeContact(jid: String) { dino_ios_remove_contact(jid) }
     func respondSubscription(jid: String, approve: Bool) { dino_ios_respond_subscription(jid, approve ? 1 : 0) }

@@ -15,6 +15,7 @@ struct RoomDetailsView: View {
     @State private var editingTopic = false
     @State private var nameDraft = ""
     @State private var topicDraft = ""
+    @State private var showPhotoPicker = false
 
     private var occupants: [Occupant] { model.occupants[conversationId] ?? [] }
     private var me: Occupant? { occupants.first { $0.isSelf } }
@@ -50,12 +51,32 @@ struct RoomDetailsView: View {
             Button("Save") { model.setRoomSubject(conversationId, topicDraft) }
             Button("Cancel", role: .cancel) {}
         }
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoPicker { url in model.setRoomAvatar(conversationId, path: url.path) }
+        }
+    }
+
+    private var avatar: some View {
+        AvatarView(jid: conversation?.jid ?? "", name: conversation?.name ?? "", isGroup: true, size: 52)
     }
 
     private var headerSection: some View {
         Section {
             HStack(spacing: 12) {
-                AvatarView(jid: conversation?.jid ?? "", name: conversation?.name ?? "", isGroup: true, size: 52)
+                if info.iAmOwner {
+                    Button { showPhotoPicker = true } label: {
+                        avatar.overlay(alignment: .bottomTrailing) {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 9))
+                                .padding(5)
+                                .background(Circle().fill(Color.accentColor))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    avatar
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(conversation?.name ?? "Group chat").font(.headline)
                     if let jid = conversation?.jid {

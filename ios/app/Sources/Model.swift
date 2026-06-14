@@ -190,7 +190,7 @@ final class AppModel: ObservableObject {
     }
 
     func setAvatar(path: String) {
-        DinoCore.shared.setAvatar(path: path)
+        DinoCore.shared.setAvatar(path: avatarPNG(from: path) ?? path)
         // re-request our own avatar once published
         if let jid = accounts.first?.id {
             requestedAvatars.remove(jid)
@@ -288,6 +288,9 @@ final class AppModel: ObservableObject {
     func setRoomModerated(_ id: Int32, _ moderated: Bool) {
         roomInfo[id]?.isModerated = moderated
         DinoCore.shared.mucSetModerated(id, moderated)
+    }
+    func setRoomAvatar(_ id: Int32, path: String) {
+        DinoCore.shared.mucSetAvatar(id, path: avatarPNG(from: path) ?? path)
     }
 
     func requestOccupants(_ id: Int32) {
@@ -675,5 +678,19 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+}
+
+/// gdk-pixbuf on iOS ships only the built-in PNG loader, so re-encode any picked
+/// image (JPEG/HEIC/…) to a PNG temp file before handing its path to the bridge
+/// for avatar publishing. Returns nil if the image can't be read or written.
+private func avatarPNG(from path: String) -> String? {
+    guard let image = UIImage(contentsOfFile: path), let data = image.pngData() else { return nil }
+    let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+    do {
+        try data.write(to: dest)
+        return dest.path
+    } catch {
+        return nil
     }
 }
