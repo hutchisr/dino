@@ -1263,11 +1263,46 @@ public void request_occupants(int conversation_id) {
                 if (!first) b.append_c(',');
                 first = false;
                 bool is_self = own != null && own.equals(occupant);
-                b.append("{\"nick\":\"%s\",\"self\":%s}".printf(esc(occupant.resourcepart), is_self ? "true" : "false"));
+                // Real bare jid is known only in non-anonymous rooms; "" otherwise.
+                Xmpp.Jid? real = muc.get_real_jid(occupant, c.account);
+                // Push the occupant's avatar (keyed by their full room jid) so
+                // the list can show it.
+                push_avatar(c.account, occupant);
+                b.append("{\"nick\":\"%s\",\"self\":%s,\"jid\":\"%s\",\"real_jid\":\"%s\"}".printf(
+                    esc(occupant.resourcepart), is_self ? "true" : "false",
+                    esc(occupant.to_string()),
+                    esc(real != null ? real.bare_jid.to_string() : "")));
             }
         }
         b.append("]}");
         emit(b.str);
+        return Source.REMOVE;
+    });
+}
+
+// Open a direct chat with a MUC occupant. In a non-anonymous room we know
+// their real jid, so start a normal 1:1; otherwise fall back to a private
+// message routed through the room (GROUPCHAT_PM to room@conf/nick).
+public void start_occupant_dm(int conversation_id, string nick) {
+    int cid = conversation_id;
+    string n = nick;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        try {
+            var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
+            Xmpp.Jid occupant = c.counterpart.with_resource(n);
+            Xmpp.Jid? real = muc.get_real_jid(occupant, c.account);
+            var cm = app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY);
+            Conversation conv = real != null
+                ? cm.create_conversation(real.bare_jid, c.account, Conversation.Type.CHAT)
+                : cm.create_conversation(occupant, c.account, Conversation.Type.GROUPCHAT_PM);
+            cm.start_conversation(conv);
+            push_conversations();
+            emit("{\"type\":\"open_conversation\",\"id\":%d}".printf(conv.id));
+        } catch (Error e) {
+            emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
+        }
         return Source.REMOVE;
     });
 }

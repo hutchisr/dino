@@ -33,6 +33,15 @@ struct PendingMucCreate: Identifiable {
     let nick: String?
 }
 
+/// A participant in a group chat.
+struct Occupant: Identifiable {
+    var id: String { jid }
+    let nick: String
+    let jid: String        // full room jid (room@conf/nick), used for the avatar
+    let realJid: String?   // bare real jid, known only in non-anonymous rooms
+    let isSelf: Bool
+}
+
 struct RosterContact: Identifiable {
     let id: String   // bare jid
     let account: String
@@ -97,7 +106,7 @@ final class AppModel: ObservableObject {
     @Published var subscriptionRequests: [String] = []
     @Published var avatars: [String: String] = [:]      // bare jid -> file path
     @Published var chatStates: [Int32: String] = [:]    // conversation id -> XEP-0085 state
-    @Published var occupants: [Int32: [(nick: String, isSelf: Bool)]] = [:]
+    @Published var occupants: [Int32: [Occupant]] = [:]
     @Published var viewerRequest: String?   // used by UI automation to open the image viewer
     @Published var accountAlias: String = ""
     @Published var omemoDeviceId: Int = 0
@@ -193,6 +202,10 @@ final class AppModel: ObservableObject {
     func closeConversation(_ id: Int32) {
         DinoCore.shared.closeConversation(id)
         if navigation.contains(id) { navigation = [] }
+    }
+
+    func startOccupantDM(_ id: Int32, nick: String) {
+        DinoCore.shared.startOccupantDM(id, nick: nick)
     }
 
     func requestOccupants(_ id: Int32) {
@@ -340,8 +353,19 @@ final class AppModel: ObservableObject {
             if let cid = e["conversation"] as? Int, let list = e["list"] as? [[String: Any]] {
                 occupants[Int32(cid)] = list.compactMap { o in
                     guard let nick = o["nick"] as? String else { return nil }
-                    return (nick: nick, isSelf: o["self"] as? Bool ?? false)
+                    let real = o["real_jid"] as? String
+                    return Occupant(
+                        nick: nick,
+                        jid: o["jid"] as? String ?? nick,
+                        realJid: (real?.isEmpty ?? true) ? nil : real,
+                        isSelf: o["self"] as? Bool ?? false)
                 }.sorted { $0.nick.lowercased() < $1.nick.lowercased() }
+            }
+        case "open_conversation":
+            if let id = e["id"] as? Int, navigation.last != Int32(id) {
+                // Push so the new chat slides in over the current one (and Back
+                // returns to where you were, e.g. the group chat).
+                navigation.append(Int32(id))
             }
         case "avatar":
             if let jid = e["jid"] as? String, let path = e["path"] as? String {

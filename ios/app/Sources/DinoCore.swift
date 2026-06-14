@@ -87,6 +87,7 @@ final class DinoCore {
     func correctMessage(_ id: Int32, item: Int32, body: String) { dino_ios_correct_message(id, item, body) }
     func closeConversation(_ id: Int32) { dino_ios_close_conversation(id) }
     func requestOccupants(_ id: Int32) { dino_ios_request_occupants(id) }
+    func startOccupantDM(_ id: Int32, nick: String) { dino_ios_start_occupant_dm(id, nick) }
     func addContact(jid: String, alias: String?) { dino_ios_add_contact(jid, alias) }
     func removeContact(jid: String) { dino_ios_remove_contact(jid) }
     func respondSubscription(jid: String, approve: Bool) { dino_ios_respond_subscription(jid, approve ? 1 : 0) }

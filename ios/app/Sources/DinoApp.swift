@@ -458,6 +458,7 @@ struct ChatView: View {
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showOccupants = false
+    @State private var occupantDMNick: String?
     @State private var editing: ChatMessage?
     @State private var replyingTo: ChatMessage?
     @State private var actionMsg: ChatMessage?
@@ -900,9 +901,19 @@ struct ChatView: View {
                 lockButton
             }
         }
-        .sheet(isPresented: $showOccupants) {
-            OccupantsView(conversationId: conversationId, isPresented: $showOccupants)
-                .environmentObject(model)
+        .sheet(isPresented: $showOccupants, onDismiss: {
+            // Start the DM only after the sheet has finished sliding away, so
+            // the push into the new chat reads as a distinct second step.
+            if let nick = occupantDMNick {
+                occupantDMNick = nil
+                model.startOccupantDM(conversationId, nick: nick)
+            }
+        }) {
+            OccupantsView(conversationId: conversationId) { nick in
+                occupantDMNick = nick
+                showOccupants = false
+            }
+            .environmentObject(model)
         }
         .fullScreenCover(item: $viewerItem) { item in
             ImageViewer(path: item.path)
@@ -1072,7 +1083,10 @@ struct MessageBubble: View {
 struct OccupantsView: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
-    @Binding var isPresented: Bool
+    /// Called with the tapped participant's nick; the parent dismisses the
+    /// sheet and (on dismiss) opens the DM.
+    let onSelect: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -1081,22 +1095,45 @@ struct OccupantsView: View {
                 if list.isEmpty {
                     Text("No participants visible.").foregroundStyle(.secondary)
                 }
-                ForEach(list, id: \.nick) { occupant in
-                    HStack {
-                        AvatarView(jid: occupant.nick, name: occupant.nick, isGroup: false, size: 32)
-                        Text(occupant.nick)
-                        if occupant.isSelf {
-                            Text("you").font(.caption).foregroundStyle(.secondary)
+                ForEach(list) { occupant in
+                    if occupant.isSelf {
+                        occupantRow(occupant)
+                    } else {
+                        Button {
+                            onSelect(occupant.nick)
+                        } label: {
+                            occupantRow(occupant)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
             .navigationTitle("Participants (\((model.occupants[conversationId] ?? []).count))")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                Button("Close") { isPresented = false }
+                Button("Close") { dismiss() }
             }
         }
+    }
+
+    @ViewBuilder
+    private func occupantRow(_ occupant: Occupant) -> some View {
+        HStack(spacing: 10) {
+            AvatarView(jid: occupant.jid, name: occupant.nick, isGroup: false, size: 32)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(occupant.nick).foregroundStyle(.primary)
+                if let real = occupant.realJid {
+                    Text(real).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer()
+            if occupant.isSelf {
+                Text("you").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Image(systemName: "message").foregroundStyle(.secondary)
+            }
+        }
+        .contentShape(.rect)
     }
 }
 
