@@ -487,6 +487,10 @@ struct ChatView: View {
     @Namespace private var composerGlass
     @State private var draft = ""
     @State private var showSend = false
+    /// Whether the Photo/File attach options are expanded out of the plus
+    /// button. A custom expander (not a system Menu) so the options can morph
+    /// out of the button's glass rather than popping over it.
+    @State private var showAttach = false
     /// Shared height for the composer's buttons and text field so they align.
     private let composerControlHeight: CGFloat = 44
     @State private var showPhotoPicker = false
@@ -509,6 +513,13 @@ struct ChatView: View {
     /// programmatic scroll-to-bottom. A flick leaves the list decelerating, and
     /// that inertia overrides `scrollTo` — disabling scrolling stops it.
     @State private var haltScroll = false
+    /// Bumped whenever a loaded image's row geometry settles (decode/layout
+    /// complete). Drives a re-pin to the bottom from the image's ACTUAL height,
+    /// not a fixed delay — decodes routinely outrun any guessed timeout.
+    @State private var imageRenderTick = 0
+    /// True while a re-pin loop is in flight, so overlapping triggers (several
+    /// images settling at once) don't stack concurrent loops.
+    @State private var repinning = false
     /// Id of the zero-height sentinel at the end of the list. Its on-screen
     /// visibility is the source of truth for `isAtBottom` (whether to show the
     /// scroll-down button). Scrolling itself targets the last message row, not
@@ -548,10 +559,41 @@ struct ChatView: View {
                 proxy.scrollTo(bottomAnchorID, anchor: .bottom)
             }
         } else {
-            // Open / auto-pin: we're already near the bottom so the end anchor
-            // is realized — scroll straight to it for a flush, true-bottom
-            // landing (the row target would leave the trailing padding below).
-            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+            // Target the real last row, not the zero-height bottom anchor:
+            // scrollTo to a 1px clear view reliably no-ops (proven in logs — it
+            // never moves the scroll, so a grown image at the bottom stays cut
+            // off). A full row is always a reachable scroll target.
+            proxy.scrollTo(lastID, anchor: .bottom)
+        }
+    }
+
+    /// Re-pin to the bottom, retrying each runloop until the bottom anchor is
+    /// actually on screen (or `attempts` runs out). A row growing — an image
+    /// decoding into a 280pt preview — settles its height, then the scroll view
+    /// propagates the new content size over several more frames; a single
+    /// scrollTo lands against the stale, pre-growth layout and stops short. This
+    /// keeps nudging until `isAtBottom` confirms it stuck, so it self-adjusts to
+    /// any decode/layout duration instead of racing a fixed delay.
+    /// Keep the bottom pinned across a content growth (an image decoding into a
+    /// preview, rows realizing on open). The single-shot guard stops overlapping
+    /// triggers from stacking concurrent loops (which read as choppy scrolling).
+    private func requestRepin(_ proxy: ScrollViewProxy) {
+        guard settling, !repinning else { return }
+        repinning = true
+        repinStep(proxy, attempts: 15)
+    }
+
+    private func repinStep(_ proxy: ScrollViewProxy, attempts: Int) {
+        // Stop once we've reached the bottom, the user scrolled away (settling
+        // cleared), or we run out of tries.
+        guard attempts > 0, settling, !isAtBottom else { repinning = false; return }
+        scrollToBottom(proxy, animated: false)
+        // Space steps across real frames: a back-to-back main.async loop fires
+        // every step before any layout/render, so they all hit the same stale
+        // layout and exhaust in a few ms (proven in device logs). A frame-sized
+        // gap lets the scroll apply and the geometry observer update isAtBottom.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            repinStep(proxy, attempts: attempts - 1)
         }
     }
 
@@ -646,28 +688,35 @@ struct ChatView: View {
     private var inputBar: some View {
         GlassEffectContainer(spacing: 6) {
             HStack(spacing: 12) {
-                Menu {
-                    Button {
-                        showPhotoPicker = true
-                    } label: {
-                        Label("Photo", systemImage: "photo")
-                    }
-                    Button {
-                        showFileImporter = true
-                    } label: {
-                        Label("File", systemImage: "doc")
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
+                        showAttach.toggle()
                     }
                 } label: {
-                    Image(systemName: "plus")
+                    Image(systemName: showAttach ? "xmark" : "plus")
                         .font(.title3.weight(.medium))
                         .foregroundStyle(.primary)
+                        .contentTransition(.symbolEffect(.replace))
                         .frame(width: composerControlHeight, height: composerControlHeight)
                         .glassEffect(.regular.interactive(), in: Circle())
                         // Make the whole circle tappable, not just the glyph.
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Attach")
+                .accessibilityLabel(showAttach ? "Close attachments" : "Attach")
+                // The Photo/File options grow upward out of the plus button —
+                // same GlassEffectContainer, so the glass blends as they emerge
+                // — instead of a system menu popping over it. Anchored to the
+                // button's bottom-leading corner and scaled from there so they
+                // visually originate at the plus.
+                .overlay(alignment: .bottomLeading) {
+                    if showAttach {
+                        attachOptions
+                            .offset(y: -(composerControlHeight + 8))
+                            .transition(.scale(scale: 0.2, anchor: .bottomLeading)
+                                .combined(with: .opacity))
+                    }
+                }
 
                 TextField("Message", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -697,6 +746,9 @@ struct ChatView: View {
                     // field's glass (and merges back when the draft clears),
                     // via the shared GlassEffectContainer + matched id.
                     Button {
+                        // Sending = follow the bottom (survives the row's async
+                        // growth, which would otherwise flip isAtBottom false).
+                        settling = true
                         if let editing {
                             model.correctMessage(conversationId, item: editing.id, body: draft)
                             self.editing = nil
@@ -725,6 +777,32 @@ struct ChatView: View {
         }
     }
 
+    private var attachOptions: some View {
+        // .fixedSize so the pills size to their content rather than being
+        // squeezed to the plus button's width by the overlay's proposal.
+        VStack(alignment: .leading, spacing: 8) {
+            attachOption(icon: "photo", title: "Photo") { showPhotoPicker = true }
+            attachOption(icon: "doc", title: "File") { showFileImporter = true }
+        }
+        .fixedSize()
+    }
+
+    private func attachOption(icon: String, title: String, action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { showAttach = false }
+            action()
+        } label: {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 18)
+                .frame(height: composerControlHeight)
+                .glassEffect(.regular.interactive(), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func reactionSheet(for m: ChatMessage) -> some View {
         ReactionSheet(
             msg: m,
@@ -750,14 +828,11 @@ struct ChatView: View {
             ForEach(chatMessages.enumerated(), id: \.element.id) { index, _ in
                 messageRow(index: index)
             }
-            // Bottom anchor: its on-screen visibility is the source of truth for
-            // `isAtBottom` (robust against the floating composer's safeAreaInset,
-            // unlike offset math).
+            // Bottom anchor: a scrollTo target for the animated glide. (isAtBottom
+            // is derived from scroll geometry, not this — a 1px view below the
+            // trailing padding is never "visible" once the last row is pinned.)
             Color.clear.frame(height: 1)
                 .id(bottomAnchorID)
-                .onScrollVisibilityChange(threshold: 0.01) { visible in
-                    isAtBottom = visible
-                }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -776,6 +851,15 @@ struct ChatView: View {
                     scrollDownButton(proxy)
                 }
             }
+            .onScrollGeometryChange(for: CGFloat.self) { geo in
+                // Distance from the bottom: visibleRect.maxY is the true bottom of
+                // the visible content (contentOffset + containerSize undershoots
+                // it by the inset region). At rest at the bottom this is ~the
+                // trailing padding (~50pt); negative during image-load overshoot.
+                geo.contentSize.height - geo.visibleRect.maxY
+            } action: { _, gap in
+                isAtBottom = gap <= 80
+            }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, _ in
                 // The content height changes repeatedly while a freshly-opened
                 // chat settles: messages arrive async, LazyVStack rows swap
@@ -787,7 +871,7 @@ struct ChatView: View {
                 // self-correcting, no fragile fixed delays. Observing
                 // contentSize (not offset) means our own scrolls don't
                 // re-trigger this, so it can't loop.
-                if settling { scrollToBottom(proxy, animated: false) }
+                if settling { requestRepin(proxy) }
             }
             .onScrollPhaseChange { _, phase in
                 // The user grabbed the scroll view — they're in control now, so
@@ -812,6 +896,11 @@ struct ChatView: View {
                 // yank the user away if they've scrolled up into history).
                 if isAtBottom { DispatchQueue.main.async { scrollToBottom(proxy, animated: false) } }
             }
+            .onChange(of: imageRenderTick) {
+                // An image finished decoding and grew its row; re-pin if we're
+                // following the bottom.
+                if settling { requestRepin(proxy) }
+            }
             .onAppear {
                 // Re-pin on (re)appearance; the geometry-change handler above
                 // drives the actual re-asserts as the layout settles.
@@ -827,10 +916,17 @@ struct ChatView: View {
             settling = true
             // A flick leaves the list decelerating, and that in-flight momentum
             // overrides a programmatic scroll — the tap feels dead. Disabling
-            // scrolling for a runloop halts the inertia; re-enable, then glide.
-            // (Nested async so the re-enable renders before the scroll runs.)
+            // scrolling halts the inertia; re-enable, then glide.
+            //
+            // The disable must be HELD across a real frame boundary: a back-to-
+            // back disable→enable toggle gets coalesced into one SwiftUI render,
+            // so .scrollDisabled never actually commits to true and the inertia
+            // isn't cancelled. That coalescing is most likely on the first fling
+            // after opening a chat (the runloop is busy with initial layout and
+            // image loads), which is exactly the case that felt broken. A short
+            // asyncAfter hold guarantees the disabled state renders first.
             haltScroll = true
-            DispatchQueue.main.async {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 haltScroll = false
                 DispatchQueue.main.async {
                     scrollToBottom(proxy, animated: true)
@@ -878,6 +974,8 @@ struct ChatView: View {
             viewerItem = ImageViewerItem(id: path)
         }, onActions: { m in
             actionMsg = m
+        }, onImageRendered: {
+            imageRenderTick &+= 1
         })
         .id(msg.id)
     }
@@ -991,11 +1089,30 @@ struct ChatView: View {
 
     var body: some View {
         scrollContent
+        // Tap anywhere in the chat to dismiss the attach expander (the system
+        // Menu used to give this for free). The composer itself is excluded —
+        // it's added below as a safeAreaInset, after this overlay — so the
+        // plus/X and the options stay tappable.
+        .overlay {
+            if showAttach {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                            showAttach = false
+                        }
+                    }
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             composerArea
         }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker { url in
+                // Sending = follow the bottom. Set it explicitly (don't rely on
+                // isAtBottom, which the image's later growth flips false right
+                // when the re-pin needs it) so we track through upload + decode.
+                settling = true
                 model.sendFile(conversationId, path: url.path)
             }
         }
@@ -1005,6 +1122,7 @@ struct ChatView: View {
                 let dest = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
                 try? FileManager.default.removeItem(at: dest)
                 if (try? FileManager.default.copyItem(at: url, to: dest)) != nil {
+                    settling = true
                     model.sendFile(conversationId, path: dest.path)
                 }
                 if scoped { url.stopAccessingSecurityScopedResource() }
@@ -1122,6 +1240,7 @@ struct MessageBubble: View {
     var onReply: ((ChatMessage) -> Void)? = nil
     var onImageTap: ((String) -> Void)? = nil
     var onActions: ((ChatMessage) -> Void)? = nil
+    var onImageRendered: (() -> Void)? = nil
 
     @State private var dragOffset: CGFloat = 0
 
@@ -1201,7 +1320,7 @@ struct MessageBubble: View {
                         .padding(.bottom, 2)
                     }
                     if msg.isFile {
-                        FileContent(conversationId: conversationId, msg: msg, onImageTap: onImageTap)
+                        FileContent(conversationId: conversationId, msg: msg, onImageTap: onImageTap, onImageRendered: onImageRendered)
                     } else {
                         messageBody(msg.body)
                     }
@@ -1271,6 +1390,7 @@ struct FileContent: View {
     let conversationId: Int32
     let msg: ChatMessage
     var onImageTap: ((String) -> Void)? = nil
+    var onImageRendered: (() -> Void)? = nil
 
     private var sizeLabel: String {
         msg.size > 0 ? ByteCountFormatter.string(fromByteCount: Int64(msg.size), countStyle: .file) : ""
@@ -1284,6 +1404,19 @@ struct FileContent: View {
                 .scaledToFit()
                 .frame(maxWidth: 220, maxHeight: 280)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                // Report the image's real laid-out height once it's known, so the
+                // chat can re-pin to the bottom exactly when the row grows —
+                // tracking actual decode/layout completion rather than a fixed
+                // delay. `initial: true` catches the first layout; it fires again
+                // if the height changes.
+                .background {
+                    GeometryReader { geo in
+                        Color.clear
+                            .onChange(of: geo.size.height, initial: true) { _, _ in
+                                onImageRendered?()
+                            }
+                    }
+                }
                 .onTapGesture {
                     onImageTap?(msg.path)
                 }
