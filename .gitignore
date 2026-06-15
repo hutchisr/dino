@@ -12,3 +12,4 @@ __pycache__/
 # SwiftPM build artifacts (GeckoKit test package)
 .build/
 .swiftpm/
+.DS_Store
