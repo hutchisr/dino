@@ -1386,6 +1386,48 @@ struct MessageBubble: View {
     }
 }
 
+/// Inline image preview backed by a downsampled, cached thumbnail. Avoids the
+/// scroll-killing pattern of decoding a full-resolution image from disk inside
+/// `body` on every re-render: the decode happens once, off the main thread, at
+/// preview size (ThumbnailLoader), and cache hits render immediately.
+struct CachedThumbnail: View {
+    let path: String
+    /// Longest-side pixel budget: ~the 280pt max preview at 3x retina.
+    private let maxPixel = 840
+    @State private var image: UIImage?
+
+    init(path: String) {
+        self.path = path
+        // Seed from cache synchronously so an already-decoded image appears with
+        // no placeholder flash while scrolling back over it.
+        _image = State(initialValue: ThumbnailLoader.cachedThumbnail(path: path, maxPixel: 840))
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                // Neutral placeholder until the thumbnail decodes; the row grows
+                // to the real aspect ratio once it lands (re-pin handles that).
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.secondarySystemBackground))
+                    .frame(width: 200, height: 150)
+            }
+        }
+        .task(id: path) {
+            guard image == nil else { return }   // seeded from cache
+            let p = path, mp = maxPixel
+            let decoded = await Task.detached(priority: .userInitiated) {
+                ThumbnailLoader.loadThumbnail(path: p, maxPixel: mp)
+            }.value
+            if !Task.isCancelled, let decoded { image = decoded }
+        }
+    }
+}
+
 struct FileContent: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
@@ -1398,11 +1440,11 @@ struct FileContent: View {
     }
 
     var body: some View {
-        if msg.fileState == "complete", msg.isImage, !msg.path.isEmpty,
-           let image = UIImage(contentsOfFile: msg.path) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
+        if msg.fileState == "complete", msg.isImage, !msg.path.isEmpty {
+            // Downsampled + cached off the main thread (CachedThumbnail), not
+            // decoded full-res in body on every scroll frame. The viewer (on tap)
+            // still loads the full-resolution file from msg.path.
+            CachedThumbnail(path: msg.path)
                 .frame(maxWidth: 220, maxHeight: 280)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 // Report the image's real laid-out height once it's known, so the
