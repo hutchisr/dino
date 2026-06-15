@@ -585,8 +585,9 @@ struct ChatView: View {
 
     private func repinStep(_ proxy: ScrollViewProxy, attempts: Int) {
         // Stop once we've reached the bottom, the user scrolled away (settling
-        // cleared), or we run out of tries.
-        guard attempts > 0, settling, !isAtBottom else { repinning = false; return }
+        // cleared), or we run out of tries. (Logic unit-tested in ChatScroll.)
+        guard ChatScroll.shouldContinueRepin(attemptsLeft: attempts, settling: settling, isAtBottom: isAtBottom)
+        else { repinning = false; return }
         scrollToBottom(proxy, animated: false)
         // Space steps across real frames: a back-to-back main.async loop fires
         // every step before any layout/render, so they all hit the same stale
@@ -851,14 +852,14 @@ struct ChatView: View {
                     scrollDownButton(proxy)
                 }
             }
-            .onScrollGeometryChange(for: CGFloat.self) { geo in
-                // Distance from the bottom: visibleRect.maxY is the true bottom of
-                // the visible content (contentOffset + containerSize undershoots
-                // it by the inset region). At rest at the bottom this is ~the
-                // trailing padding (~50pt); negative during image-load overshoot.
-                geo.contentSize.height - geo.visibleRect.maxY
-            } action: { _, gap in
-                isAtBottom = gap <= 80
+            .onScrollGeometryChange(for: Bool.self) { geo in
+                // visibleRect.maxY is the true bottom of the visible content
+                // (contentOffset + containerSize undershoots it by the inset
+                // region). See ChatScroll.isAtBottom — logic is unit-tested.
+                ChatScroll.isAtBottom(contentHeight: geo.contentSize.height,
+                                      visibleMaxY: geo.visibleRect.maxY)
+            } action: { _, atBottom in
+                isAtBottom = atBottom
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, _ in
                 // The content height changes repeatedly while a freshly-opened
@@ -885,7 +886,7 @@ struct ChatView: View {
                 // bottom (or still settling the initial open) — don't yank a
                 // user reading history. Re-enter `settling` so the row's async
                 // height (image/file) re-pins as it resolves.
-                if isAtBottom || settling {
+                if ChatScroll.shouldFollow(isAtBottom: isAtBottom, settling: settling) {
                     settling = true
                     DispatchQueue.main.async { scrollToBottom(proxy, animated: false) }
                 }
