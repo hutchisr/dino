@@ -55,7 +55,10 @@ struct InvertedMessageList: UIViewControllerRepresentable {
         controller.apply(messages: messages, isGroupchat: isGroupchat)
         if context.coordinator.lastScrollToken != scrollToBottomToken {
             context.coordinator.lastScrollToken = scrollToBottomToken
-            controller.scrollToBottom(animated: true)
+            // Defer past this SwiftUI update: issuing the scroll from inside
+            // updateUIViewController gets dropped — it has to run on the next
+            // runloop tick.
+            DispatchQueue.main.async { controller.scrollToBottom(animated: true) }
         }
     }
 
@@ -208,11 +211,10 @@ final class ChatListController: UITableViewController {
     func scrollToBottom(animated: Bool) {
         loadViewIfNeeded()
         guard !orderedIDs.isEmpty else { return }
-        if !isAtBottom {
-            isAtBottom = true
-            onIsAtBottomChanged?(true)
-        }
-        tableView.setContentOffset(.zero, animated: animated)
+        // Row 0 = newest. scrollToRow computes the exact target offset (more
+        // robust than a raw setContentOffset) and natively cancels momentum.
+        // isAtBottom updates itself via scrollViewDidScroll as the glide lands.
+        tableView.scrollToRow(at: IndexPath(row: 0, section: 0), at: .top, animated: animated)
     }
 
     override func scrollViewDidScroll(_ scrollView: UIScrollView) {
