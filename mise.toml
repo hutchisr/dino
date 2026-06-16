@@ -1,0 +1,52 @@
+# mise tasks for Gecko — the Dino XMPP client's iOS app.
+#
+#   mise run sim          build + launch in the iOS Simulator
+#   mise run iphone       build, re-sign, install on a connected iPhone
+#   mise run testflight   build, sign, upload to TestFlight
+#   mise tasks            list everything
+#
+# First time on a machine (slow, run once per target): build the cross-compiled
+# dependency + core stacks the app links against —
+#   mise run deps-sim && mise run core-sim          # Simulator
+#   mise run deps-device && mise run core-device    # device / TestFlight
+# (The iphone/testflight tasks re-link the device core incrementally each run.)
+
+[tasks.sim]
+description = "Build the app and launch it in the iOS Simulator"
+run = "{{config_root}}/ios/app/build-app.sh run sim-arm64"
+
+[tasks.build]
+description = "Build the app for the Simulator (no launch)"
+run = "{{config_root}}/ios/app/build-app.sh build sim-arm64"
+
+[tasks.iphone]
+description = "Build, re-sign, and install on a connected iPhone (default: iPhone 17 Pro)"
+run = "{{config_root}}/ios/app/deploy-phone.sh"
+
+[tasks.testflight]
+description = "Build, sign, and upload to TestFlight"
+run = """
+# App Store Connect API creds: take them from the environment, else from the
+# gitignored credentials.local.txt. The matching AuthKey_<KeyID>.p8 must be in
+# ~/.appstoreconnect/private_keys/.
+creds="{{config_root}}/credentials.local.txt"
+export ASC_KEY_ID="${ASC_KEY_ID:-$(sed -n 's/^ISSUER_KEY_ID=//p' "$creds" 2>/dev/null)}"
+export ASC_ISSUER_ID="${ASC_ISSUER_ID:-$(sed -n 's/^ISSUER_ID=//p' "$creds" 2>/dev/null)}"
+exec "{{config_root}}/ios/app/deploy-testflight.sh"
+"""
+
+[tasks.core-sim]
+description = "Cross-compile the Dino core + plugins for the Simulator (run once)"
+run = "{{config_root}}/ios/build-core.sh sim-arm64"
+
+[tasks.core-device]
+description = "Cross-compile the Dino core + plugins for device (run once)"
+run = "{{config_root}}/ios/build-core.sh device-arm64"
+
+[tasks.deps-sim]
+description = "Cross-compile the dependency stack for the Simulator (very slow; run once)"
+run = "{{config_root}}/ios/build-deps.sh sim-arm64"
+
+[tasks.deps-device]
+description = "Cross-compile the dependency stack for device (very slow; run once)"
+run = "{{config_root}}/ios/build-deps.sh device-arm64"
