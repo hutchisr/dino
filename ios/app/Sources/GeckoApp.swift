@@ -502,110 +502,13 @@ struct ChatView: View {
     @State private var replyingTo: ChatMessage?
     @State private var actionMsg: ChatMessage?
     @State private var showFullTitle = false
+    /// Whether the list is pinned to the newest message. Driven by the inverted
+    /// table (InvertedMessageList); gates the scroll-down button.
     @State private var isAtBottom = true
-    /// While true, we keep re-pinning to the newest message as the layout
-    /// settles — async message load, LazyVStack rows swapping estimated heights
-    /// for real ones, avatars/images resolving. Reset on each appearance and
-    /// cleared the instant the user touches the scroll view, so we never yank
-    /// them out of history.
-    @State private var settling = true
-    /// Pulsed true for a runloop to halt in-flight scroll momentum before a
-    /// programmatic scroll-to-bottom. A flick leaves the list decelerating, and
-    /// that inertia overrides `scrollTo` — disabling scrolling stops it.
-    @State private var haltScroll = false
-    /// Bumped whenever a loaded image's row geometry settles (decode/layout
-    /// complete). Drives a re-pin to the bottom from the image's ACTUAL height,
-    /// not a fixed delay — decodes routinely outrun any guessed timeout.
-    @State private var imageRenderTick = 0
-    /// True while a re-pin loop is in flight, so overlapping triggers (several
-    /// images settling at once) don't stack concurrent loops.
-    @State private var repinning = false
-    /// Id of the zero-height sentinel at the end of the list. Its on-screen
-    /// visibility is the source of truth for `isAtBottom` (whether to show the
-    /// scroll-down button). Scrolling itself targets the last message row, not
-    /// this — see `scrollToBottom`.
-    ///
-    /// We re-pin imperatively (ScrollViewReader) rather than via the `.bottom`
-    /// content edge: re-issuing the same edge on `ScrollPosition` is a no-op
-    /// (the binding value doesn't change), so once the LazyVStack's estimated
-    /// row heights settle to their real ones and leave us stranded a screenful
-    /// above the end, the edge API can't re-correct. An imperative
-    /// `scrollTo(id:)` re-runs on every call, so the settle loop converges.
-    private let bottomAnchorID = "chat-bottom-anchor"
+    /// Bumped to ask the message list to glide to the newest message — the
+    /// scroll-down button, and after sending.
+    @State private var scrollToBottomToken = 0
     @State private var viewerItem: ImageViewerItem?
-
-    /// Scroll to the newest message. `animated` drives the on-screen scroll-down
-    /// button (a smooth glide); the implicit scrolls on new content snap.
-    ///
-    /// Targets the last real message row, not the zero-height bottom anchor: a
-    /// 1px target is unreliable for `scrollTo` when it's far off-screen and not
-    /// yet realized (which is exactly the case when the scroll-down button is
-    /// showing), whereas a full row is always reachable. Anchoring its `.bottom`
-    /// to the viewport bottom can't overshoot past it, so it also can't
-    /// reproduce the screenful-of-empty-space landing.
-    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
-        guard let lastID = chatMessages.last?.id else { return }
-        if animated {
-            // Glide to the last row — reliable to reach even from far up, where
-            // the zero-height end anchor isn't realized yet. Anchoring the row's
-            // .bottom stops a few px short (the list's trailing padding sits
-            // below the fold), so once the glide settles and the anchor is
-            // realized just below the row, snap the remaining px to the true
-            // bottom.
-            withAnimation(.easeOut(duration: 0.3)) {
-                proxy.scrollTo(lastID, anchor: .bottom)
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
-                proxy.scrollTo(bottomAnchorID, anchor: .bottom)
-            }
-        } else {
-            // Target the real last row, not the zero-height bottom anchor:
-            // scrollTo to a 1px clear view reliably no-ops (proven in logs — it
-            // never moves the scroll, so a grown image at the bottom stays cut
-            // off). A full row is always a reachable scroll target.
-            proxy.scrollTo(lastID, anchor: .bottom)
-        }
-    }
-
-    /// Re-pin to the bottom, retrying each runloop until the bottom anchor is
-    /// actually on screen (or `attempts` runs out). A row growing — an image
-    /// decoding into a 280pt preview — settles its height, then the scroll view
-    /// propagates the new content size over several more frames; a single
-    /// scrollTo lands against the stale, pre-growth layout and stops short. This
-    /// keeps nudging until `isAtBottom` confirms it stuck, so it self-adjusts to
-    /// any decode/layout duration instead of racing a fixed delay.
-    /// Keep the bottom pinned across a content growth (an image decoding into a
-    /// preview, rows realizing on open). The single-shot guard stops overlapping
-    /// triggers from stacking concurrent loops (which read as choppy scrolling).
-    private func requestRepin(_ proxy: ScrollViewProxy) {
-        guard settling, !repinning else { return }
-        repinning = true
-        repinStep(proxy, attempts: 15)
-    }
-
-    private func repinStep(_ proxy: ScrollViewProxy, attempts: Int) {
-        // Stop once we've reached the bottom, the user scrolled away (settling
-        // cleared), or we run out of tries. (Logic unit-tested in ChatScroll.)
-        guard ChatScroll.shouldContinueRepin(attemptsLeft: attempts, settling: settling, isAtBottom: isAtBottom)
-        else { repinning = false; return }
-        scrollToBottom(proxy, animated: false)
-        // Space steps across real frames: a back-to-back main.async loop fires
-        // every step before any layout/render, so they all hit the same stale
-        // layout and exhaust in a few ms (proven in device logs). A frame-sized
-        // gap lets the scroll apply and the geometry observer update isAtBottom.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
-            repinStep(proxy, attempts: attempts - 1)
-        }
-    }
-
-    private static func dayLabel(_ date: Date) -> String {
-        let cal = Calendar.current
-        if cal.isDateInToday(date) { return "Today" }
-        if cal.isDateInYesterday(date) { return "Yesterday" }
-        let fmt = DateFormatter()
-        fmt.dateStyle = .medium
-        return fmt.string(from: date)
-    }
 
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
@@ -747,9 +650,8 @@ struct ChatView: View {
                     // field's glass (and merges back when the draft clears),
                     // via the shared GlassEffectContainer + matched id.
                     Button {
-                        // Sending = follow the bottom (survives the row's async
-                        // growth, which would otherwise flip isAtBottom false).
-                        settling = true
+                        // Sending = glide to the newest message.
+                        scrollToBottomToken &+= 1
                         if let editing {
                             model.correctMessage(conversationId, item: editing.id, body: draft)
                             self.editing = nil
@@ -822,122 +724,28 @@ struct ChatView: View {
             } : nil)
     }
 
-    private var messageStack: some View {
-        LazyVStack(spacing: 6) {
-            // Key by the stable message id (not the array index) so inserts and
-            // deletes keep each row's identity, animations, and state.
-            ForEach(chatMessages.enumerated(), id: \.element.id) { index, _ in
-                messageRow(index: index)
-            }
-            // Bottom anchor: a scrollTo target for the animated glide. (isAtBottom
-            // is derived from scroll geometry, not this — a 1px view below the
-            // trailing padding is never "visible" once the last row is pinned.)
-            Color.clear.frame(height: 1)
-                .id(bottomAnchorID)
+    private var messageList: some View {
+        InvertedMessageList(
+            messages: chatMessages,
+            conversationId: conversationId,
+            isGroupchat: isGroupChat,
+            model: model,
+            isAtBottom: $isAtBottom,
+            scrollToBottomToken: scrollToBottomToken,
+            onEdit: { m in replyingTo = nil; editing = m; draft = m.body },
+            onReply: { m in editing = nil; replyingTo = m },
+            onImageTap: { path in viewerItem = ImageViewerItem(id: path) },
+            onActions: { m in actionMsg = m }
+        )
+        .overlay(alignment: .bottomTrailing) {
+            if !isAtBottom { scrollDownButton }
         }
-        .padding(.horizontal, 12)
-        // Top inset only. A bottom inset here stacked a third gap under the last
-        // row — on top of the anchor's leading spacing AND the composer's own top
-        // padding (it sits below as a bottom safeAreaInset) — which read as a
-        // doubled margin. The anchor's ~7pt already matches this 8pt top gap.
-        .padding(.top, 8)
+        .animation(.snappy(duration: 0.2), value: isAtBottom)
     }
 
-    private var scrollContent: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                messageStack
-            }
-            .scrollDisabled(haltScroll)
-            .defaultScrollAnchor(.bottom)
-            .coordinateSpace(name: "chatScroll")
-            .overlay(alignment: .bottomTrailing) {
-                if !isAtBottom {
-                    scrollDownButton(proxy)
-                }
-            }
-            .onScrollGeometryChange(for: Bool.self) { geo in
-                // visibleRect.maxY is the true bottom of the visible content
-                // (contentOffset + containerSize undershoots it by the inset
-                // region). See ChatScroll.isAtBottom — logic is unit-tested.
-                ChatScroll.isAtBottom(contentHeight: geo.contentSize.height,
-                                      visibleMaxY: geo.visibleRect.maxY)
-            } action: { _, atBottom in
-                isAtBottom = atBottom
-            }
-            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, _ in
-                // The content height changes repeatedly while a freshly-opened
-                // chat settles: messages arrive async, LazyVStack rows swap
-                // estimated heights for real ones, avatars/images load. A
-                // one-shot scrollTo lands against a transient over-estimate and
-                // leaves the last message a screenful above the real bottom.
-                // Re-assert the bottom (imperatively, so it actually re-runs) on
-                // every settle step until the height stops changing —
-                // self-correcting, no fragile fixed delays. Observing
-                // contentSize (not offset) means our own scrolls don't
-                // re-trigger this, so it can't loop.
-                if settling { requestRepin(proxy) }
-            }
-            .onScrollPhaseChange { _, phase in
-                // The user grabbed the scroll view — they're in control now, so
-                // stop auto-pinning. Programmatic scrolls report .animating.
-                if phase == .tracking || phase == .interacting {
-                    settling = false
-                }
-            }
-            .onChange(of: model.messages[conversationId]?.count ?? 0) {
-                // A new message landed. Follow it only if we're already at the
-                // bottom (or still settling the initial open) — don't yank a
-                // user reading history. Re-enter `settling` so the row's async
-                // height (image/file) re-pins as it resolves.
-                if ChatScroll.shouldFollow(isAtBottom: isAtBottom, settling: settling) {
-                    settling = true
-                    DispatchQueue.main.async { scrollToBottom(proxy, animated: false) }
-                }
-            }
-            .onChange(of: chatMessages.reduce(0) { $0 + $1.reactions.count }) {
-                // A reaction chip appearing grows its message row; keep the
-                // latest in view if we're already pinned to the bottom (don't
-                // yank the user away if they've scrolled up into history).
-                if isAtBottom { DispatchQueue.main.async { scrollToBottom(proxy, animated: false) } }
-            }
-            .onChange(of: imageRenderTick) {
-                // Safety net for a late row-height change (e.g. an
-                // upload/download completing and swapping the file row for the
-                // image); re-pin if we're following the bottom.
-                if settling { requestRepin(proxy) }
-            }
-            .onAppear {
-                // Re-pin on (re)appearance; the geometry-change handler above
-                // drives the actual re-asserts as the layout settles.
-                settling = true
-                DispatchQueue.main.async { scrollToBottom(proxy, animated: false) }
-            }
-        }
-    }
-
-    private func scrollDownButton(_ proxy: ScrollViewProxy) -> some View {
+    private var scrollDownButton: some View {
         Button {
-            // The user tapped it, so resume following the bottom.
-            settling = true
-            // A flick leaves the list decelerating, and that in-flight momentum
-            // overrides a programmatic scroll — the tap feels dead. Disabling
-            // scrolling halts the inertia; re-enable, then glide.
-            //
-            // The disable must be HELD across a real frame boundary: a back-to-
-            // back disable→enable toggle gets coalesced into one SwiftUI render,
-            // so .scrollDisabled never actually commits to true and the inertia
-            // isn't cancelled. That coalescing is most likely on the first fling
-            // after opening a chat (the runloop is busy with initial layout and
-            // image loads), which is exactly the case that felt broken. A short
-            // asyncAfter hold guarantees the disabled state renders first.
-            haltScroll = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                haltScroll = false
-                DispatchQueue.main.async {
-                    scrollToBottom(proxy, animated: true)
-                }
-            }
+            scrollToBottomToken &+= 1   // the inverted table glides to row 0
         } label: {
             Image(systemName: "chevron.down")
                 .font(.system(size: 17, weight: .semibold))
@@ -945,45 +753,11 @@ struct ChatView: View {
                 .frame(width: 44, height: 44)
         }
         .glassEffect(.regular.interactive(), in: .circle)
+        .contentShape(.circle)
         .accessibilityLabel("Scroll to latest messages")
         .padding(.trailing, 14)
         .padding(.bottom, 10)
-    }
-
-    @ViewBuilder
-    private func messageRow(index: Int) -> some View {
-        let msgs = chatMessages
-        let msg = msgs[index]
-        let isGroup = isGroupChat
-        let newDay = index == 0 || !Calendar.current.isDate(msg.time, inSameDayAs: msgs[index - 1].time)
-        if newDay {
-            Text(Self.dayLabel(msg.time))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(Color(.secondarySystemBackground)))
-                .padding(.vertical, 6)
-        }
-        MessageBubble(conversationId: conversationId, msg: msg,
-                      inGroupchat: isGroup,
-                      showSender: isGroup && msg.direction == "in" &&
-                          (newDay || index == 0 || msgs[index - 1].from != msg.from),
-                      onEdit: { m in
-            replyingTo = nil
-            editing = m
-            draft = m.body
-        }, onReply: { m in
-            editing = nil
-            replyingTo = m
-        }, onImageTap: { path in
-            viewerItem = ImageViewerItem(id: path)
-        }, onActions: { m in
-            actionMsg = m
-        }, onImageRendered: {
-            imageRenderTick &+= 1
-        })
-        .id(msg.id)
+        .transition(.scale(scale: 0.5).combined(with: .opacity))
     }
 
     private var titleButton: some View {
@@ -1094,7 +868,7 @@ struct ChatView: View {
     }
 
     var body: some View {
-        scrollContent
+        messageList
         // Tap anywhere in the chat to dismiss the attach expander (the system
         // Menu used to give this for free). The composer itself is excluded —
         // it's added below as a safeAreaInset, after this overlay — so the
@@ -1115,10 +889,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker { url in
-                // Sending = follow the bottom. Set it explicitly (don't rely on
-                // isAtBottom, which the image's later growth flips false right
-                // when the re-pin needs it) so we track through upload + decode.
-                settling = true
+                scrollToBottomToken &+= 1   // glide to the message we're sending
                 model.sendFile(conversationId, path: url.path)
             }
         }
@@ -1128,7 +899,7 @@ struct ChatView: View {
                 let dest = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
                 try? FileManager.default.removeItem(at: dest)
                 if (try? FileManager.default.copyItem(at: url, to: dest)) != nil {
-                    settling = true
+                    scrollToBottomToken &+= 1
                     model.sendFile(conversationId, path: dest.path)
                 }
                 if scoped { url.stopAccessingSecurityScopedResource() }
