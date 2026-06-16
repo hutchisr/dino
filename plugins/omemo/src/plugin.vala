@@ -78,14 +78,8 @@ public class Plugin : RootInterface, Object {
         JingleFileHelperRegistry.instance.add_encryption_helper(Encryption.OMEMO, new JetOmemo.EncryptionHelper(app.stream_interactor));
 
         Manager.start(this.app.stream_interactor, db, trust_manager, encryptors);
-
-        string locales_dir;
-        if (app.search_path_generator != null) {
-            locales_dir = ((!)app.search_path_generator).get_locale_path(GETTEXT_PACKAGE, LOCALE_INSTALL_DIR);
-        } else {
-            locales_dir = LOCALE_INSTALL_DIR;
-        }
-        internationalize(GETTEXT_PACKAGE, locales_dir);
+        // No gettext setup: the translation catalog (po/) went with the GTK UI;
+        // none of the headless sources have translatable strings.
     }
 
     public void shutdown() {

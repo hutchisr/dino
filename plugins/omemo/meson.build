@@ -1,5 +1,3 @@
-subdir('po')
-omemo_ui = get_option('ui').allowed() and dep_gtk4.found()
 dependencies = [
     dep_crypto_vala,
     dep_dino,
@@ -44,8 +42,6 @@ sources = files(
 )
 c_args = [
     '-DG_LOG_DOMAIN="OMEMO"',
-    '-DGETTEXT_PACKAGE="dino-omemo"',
-    '-DLOCALE_INSTALL_DIR="@0@"'.format(get_option('prefix') / get_option('localedir')),
 ]
 vala_args = [
     '--vapidir', meson.current_source_dir() / 'vapi',
@@ -57,27 +53,9 @@ vala_args = [
 if not static_plugins
     sources += files('src/register_plugin.vala')
 endif
-if omemo_ui
-    dependencies += [dep_libadwaita, dep_gtk4, dep_libqrencode]
-    sources += files(
-        'src/ui/bad_messages_populator.vala',
-        'src/ui/call_encryption_entry.vala',
-        'src/ui/contact_details_provider.vala',
-        'src/ui/device_notification_populator.vala',
-        'src/ui/encryption_list_entry.vala',
-        'src/ui/encryption_preferences_entry.vala',
-        'src/ui/manage_key_dialog.vala',
-        'src/ui/own_notifications.vala',
-        'src/ui/util.vala',
-    )
-    sources += gnome.compile_resources(
-        'resources',
-        'data/gresource.xml',
-        source_dir: 'data',
-    )
-else
-    vala_args += ['-D', 'DINO_NO_UI']
-endif
+# The GTK UI (src/ui, data/, po/) was removed with the desktop app; this is an
+# iOS-only tree, so the plugin always builds headless.
+vala_args += ['-D', 'DINO_NO_UI']
 lib_omemo = library('omemo', sources, name_prefix: '', c_args: c_args, vala_args: vala_args, include_directories: include_directories('src'), dependencies: dependencies, install: true, install_dir: get_option('libdir') / get_option('plugindir'), install_rpath: default_install_rpath)
 dep_omemo = declare_dependency(link_with: lib_omemo, include_directories: include_directories('.', 'src'))
 summary('End-to-end encryption using OMEMO (omemo)', dep_omemo, section: 'Plugins')
