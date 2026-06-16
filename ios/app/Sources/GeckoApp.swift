@@ -562,6 +562,14 @@ struct ChatView: View {
             }
             inputBar
         }
+        // Translucent bar: a thin material that blurs the chat content scrolling
+        // up behind it. Extends past the bottom safe area so it reaches the
+        // screen edge under the home indicator.
+        .background {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea(.container, edges: .bottom)
+        }
     }
 
     /// A dismissable banner (typing reply/edit context) shown above the input.
@@ -591,7 +599,9 @@ struct ChatView: View {
 
     private var inputBar: some View {
         GlassEffectContainer(spacing: 6) {
-            HStack(spacing: 12) {
+            // Bottom-align so the +/send buttons stay pinned to the bottom as the
+            // text field grows upward over multiple lines.
+            HStack(alignment: .bottom, spacing: 12) {
                 Button {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
                         showAttach.toggle()
@@ -624,7 +634,13 @@ struct ChatView: View {
 
                 TextField("Message", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
+                    // Grow with the text up to a cap, then scroll internally.
+                    .lineLimit(1...6)
+                    // Vertical inset too (not just horizontal) so multi-line text
+                    // stays inside the capsule instead of spilling past its
+                    // rounded top/bottom edges.
                     .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
                     .frame(minHeight: composerControlHeight)
                     .glassEffect(.regular, in: Capsule())
                     .glassEffectID("composerField", in: composerGlass)
@@ -909,6 +925,10 @@ struct ChatView: View {
         // navigationTitle here would render a second, centred copy.
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        // Translucent material nav bar (the inverted table doesn't drive
+        // SwiftUI's scroll-edge effect, so the bar background needs to be set
+        // explicitly). Content scrolls up behind it.
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 titleButton
