@@ -836,7 +836,11 @@ struct ChatView: View {
                 .id(bottomAnchorID)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        // Top inset only. A bottom inset here stacked a third gap under the last
+        // row — on top of the anchor's leading spacing AND the composer's own top
+        // padding (it sits below as a bottom safeAreaInset) — which read as a
+        // doubled margin. The anchor's ~7pt already matches this 8pt top gap.
+        .padding(.top, 8)
     }
 
     private var scrollContent: some View {
@@ -898,8 +902,9 @@ struct ChatView: View {
                 if isAtBottom { DispatchQueue.main.async { scrollToBottom(proxy, animated: false) } }
             }
             .onChange(of: imageRenderTick) {
-                // An image finished decoding and grew its row; re-pin if we're
-                // following the bottom.
+                // Safety net for a late row-height change (e.g. an
+                // upload/download completing and swapping the file row for the
+                // image); re-pin if we're following the bottom.
                 if settling { requestRepin(proxy) }
             }
             .onAppear {
@@ -1394,13 +1399,26 @@ struct CachedThumbnail: View {
     let path: String
     /// Longest-side pixel budget: ~the 280pt max preview at 3x retina.
     private let maxPixel = 840
+    /// The box the preview is fit into (matches the old maxWidth/maxHeight).
+    static let box = CGSize(width: 220, height: 280)
     @State private var image: UIImage?
+    /// The row's final on-screen size, reserved BEFORE the image decodes (from a
+    /// cheap header read of its real dimensions). Holding the row at its final
+    /// height from the first layout means it never grows when the decode lands —
+    /// so a chat already pinned to the bottom stays pinned, instead of being left
+    /// scrolled to the new image's top with its bottom below the fold.
+    private let reserved: CGSize
 
     init(path: String) {
         self.path = path
         // Seed from cache synchronously so an already-decoded image appears with
         // no placeholder flash while scrolling back over it.
         _image = State(initialValue: ThumbnailLoader.cachedThumbnail(path: path, maxPixel: 840))
+        if let px = ThumbnailLoader.pixelSize(path: path) {
+            reserved = ThumbnailLoader.fit(px, in: Self.box)
+        } else {
+            reserved = CGSize(width: 200, height: 150)   // header unreadable: stable fallback
+        }
     }
 
     var body: some View {
@@ -1410,13 +1428,13 @@ struct CachedThumbnail: View {
                     .resizable()
                     .scaledToFit()
             } else {
-                // Neutral placeholder until the thumbnail decodes; the row grows
-                // to the real aspect ratio once it lands (re-pin handles that).
+                // Neutral placeholder until the thumbnail decodes. Same reserved
+                // frame as the loaded image, so there's no layout shift.
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color(.secondarySystemBackground))
-                    .frame(width: 200, height: 150)
             }
         }
+        .frame(width: reserved.width, height: reserved.height)
         .task(id: path) {
             guard image == nil else { return }   // seeded from cache
             let p = path, mp = maxPixel
@@ -1444,14 +1462,13 @@ struct FileContent: View {
             // Downsampled + cached off the main thread (CachedThumbnail), not
             // decoded full-res in body on every scroll frame. The viewer (on tap)
             // still loads the full-resolution file from msg.path.
+            // CachedThumbnail reserves its final size up front (from the image
+            // header) so the row doesn't grow when the decode lands.
             CachedThumbnail(path: msg.path)
-                .frame(maxWidth: 220, maxHeight: 280)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                // Report the image's real laid-out height once it's known, so the
-                // chat can re-pin to the bottom exactly when the row grows —
-                // tracking actual decode/layout completion rather than a fixed
-                // delay. `initial: true` catches the first layout; it fires again
-                // if the height changes.
+                // Safety net: should the reserved size ever be wrong (an
+                // unreadable header), report a late height change so the chat can
+                // still re-pin. With the size reserved this normally fires once.
                 .background {
                     GeometryReader { geo in
                         Color.clear
