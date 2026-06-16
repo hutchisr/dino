@@ -905,7 +905,7 @@ struct ChatView: View {
                     }
             }
         }
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             composerArea
         }
         .sheet(isPresented: $showPhotoPicker) {
