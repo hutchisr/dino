@@ -642,7 +642,12 @@ struct ChatView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 11)
                     .frame(minHeight: composerControlHeight)
-                    .glassEffect(.regular, in: Capsule())
+                    // RoundedRectangle, not Capsule: a wide multi-line field made
+                    // a Capsule rounds its left/right ends into big semicircles
+                    // (radius = half the height) that clip the text. Fixed 22pt
+                    // corners keep a full-width text area; at one line (44pt tall)
+                    // it still reads as a pill.
+                    .glassEffect(.regular, in: .rect(cornerRadius: 22))
                     .glassEffectID("composerField", in: composerGlass)
                     .onChange(of: draft) { _, value in
                         if editing == nil {
