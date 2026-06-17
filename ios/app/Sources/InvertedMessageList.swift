@@ -11,6 +11,17 @@ private struct ChatRowModel: Equatable {
     let senderAvatarPath: String?
 }
 
+/// A table cell that reports **zero safe-area insets**. UIKit otherwise inflates
+/// a cell's layout margins by the safe-area inset as the cell nears a screen
+/// edge, which the `UIHostingConfiguration` host view picks up and turns into
+/// growing space above/below the bubble — making inter-message gaps widen as a
+/// row approaches the top or bottom of the screen. The chat manages its own
+/// insets (the chrome floats over the table), so the cells never need safe-area
+/// awareness; zeroing it here keeps spacing constant at every scroll position.
+private final class FlatCell: UITableViewCell {
+    override var safeAreaInsets: UIEdgeInsets { .zero }
+}
+
 /// The chat message list, backed by an **inverted UIKit table view** rather than
 /// a SwiftUI `ScrollView`.
 ///
@@ -105,6 +116,16 @@ final class ChatListController: UITableViewController {
     private var pendingBottomCorrection = false
     private var bottomCorrectionWorkItem: DispatchWorkItem?
 
+    /// Deterministic per-row heights, measured once offscreen and cached by
+    /// message id. Invalidated when a row's content changes or the table width
+    /// changes. Served from both `heightForRowAt` and `estimatedHeightForRowAt`
+    /// so `contentSize` stays stable as rows recycle.
+    private var heightCache: [Int32: CGFloat] = [:]
+    private var heightMeasureWidth: CGFloat = 0
+    /// Reused offscreen cell for height measurement. A `FlatCell` so its
+    /// (zero) safe-area handling matches the real, in-table cells.
+    private lazy var sizingCell: UITableViewCell = FlatCell(style: .default, reuseIdentifier: nil)
+
     /// Visual bottom = flipped origin. A little slack absorbs the rubber-band
     /// bounce and float imprecision so the button doesn't flicker at rest, but
     /// keep it tight enough that the scroll-down affordance stays visible until
@@ -126,7 +147,14 @@ final class ChatListController: UITableViewController {
         // table. The vertical flip swaps visual top/bottom, so UIKit's
         // automatic safe-area insets would land on the wrong visual edge.
         tableView.contentInsetAdjustmentBehavior = .never
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
+        tableView.register(FlatCell.self, forCellReuseIdentifier: "cell")
+        // Row heights are computed deterministically (see `measuredHeight`) and
+        // served from `heightForRowAt`, rather than relying on UIKit's
+        // self-sizing of `UIHostingConfiguration` cells — that self-sizing is
+        // unstable here (the same row measures at different heights on different
+        // passes), which made `contentSize` drift and inter-message gaps grow
+        // while scrolling back through history.
+        tableView.estimatedRowHeight = 80
 
         dataSource = UITableViewDiffableDataSource(tableView: tableView) { [weak self] table, indexPath, id in
             let cell = table.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
@@ -135,6 +163,9 @@ final class ChatListController: UITableViewController {
             cell.backgroundColor = .clear
             cell.clipsToBounds = false
             cell.contentView.clipsToBounds = false
+            // `FlatCell` reports zero safe-area insets so the cell's margins (and
+            // the visible gap around the bubble) don't grow as the row nears a
+            // screen edge. `.margins(.all, 0)` keeps the hosted content flush.
             guard let self, let row = self.rowsByID[id] else { return cell }
             cell.contentConfiguration = UIHostingConfiguration { self.rowView(row) }
                 .margins(.all, 0)
@@ -230,6 +261,12 @@ final class ChatListController: UITableViewController {
         let wasAtBottom = isAtBottom
         let newestChanged = newOrderedIDs.first != orderedIDs.first
 
+        // Drop stale heights: changed rows must be re-measured, and rows no
+        // longer present should not linger in the cache.
+        for id in changedIDs { heightCache[id] = nil }
+        let live = Set(newOrderedIDs)
+        heightCache = heightCache.filter { live.contains($0.key) }
+
         rowsByID = newRowsByID
         orderedIDs = newOrderedIDs
 
@@ -267,6 +304,46 @@ final class ChatListController: UITableViewController {
             tableView.setContentOffset(target, animated: false)
             updateBottomState()
         }
+    }
+
+    // MARK: - Height estimation
+
+    /// Measure a row's height offscreen with a reused `FlatCell`. The result is
+    /// cached and reused; the same value feeds both the real and estimated
+    /// height so the table never has to reconcile a wrong guess.
+    private func measuredHeight(for id: Int32) -> CGFloat {
+        let width = tableView.bounds.width
+        guard width > 0, let row = rowsByID[id] else { return 80 }
+        if heightMeasureWidth != width {
+            heightMeasureWidth = width
+            heightCache.removeAll()
+        }
+        if let cached = heightCache[id] { return cached }
+        sizingCell.contentConfiguration = UIHostingConfiguration { self.rowView(row) }
+            .margins(.all, 0)
+        sizingCell.bounds = CGRect(x: 0, y: 0, width: width, height: 2000)
+        sizingCell.contentView.bounds = CGRect(x: 0, y: 0, width: width, height: 2000)
+        sizingCell.setNeedsLayout()
+        sizingCell.layoutIfNeeded()
+        let size = sizingCell.contentView.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel)
+        let h = ceil(size.height)
+        heightCache[id] = h
+        return h
+    }
+
+    override func tableView(_ tableView: UITableView,
+                            heightForRowAt indexPath: IndexPath) -> CGFloat {
+        guard indexPath.row < orderedIDs.count else { return 80 }
+        return measuredHeight(for: orderedIDs[indexPath.row])
+    }
+
+    override func tableView(_ tableView: UITableView,
+                            estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+        guard indexPath.row < orderedIDs.count else { return 80 }
+        return measuredHeight(for: orderedIDs[indexPath.row])
     }
 
     override func scrollViewDidScroll(_ scrollView: UIScrollView) {
