@@ -9,37 +9,72 @@ struct ImageViewerItem: Identifiable {
 struct ImageViewer: View {
     let path: String
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.displayScale) private var displayScale
+    @State private var image: UIImage?
+    @State private var failed = false
 
-    private var image: UIImage? { UIImage(contentsOfFile: path) }
+    private func maxPixel(for size: CGSize) -> Int {
+        let longestSide = max(size.width, size.height)
+        return max(1200, min(4096, Int((longestSide * displayScale * 2).rounded())))
+    }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let image {
-                    ZoomableImageView(image: image, onSwipeDismiss: { dismiss() })
-                        .ignoresSafeArea()
-                        .background(Color.black)
-                } else {
-                    Text("Could not load image").foregroundStyle(.white)
-                }
-            }
-            .background(Color.black)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
+        GeometryReader { geo in
+            let pixelBudget = maxPixel(for: geo.size)
+            NavigationStack {
+                Group {
+                    if let image {
+                        ZoomableImageView(image: image, onSwipeDismiss: { dismiss() })
+                            .ignoresSafeArea()
+                            .background(Color.black)
+                    } else if failed {
+                        Text("Could not load image").foregroundStyle(.white)
+                    } else {
+                        ProgressView()
+                            .tint(.white)
                     }
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    ShareLink(item: URL(fileURLWithPath: path)) {
-                        Image(systemName: "square.and.arrow.up")
+                .background(Color.black)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                    }
+                    ToolbarItem(placement: .primaryAction) {
+                        ShareLink(item: URL(fileURLWithPath: path)) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
                     }
                 }
+                .toolbarBackground(.black.opacity(0.6), for: .navigationBar)
+                .toolbarColorScheme(.dark, for: .navigationBar)
             }
-            .toolbarBackground(.black.opacity(0.6), for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .task(id: "\(path)@\(pixelBudget)") {
+                await loadImage(maxPixel: pixelBudget)
+            }
+        }
+        .background(Color.black)
+    }
+
+    private func loadImage(maxPixel: Int) async {
+        if let cached = ThumbnailLoader.cachedThumbnail(path: path, maxPixel: maxPixel) {
+            image = cached
+            failed = false
+            return
+        }
+
+        image = nil
+        failed = false
+        let p = path
+        let decoded = await Task.detached(priority: .userInitiated) {
+            ThumbnailLoader.loadThumbnail(path: p, maxPixel: maxPixel)
+        }.value
+        if !Task.isCancelled {
+            image = decoded
+            failed = decoded == nil
         }
     }
 }

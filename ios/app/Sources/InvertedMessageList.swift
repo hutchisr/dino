@@ -8,6 +8,7 @@ private struct ChatRowModel: Equatable {
     let showDay: Bool
     let dayLabel: String
     let showSender: Bool
+    let senderAvatarPath: String?
 }
 
 /// The chat message list, backed by an **inverted UIKit table view** rather than
@@ -28,6 +29,7 @@ struct InvertedMessageList: UIViewControllerRepresentable {
     let messages: [ChatMessage]           // chronological: oldest first
     let conversationId: Int32
     let isGroupchat: Bool
+    let avatarPaths: [String: String]
     let model: AppModel
     @Binding var isAtBottom: Bool
     /// Bumped by the caller to request a programmatic scroll to the newest
@@ -52,7 +54,7 @@ struct InvertedMessageList: UIViewControllerRepresentable {
         controller.callbacks = ChatListController.Callbacks(
             conversationId: conversationId, onEdit: onEdit, onReply: onReply,
             onImageTap: onImageTap, onActions: onActions)
-        controller.apply(messages: messages, isGroupchat: isGroupchat)
+        controller.apply(messages: messages, isGroupchat: isGroupchat, avatarPaths: avatarPaths)
         if context.coordinator.lastScrollToken != scrollToBottomToken {
             context.coordinator.lastScrollToken = scrollToBottomToken
             // Defer past this SwiftUI update: issuing the scroll from inside
@@ -145,14 +147,20 @@ final class ChatListController: UITableViewController {
                         .padding(.top, 6)
                         .padding(.bottom, 2)
                 }
-                MessageBubble(conversationId: cb.conversationId, msg: row.msg,
-                              inGroupchat: isGroupchat, showSender: row.showSender,
+                MessageBubble(msg: row.msg, inGroupchat: isGroupchat, showSender: row.showSender,
+                              senderAvatarPath: row.senderAvatarPath,
                               onEdit: cb.onEdit, onReply: cb.onReply,
-                              onImageTap: cb.onImageTap, onActions: cb.onActions)
+                              onImageTap: cb.onImageTap, onActions: cb.onActions,
+                              onAvatarNeeded: { model.ensureAvatar(for: $0) },
+                              onReaction: { emoji, add in
+                                  model.setReaction(cb.conversationId, item: row.msg.id, emoji: emoji, add: add)
+                              },
+                              onDownloadFile: { item in
+                                  model.downloadFile(cb.conversationId, item: item)
+                              })
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 3)
-            .environmentObject(model)
         }
     }
 
@@ -160,7 +168,7 @@ final class ChatListController: UITableViewController {
     /// animate; in-place content changes (marked state, file progress) reconfigure
     /// the affected cells. Follows the bottom on a new newest message only if we
     /// were already there.
-    func apply(messages: [ChatMessage], isGroupchat: Bool) {
+    func apply(messages: [ChatMessage], isGroupchat: Bool, avatarPaths: [String: String]) {
         loadViewIfNeeded()
         self.isGroupchat = isGroupchat
 
@@ -171,9 +179,11 @@ final class ChatListController: UITableViewController {
             let newDay = i == 0 || !cal.isDate(msg.time, inSameDayAs: messages[i - 1].time)
             let showSender = isGroupchat && msg.direction == "in"
                 && (newDay || messages[i - 1].from != msg.from)
+            let avatarPath = isGroupchat && msg.direction == "in" ? avatarPaths[msg.from] : nil
             chronological.append(ChatRowModel(msg: msg, showDay: newDay,
                                               dayLabel: Self.dayLabel(msg.time),
-                                              showSender: showSender))
+                                              showSender: showSender,
+                                              senderAvatarPath: avatarPath))
         }
 
         let reversed = Array(chronological.reversed())   // row 0 = newest
@@ -229,8 +239,6 @@ final class ChatListController: UITableViewController {
         let cal = Calendar.current
         if cal.isDateInToday(date) { return "Today" }
         if cal.isDateInYesterday(date) { return "Yesterday" }
-        let fmt = DateFormatter()
-        fmt.dateStyle = .medium
-        return fmt.string(from: date)
+        return GeckoDisplayFormatters.dayLabel(date)
     }
 }

@@ -15,7 +15,9 @@ struct BlockedContactsView: View {
             } else {
                 ForEach(model.blockedContacts, id: \.self) { jid in
                     HStack(spacing: 10) {
-                        AvatarView(jid: jid, name: jid, isGroup: false, size: 32)
+                        AvatarView(jid: jid, name: jid, isGroup: false, size: 32,
+                                   avatarPath: model.avatars[jid],
+                                   requestAvatar: { model.ensureAvatar(for: jid) })
                         Text(jid).lineLimit(1)
                         Spacer()
                         Button("Unblock") { model.unblockContact(jid) }

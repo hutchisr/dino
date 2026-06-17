@@ -57,7 +57,10 @@ struct RoomDetailsView: View {
     }
 
     private var avatar: some View {
-        AvatarView(jid: conversation?.jid ?? "", name: conversation?.name ?? "", isGroup: true, size: 52)
+        let jid = conversation?.jid ?? ""
+        return AvatarView(jid: jid, name: conversation?.name ?? "", isGroup: true, size: 52,
+                          avatarPath: model.avatars[jid],
+                          requestAvatar: jid.isEmpty ? nil : { model.ensureAvatar(for: jid) })
     }
 
     private var headerSection: some View {
@@ -165,7 +168,9 @@ struct RoomDetailsView: View {
     @ViewBuilder
     private func occupantRow(_ occupant: Occupant) -> some View {
         HStack(spacing: 10) {
-            AvatarView(jid: occupant.jid, name: occupant.nick, isGroup: false, size: 32)
+            AvatarView(jid: occupant.jid, name: occupant.nick, isGroup: false, size: 32,
+                       avatarPath: model.avatars[occupant.jid],
+                       requestAvatar: { model.ensureAvatar(for: occupant.jid) })
             VStack(alignment: .leading, spacing: 1) {
                 Text(occupant.nick).foregroundStyle(.primary)
                 if let real = occupant.realJid {

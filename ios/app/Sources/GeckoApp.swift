@@ -124,8 +124,13 @@ struct ConversationListView: View {
             }
             Section("Conversations") {
                 ForEach(model.conversations) { conv in
+                    let presence = conv.isGroupchat ? nil : model.presence(for: conv.jid)
                     NavigationLink(value: conv.id) {
-                        ConversationRow(conv: conv)
+                        ConversationRow(
+                            conv: conv,
+                            presence: presence,
+                            avatarPath: model.avatars[conv.jid],
+                            requestAvatar: { model.ensureAvatar(for: conv.jid) })
                     }
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
@@ -148,7 +153,10 @@ struct ConversationListView: View {
                     Button {
                         showAccountSettings = true
                     } label: {
-                        AvatarView(jid: account.id, name: model.accountAlias, isGroup: false, size: 34)
+                        AvatarView(
+                            jid: account.id, name: model.accountAlias, isGroup: false, size: 34,
+                            avatarPath: model.avatars[account.id],
+                            requestAvatar: { model.ensureAvatar(for: account.id) })
                             .padding(3)
                             .glassEffect(.regular.tint(accountStatusColor(account.state)).interactive(), in: Circle())
                             .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
@@ -246,14 +254,78 @@ func presenceColor(_ show: String) -> Color {
     }
 }
 
+struct CachedDiskImage<Placeholder: View>: View {
+    let path: String?
+    let maxPixel: Int
+    var contentMode: ContentMode = .fill
+    @ViewBuilder var placeholder: () -> Placeholder
+    @State private var image: UIImage?
+    @State private var loadedKey = ""
+
+    private var cacheKey: String {
+        "\(path ?? "")@\(maxPixel)"
+    }
+
+    init(
+        path: String?,
+        maxPixel: Int,
+        contentMode: ContentMode = .fill,
+        @ViewBuilder placeholder: @escaping () -> Placeholder
+    ) {
+        self.path = path
+        self.maxPixel = maxPixel
+        self.contentMode = contentMode
+        self.placeholder = placeholder
+        if let path, let cached = ThumbnailLoader.cachedThumbnail(path: path, maxPixel: maxPixel) {
+            _image = State(initialValue: cached)
+            _loadedKey = State(initialValue: "\(path)@\(maxPixel)")
+        }
+    }
+
+    var body: some View {
+        let currentKey = cacheKey
+        Group {
+            if let image, loadedKey == currentKey {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            } else {
+                placeholder()
+            }
+        }
+        .task(id: currentKey) {
+            guard let path, !path.isEmpty else {
+                image = nil
+                loadedKey = currentKey
+                return
+            }
+            if let cached = ThumbnailLoader.cachedThumbnail(path: path, maxPixel: maxPixel) {
+                image = cached
+                loadedKey = currentKey
+                return
+            }
+            let p = path, mp = maxPixel
+            let decoded = await Task.detached(priority: .userInitiated) {
+                ThumbnailLoader.loadThumbnail(path: p, maxPixel: mp)
+            }.value
+            if !Task.isCancelled {
+                image = decoded
+                loadedKey = currentKey
+            }
+        }
+    }
+}
+
 struct AvatarView: View {
-    @EnvironmentObject var model: AppModel
+    @Environment(\.displayScale) private var displayScale
     let jid: String
     let name: String
     let isGroup: Bool
     var size: CGFloat = 44
     /// XMPP "show" for a status dot, or nil to draw no dot (groups, occupants…).
     var presence: String?
+    var avatarPath: String?
+    var requestAvatar: (() -> Void)?
 
     private var initial: String {
         String((name.isEmpty ? jid : name).prefix(1)).uppercased()
@@ -263,27 +335,13 @@ struct AvatarView: View {
         jidColor(jid)
     }
 
+    private var maxPixel: Int {
+        max(96, Int((size * displayScale * 2).rounded()))
+    }
+
     var body: some View {
-        Group {
-            if let path = model.avatars[jid],
-               let image = UIImage(contentsOfFile: path) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ZStack {
-                    fallbackColor.opacity(0.85)
-                    if isGroup {
-                        Image(systemName: "person.2.fill")
-                            .font(.system(size: size * 0.4))
-                            .foregroundStyle(.white)
-                    } else {
-                        Text(initial)
-                            .font(.system(size: size * 0.45, weight: .medium))
-                            .foregroundStyle(.white)
-                    }
-                }
-            }
+        CachedDiskImage(path: avatarPath, maxPixel: maxPixel, contentMode: .fill) {
+            fallback
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
@@ -295,32 +353,39 @@ struct AvatarView: View {
                     .overlay(Circle().stroke(Color(.systemBackground), lineWidth: max(1.5, size * 0.045)))
             }
         }
-        .onAppear { model.ensureAvatar(for: jid) }
+        .onAppear { requestAvatar?() }
+    }
+
+    private var fallback: some View {
+        ZStack {
+            fallbackColor.opacity(0.85)
+            if isGroup {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: size * 0.4))
+                    .foregroundStyle(.white)
+            } else {
+                Text(initial)
+                    .font(.system(size: size * 0.45, weight: .medium))
+                    .foregroundStyle(.white)
+            }
+        }
     }
 }
 
 struct ConversationRow: View {
-    @EnvironmentObject var model: AppModel
     let conv: XmppConversation
+    let presence: String?
+    let avatarPath: String?
+    let requestAvatar: () -> Void
 
     private var timeLabel: String {
-        if conv.time.timeIntervalSince1970 == 0 { return "" }
-        let cal = Calendar.current
-        let fmt = DateFormatter()
-        if cal.isDateInToday(conv.time) {
-            fmt.timeStyle = .short
-            fmt.dateStyle = .none
-        } else {
-            fmt.dateStyle = .short
-            fmt.timeStyle = .none
-        }
-        return fmt.string(from: conv.time)
+        GeckoDisplayFormatters.conversationTime(conv.time)
     }
 
     var body: some View {
         HStack(spacing: 10) {
             AvatarView(jid: conv.jid, name: conv.name, isGroup: conv.isGroupchat,
-                       presence: conv.isGroupchat ? nil : model.presence(for: conv.jid))
+                       presence: presence, avatarPath: avatarPath, requestAvatar: requestAvatar)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(conv.name)
@@ -412,7 +477,8 @@ struct ContactsView: View {
                     } label: {
                         HStack {
                             AvatarView(jid: contact.id, name: contact.displayName, isGroup: false, size: 36,
-                                       presence: contact.show)
+                                       presence: contact.show, avatarPath: model.avatars[contact.id],
+                                       requestAvatar: { model.ensureAvatar(for: contact.id) })
                             VStack(alignment: .leading) {
                                 Text(contact.displayName)
                                 HStack(spacing: 4) {
@@ -750,6 +816,7 @@ struct ChatView: View {
             messages: chatMessages,
             conversationId: conversationId,
             isGroupchat: isGroupChat,
+            avatarPaths: model.avatars,
             model: model,
             isAtBottom: $isAtBottom,
             scrollToBottomToken: scrollToBottomToken,
@@ -808,7 +875,9 @@ struct ChatView: View {
         let name: String = conversation?.name ?? "Chat"
         let jid: String = conversation?.jid ?? ""
         return HStack(spacing: 12) {
-            AvatarView(jid: jid, name: name, isGroup: isGroupChat, size: 44)
+            AvatarView(jid: jid, name: name, isGroup: isGroupChat, size: 44,
+                       avatarPath: model.avatars[jid],
+                       requestAvatar: jid.isEmpty ? nil : { model.ensureAvatar(for: jid) })
             VStack(alignment: .leading, spacing: 4) {
                 Text(name)
                     .font(.subheadline.weight(.semibold))
@@ -1033,15 +1102,17 @@ private func messageBody(_ text: String) -> some View {
 }
 
 struct MessageBubble: View {
-    @EnvironmentObject var model: AppModel
-    let conversationId: Int32
     let msg: ChatMessage
     var inGroupchat: Bool = false
     var showSender: Bool = false
+    var senderAvatarPath: String?
     var onEdit: ((ChatMessage) -> Void)? = nil
     var onReply: ((ChatMessage) -> Void)? = nil
     var onImageTap: ((String) -> Void)? = nil
     var onActions: ((ChatMessage) -> Void)? = nil
+    var onAvatarNeeded: ((String) -> Void)? = nil
+    var onReaction: ((String, Bool) -> Void)? = nil
+    var onDownloadFile: ((Int32) -> Void)? = nil
     var onImageRendered: (() -> Void)? = nil
 
     @State private var dragOffset: CGFloat = 0
@@ -1091,7 +1162,9 @@ struct MessageBubble: View {
             }
             if inGroupchat && msg.direction == "in" {
                 if showSender {
-                    AvatarView(jid: msg.from, name: msg.fromDisplay, isGroup: false, size: 30)
+                    AvatarView(jid: msg.from, name: msg.fromDisplay, isGroup: false, size: 30,
+                               avatarPath: senderAvatarPath,
+                               requestAvatar: { onAvatarNeeded?(msg.from) })
                         .padding(.top, showSender ? 16 : 0)
                 } else {
                     Color.clear.frame(width: 30, height: 1)
@@ -1122,7 +1195,8 @@ struct MessageBubble: View {
                         .padding(.bottom, 2)
                     }
                     if msg.isFile {
-                        FileContent(conversationId: conversationId, msg: msg, onImageTap: onImageTap, onImageRendered: onImageRendered)
+                        FileContent(msg: msg, onImageTap: onImageTap, onDownloadFile: onDownloadFile,
+                                    onImageRendered: onImageRendered)
                     } else {
                         messageBody(msg.body)
                     }
@@ -1149,7 +1223,7 @@ struct MessageBubble: View {
                     HStack(spacing: 4) {
                         ForEach(msg.reactions, id: \.emoji) { r in
                             Button {
-                                model.setReaction(conversationId, item: msg.id, emoji: r.emoji, add: !r.me)
+                                onReaction?(r.emoji, !r.me)
                             } label: {
                                 Text("\(r.emoji) \(r.count)")
                                     .font(.caption)
@@ -1243,14 +1317,13 @@ struct CachedThumbnail: View {
 }
 
 struct FileContent: View {
-    @EnvironmentObject var model: AppModel
-    let conversationId: Int32
     let msg: ChatMessage
     var onImageTap: ((String) -> Void)? = nil
+    var onDownloadFile: ((Int32) -> Void)? = nil
     var onImageRendered: (() -> Void)? = nil
 
     private var sizeLabel: String {
-        msg.size > 0 ? ByteCountFormatter.string(fromByteCount: Int64(msg.size), countStyle: .file) : ""
+        GeckoDisplayFormatters.fileSize(msg.size)
     }
 
     var body: some View {
@@ -1286,7 +1359,7 @@ struct FileContent: View {
             fileRow
                 .onTapGesture {
                     if msg.fileState == "not_started" || msg.fileState == "failed" {
-                        model.downloadFile(conversationId, item: msg.id)
+                        onDownloadFile?(msg.id)
                     }
                 }
         }

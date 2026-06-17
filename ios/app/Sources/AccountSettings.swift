@@ -10,10 +10,28 @@ struct AccountSettingsView: View {
     @State private var aliasSaved = false
     @State private var presenceShow = "online"
     @State private var presenceStatus = ""
+    @State private var presenceDirty = false
+    @State private var closingForSignOut = false
 
     private let presenceOptions = [("online", "Online"), ("away", "Away"), ("dnd", "Do Not Disturb")]
 
     private var jid: String { model.accounts.first?.id ?? "" }
+    private var presenceShowBinding: Binding<String> {
+        Binding(
+            get: { presenceShow },
+            set: { value in
+                presenceShow = value
+                presenceDirty = true
+            })
+    }
+    private var presenceStatusBinding: Binding<String> {
+        Binding(
+            get: { presenceStatus },
+            set: { value in
+                presenceStatus = value
+                presenceDirty = true
+            })
+    }
 
     var body: some View {
         NavigationStack {
@@ -25,7 +43,13 @@ struct AccountSettingsView: View {
                             Button {
                                 showPhotoPicker = true
                             } label: {
-                                AvatarView(jid: jid, name: model.accountAlias.isEmpty ? jid : model.accountAlias, isGroup: false, size: 88)
+                                AvatarView(
+                                    jid: jid,
+                                    name: model.accountAlias.isEmpty ? jid : model.accountAlias,
+                                    isGroup: false,
+                                    size: 88,
+                                    avatarPath: model.avatars[jid],
+                                    requestAvatar: jid.isEmpty ? nil : { model.ensureAvatar(for: jid) })
                                     .overlay(alignment: .bottomTrailing) {
                                         Image(systemName: "camera.fill")
                                             .font(.caption)
@@ -48,7 +72,7 @@ struct AccountSettingsView: View {
                 .listRowBackground(Color.clear)
 
                 Section("Status") {
-                    Picker("Availability", selection: $presenceShow) {
+                    Picker("Availability", selection: presenceShowBinding) {
                         ForEach(presenceOptions, id: \.0) { value, label in
                             HStack {
                                 Circle().fill(presenceColor(value)).frame(width: 8, height: 8)
@@ -57,11 +81,10 @@ struct AccountSettingsView: View {
                             .tag(value)
                         }
                     }
-                    TextField("Status message (optional)", text: $presenceStatus)
-                        .onSubmit { model.setPresence(show: presenceShow, status: presenceStatus) }
-                }
-                .onChange(of: presenceShow) { _, show in
-                    model.setPresence(show: show, status: presenceStatus)
+                    TextField("Status message (optional)", text: presenceStatusBinding)
+                        .onSubmit { savePresenceIfNeeded() }
+                    Button("Save status") { savePresenceIfNeeded() }
+                        .disabled(!presenceDirty)
                 }
 
                 Section("Display name") {
@@ -127,6 +150,8 @@ struct AccountSettingsView: View {
 
                 Section {
                     Button(role: .destructive) {
+                        closingForSignOut = true
+                        presenceDirty = false
                         isPresented = false
                         model.signOut()
                     } label: {
@@ -137,7 +162,10 @@ struct AccountSettingsView: View {
             .navigationTitle("Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                Button("Done") { isPresented = false }
+                Button("Done") {
+                    savePresenceIfNeeded()
+                    isPresented = false
+                }
             }
             .sheet(isPresented: $showPhotoPicker) {
                 PhotoPicker { url in
@@ -150,14 +178,16 @@ struct AccountSettingsView: View {
                 model.requestBlocklist()
                 model.requestPrivacy()
                 alias = model.accountAlias
-                presenceShow = model.selfShow
-                presenceStatus = model.selfStatus
+                syncPresenceFromModel()
             }
             .onChange(of: model.accountAlias) { _, value in
                 alias = value
             }
-            .onChange(of: model.selfShow) { _, value in presenceShow = value }
-            .onChange(of: model.selfStatus) { _, value in presenceStatus = value }
+            .onChange(of: model.selfShow) { _, _ in if !presenceDirty { syncPresenceFromModel() } }
+            .onChange(of: model.selfStatus) { _, _ in if !presenceDirty { syncPresenceFromModel() } }
+            .onDisappear {
+                if !closingForSignOut { savePresenceIfNeeded() }
+            }
             .alert("Password changed", isPresented: $model.passwordChanged) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -170,5 +200,17 @@ struct AccountSettingsView: View {
         model.setAlias(alias)
         aliasSaved = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { aliasSaved = false }
+    }
+
+    private func syncPresenceFromModel() {
+        presenceShow = model.selfShow
+        presenceStatus = model.selfStatus
+        presenceDirty = false
+    }
+
+    private func savePresenceIfNeeded() {
+        guard presenceDirty else { return }
+        model.setPresence(show: presenceShow, status: presenceStatus)
+        presenceDirty = false
     }
 }

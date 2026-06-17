@@ -96,7 +96,7 @@ struct ReactionSheet: View {
                     ContentUnavailableView.search(text: search)
                         .padding(.top, 24)
                 } else {
-                    LazyVGrid(columns: Array(repeating: GridItem(.adaptive(minimum: 40)), count: 8), spacing: 6) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))], spacing: 6) {
                         ForEach(filteredEmojis, id: \.emoji) { item in
                             Button {
                                 onReact(item.emoji)

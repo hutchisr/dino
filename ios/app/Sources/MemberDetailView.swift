@@ -148,7 +148,9 @@ struct MemberDetailView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            AvatarView(jid: occupant.jid, name: occupant.nick, isGroup: false, size: 52)
+            AvatarView(jid: occupant.jid, name: occupant.nick, isGroup: false, size: 52,
+                       avatarPath: model.avatars[occupant.jid],
+                       requestAvatar: { model.ensureAvatar(for: occupant.jid) })
             VStack(alignment: .leading, spacing: 2) {
                 Text(occupant.nick).font(.headline)
                 if let real = occupant.realJid {
