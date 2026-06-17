@@ -554,6 +554,29 @@ private struct ComposerHeightKey: PreferenceKey {
     }
 }
 
+private struct DraftAttachment: Identifiable, Equatable {
+    let id = UUID()
+    let url: URL
+    let name: String
+    let byteCount: Int?
+    let isImage: Bool
+    let sizeLabel: String
+
+    init(url: URL) {
+        self.url = url
+        self.name = url.lastPathComponent.isEmpty ? "File" : url.lastPathComponent
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let byteCount = (attrs?[.size] as? NSNumber)?.intValue
+        self.byteCount = byteCount
+        if let byteCount, byteCount > 0 {
+            self.sizeLabel = ByteCountFormatter.string(fromByteCount: Int64(byteCount), countStyle: .file)
+        } else {
+            self.sizeLabel = ""
+        }
+        self.isImage = ThumbnailLoader.pixelSize(path: url.path) != nil
+    }
+}
+
 struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var model: AppModel
@@ -594,6 +617,7 @@ struct ChatView: View {
     @State private var scrollToBottomToken = 0
     @State private var viewerItem: ImageViewerItem?
     @State private var composerHeight: CGFloat = 0
+    @State private var draftAttachments: [DraftAttachment] = []
 
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
@@ -609,6 +633,12 @@ struct ChatView: View {
 
     private var hasComposerAccessory: Bool {
         model.chatStates[conversationId] == "composing" || editing != nil || replyingTo != nil
+            || !draftAttachments.isEmpty
+    }
+
+    private var shouldShowSendButton: Bool {
+        if editing != nil { return !draft.isEmpty }
+        return !draft.isEmpty || !draftAttachments.isEmpty
     }
 
     @ViewBuilder
@@ -649,6 +679,9 @@ struct ChatView: View {
                     }
                 }
             }
+            if !draftAttachments.isEmpty {
+                draftAttachmentStrip
+            }
             inputBar
         }
     }
@@ -661,6 +694,73 @@ struct ChatView: View {
                     Color.clear.preference(key: ComposerHeightKey.self, value: geo.size.height)
                 }
             }
+    }
+
+    private var draftAttachmentStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(draftAttachments) { attachment in
+                    draftAttachmentPreview(attachment)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+        }
+    }
+
+    @ViewBuilder
+    private func draftAttachmentPreview(_ attachment: DraftAttachment) -> some View {
+        ZStack(alignment: .topTrailing) {
+            if attachment.isImage {
+                CachedDiskImage(path: attachment.url.path, maxPixel: 360, contentMode: .fill) {
+                    Image(systemName: "photo")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(.secondarySystemBackground))
+                }
+                .frame(width: 76, height: 76)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            } else {
+                HStack(spacing: 10) {
+                    Image(systemName: "doc.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 32)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(attachment.name)
+                            .font(.subheadline.weight(.medium))
+                            .lineLimit(1)
+                        if !attachment.sizeLabel.isEmpty {
+                            Text(attachment.sizeLabel)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(width: 190, height: 76)
+                .padding(.horizontal, 12)
+                .glassEffect(.regular, in: .rect(cornerRadius: 16))
+            }
+
+            Button {
+                removeDraftAttachment(attachment)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title3)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Color.secondary, Color(.systemBackground))
+                    .frame(width: 32, height: 32)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remove \(attachment.name)")
+            .offset(x: 8, y: -8)
+        }
+        .padding(.top, 8)
+        .padding(.trailing, 8)
     }
 
     /// A dismissable banner (typing reply/edit context) shown above the input.
@@ -709,6 +809,8 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(showAttach ? "Close attachments" : "Attach")
+                .disabled(editing != nil)
+                .opacity(editing == nil ? 1 : 0.45)
                 // The Photo/File options grow upward out of the plus button —
                 // same GlassEffectContainer, so the glass blends as they emerge
                 // — instead of a system menu popping over it. Anchored to the
@@ -753,7 +855,7 @@ struct ChatView: View {
                         // fast — a slow morph leaves it briefly unresponsive
                         // right after a send (while it animates back in).
                         withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                            showSend = !value.isEmpty
+                            showSend = shouldShowSendButton
                         }
                     }
 
@@ -762,16 +864,7 @@ struct ChatView: View {
                     // field's glass (and merges back when the draft clears),
                     // via the shared GlassEffectContainer + matched id.
                     Button {
-                        // Sending = glide to the newest message.
-                        scrollToBottomToken &+= 1
-                        if let editing {
-                            model.correctMessage(conversationId, item: editing.id, body: draft)
-                            self.editing = nil
-                        } else {
-                            model.send(conversationId, draft, replyTo: replyingTo?.id ?? 0)
-                            replyingTo = nil
-                        }
-                        draft = ""
+                        sendCurrentDraft()
                     } label: {
                         Image(systemName: editing != nil ? "checkmark" : "paperplane.fill")
                             .font(.title3.weight(.semibold))
@@ -818,6 +911,47 @@ struct ChatView: View {
         .buttonStyle(.plain)
     }
 
+    private func addDraftAttachment(_ url: URL) {
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+            draftAttachments.append(DraftAttachment(url: url))
+            showSend = true
+        }
+    }
+
+    private func removeDraftAttachment(_ attachment: DraftAttachment) {
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+            draftAttachments.removeAll { $0.id == attachment.id }
+            showSend = shouldShowSendButton
+        }
+    }
+
+    private func sendCurrentDraft() {
+        scrollToBottomToken &+= 1
+        if let editing {
+            model.correctMessage(conversationId, item: editing.id, body: draft)
+            self.editing = nil
+            draft = ""
+            draftAttachments = []
+            showSend = false
+            model.setTyping(conversationId, false)
+            return
+        }
+
+        let body = draft
+        let attachments = draftAttachments
+        if !body.isEmpty {
+            model.send(conversationId, body, replyTo: replyingTo?.id ?? 0)
+        }
+        for attachment in attachments {
+            model.sendFile(conversationId, path: attachment.url.path)
+        }
+        replyingTo = nil
+        draft = ""
+        draftAttachments = []
+        showSend = false
+        model.setTyping(conversationId, false)
+    }
+
     private func reactionSheet(for m: ChatMessage) -> some View {
         ReactionSheet(
             msg: m,
@@ -831,6 +965,7 @@ struct ChatView: View {
             },
             onEdit: m.editable ? {
                 replyingTo = nil
+                draftAttachments = []
                 editing = m
                 draft = m.body
             } : nil)
@@ -847,7 +982,12 @@ struct ChatView: View {
             model: model,
             isAtBottom: $isAtBottom,
             scrollToBottomToken: scrollToBottomToken,
-            onEdit: { m in replyingTo = nil; editing = m; draft = m.body },
+            onEdit: { m in
+                replyingTo = nil
+                draftAttachments = []
+                editing = m
+                draft = m.body
+            },
             onReply: { m in editing = nil; replyingTo = m },
             onImageTap: { path in viewerItem = ImageViewerItem(id: path) },
             onActions: { m in actionMsg = m }
@@ -1147,18 +1287,17 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker { url in
-                scrollToBottomToken &+= 1   // glide to the message we're sending
-                model.sendFile(conversationId, path: url.path)
+                addDraftAttachment(url)
             }
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
             if case .success(let url) = result {
                 let scoped = url.startAccessingSecurityScopedResource()
-                let dest = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                let dest = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent)
                 try? FileManager.default.removeItem(at: dest)
                 if (try? FileManager.default.copyItem(at: url, to: dest)) != nil {
-                    scrollToBottomToken &+= 1
-                    model.sendFile(conversationId, path: dest.path)
+                    addDraftAttachment(dest)
                 }
                 if scoped { url.stopAccessingSecurityScopedResource() }
             }
