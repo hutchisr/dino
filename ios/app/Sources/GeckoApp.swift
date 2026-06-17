@@ -567,9 +567,12 @@ struct ChatView: View {
     @State private var showAttach = false
     /// Shared height for the composer's buttons and text field so they align.
     private let composerControlHeight: CGFloat = 44
+    private let composerInputVerticalPadding: CGFloat = 8
     /// Extra visible space between the newest message and the floating composer.
-    /// Keeps the pinned-bottom gap close to the vertical rhythm between rows.
-    private let composerMessageClearance: CGFloat = 8
+    /// Rows already have 3pt bottom padding, so another 3pt matches the 6pt
+    /// row-to-row rhythm instead of leaving a visibly larger composer gap.
+    private let composerMessageClearance: CGFloat = 3
+    private let topToolbarMessageClearance: CGFloat = 8
     private let topToolbarControlHeight: CGFloat = 44
     private let topToolbarVerticalPadding: CGFloat = 6
     private let topToolbarAvatarSize: CGFloat = 34
@@ -602,6 +605,10 @@ struct ChatView: View {
 
     private var isGroupChat: Bool {
         conversation?.isGroupchat == true
+    }
+
+    private var hasComposerAccessory: Bool {
+        model.chatStates[conversationId] == "composing" || editing != nil || replyingTo != nil
     }
 
     @ViewBuilder
@@ -781,7 +788,7 @@ struct ChatView: View {
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.vertical, composerInputVerticalPadding)
         }
     }
 
@@ -855,12 +862,13 @@ struct ChatView: View {
     }
 
     private func bottomChromeInset(safeAreaBottom: CGFloat) -> CGFloat {
-        let toolbarHeight = max(composerHeight, composerControlHeight + 16)
-        return safeAreaBottom + toolbarHeight + composerMessageClearance
+        let toolbarHeight = max(composerHeight, composerControlHeight + composerInputVerticalPadding * 2)
+        let transparentTopOverlap = hasComposerAccessory ? 0 : composerInputVerticalPadding
+        return safeAreaBottom + toolbarHeight - transparentTopOverlap + composerMessageClearance
     }
 
     private func topChromeInset(safeAreaTop: CGFloat) -> CGFloat {
-        safeAreaTop + topToolbarControlHeight + topToolbarVerticalPadding * 2 + composerMessageClearance
+        safeAreaTop + topToolbarControlHeight + topToolbarVerticalPadding * 2 + topToolbarMessageClearance
     }
 
     private func topFadeHeight(safeAreaTop: CGFloat) -> CGFloat {
@@ -885,7 +893,8 @@ struct ChatView: View {
     }
 
     private func scrollDownButton(bottomChromeInset: CGFloat) -> some View {
-        Button {
+        let bottomPadding = max(0, bottomChromeInset - composerInputVerticalPadding)
+        return Button {
             scrollToBottomToken &+= 1   // the inverted table glides to row 0
         } label: {
             Image(systemName: "chevron.down")
@@ -897,7 +906,7 @@ struct ChatView: View {
         .contentShape(.circle)
         .accessibilityLabel("Scroll to latest messages")
         .padding(.trailing, 14)
-        .padding(.bottom, bottomChromeInset + 8)
+        .padding(.bottom, bottomPadding)
         .transition(.scale(scale: 0.5).combined(with: .opacity))
     }
 

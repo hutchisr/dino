@@ -102,10 +102,14 @@ final class ChatListController: UITableViewController {
     private(set) var isAtBottom = true
     private var visualTopInset: CGFloat = 0
     private var visualBottomInset: CGFloat = 0
+    private var pendingBottomCorrection = false
+    private var bottomCorrectionWorkItem: DispatchWorkItem?
 
     /// Visual bottom = flipped origin. A little slack absorbs the rubber-band
-    /// bounce and float imprecision so the button doesn't flicker at rest.
-    private static let bottomThreshold: CGFloat = 24
+    /// bounce and float imprecision so the button doesn't flicker at rest, but
+    /// keep it tight enough that the scroll-down affordance stays visible until
+    /// the newest message is actually pinned.
+    private static let bottomThreshold: CGFloat = 8
 
     init() { super.init(style: .plain) }
     required init?(coder: NSCoder) { fatalError("init(coder:) unused") }
@@ -242,24 +246,77 @@ final class ChatListController: UITableViewController {
         }
     }
 
-    /// Scroll to the newest message. In the flipped table that's the content
-    /// origin, so a plain `setContentOffset` to zero — which natively cancels any
-    /// in-flight deceleration and glides — is all it takes.
+    /// Scroll to the newest message. In the flipped table, the visual bottom is
+    /// the adjusted top inset's negative offset.
     func scrollToBottom(animated: Bool) {
         loadViewIfNeeded()
         guard !orderedIDs.isEmpty else { return }
-        // Row 0 = newest. In the flipped table the visual bottom is UIKit's
-        // adjusted top inset, so this natively cancels momentum and glides to the
-        // pinned position while preserving the floating composer clearance.
-        tableView.setContentOffset(CGPoint(x: 0, y: bottomContentOffsetY), animated: animated)
+        // Row 0 = newest. The visual bottom maps to UIKit's minimum offset:
+        // negative adjusted top inset. The inset itself is the floating composer
+        // clearance, so targeting 0 stops short.
+        tableView.layoutIfNeeded()
+        let target = CGPoint(x: 0, y: bottomContentOffsetY)
+        bottomCorrectionWorkItem?.cancel()
+
+        if animated {
+            pendingBottomCorrection = true
+            tableView.setContentOffset(target, animated: true)
+            scheduleBottomCorrectionFallback()
+        } else {
+            pendingBottomCorrection = false
+            tableView.setContentOffset(target, animated: false)
+            updateBottomState()
+        }
     }
 
     override func scrollViewDidScroll(_ scrollView: UIScrollView) {
         updateBottomState()
     }
 
+    override func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        pendingBottomCorrection = false
+        bottomCorrectionWorkItem?.cancel()
+        bottomCorrectionWorkItem = nil
+    }
+
+    override func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        finishBottomCorrection()
+    }
+
     private var bottomContentOffsetY: CGFloat {
         -tableView.adjustedContentInset.top
+    }
+
+    private func scheduleBottomCorrectionFallback() {
+        let work = DispatchWorkItem { [weak self] in
+            self?.finishBottomCorrection()
+        }
+        bottomCorrectionWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: work)
+    }
+
+    private func finishBottomCorrection() {
+        guard pendingBottomCorrection else { return }
+        pendingBottomCorrection = false
+        bottomCorrectionWorkItem?.cancel()
+        bottomCorrectionWorkItem = nil
+        correctBottomOffsetIfNeeded()
+
+        // UIHostingConfiguration cells can report their final height one layout
+        // pass after the scroll animation completes. Correct again on the next
+        // runloop so the final resting offset is exact.
+        DispatchQueue.main.async { [weak self] in
+            self?.correctBottomOffsetIfNeeded()
+        }
+    }
+
+    private func correctBottomOffsetIfNeeded() {
+        tableView.layoutIfNeeded()
+        let targetY = bottomContentOffsetY
+        if abs(tableView.contentOffset.y - targetY) > 0.5 {
+            tableView.setContentOffset(CGPoint(x: 0, y: targetY), animated: false)
+        }
+        updateBottomState()
     }
 
     private func updateBottomState() {
