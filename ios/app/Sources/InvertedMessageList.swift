@@ -30,6 +30,8 @@ struct InvertedMessageList: UIViewControllerRepresentable {
     let conversationId: Int32
     let isGroupchat: Bool
     let avatarPaths: [String: String]
+    let visualTopInset: CGFloat
+    let visualBottomInset: CGFloat
     let model: AppModel
     @Binding var isAtBottom: Bool
     /// Bumped by the caller to request a programmatic scroll to the newest
@@ -54,6 +56,7 @@ struct InvertedMessageList: UIViewControllerRepresentable {
         controller.callbacks = ChatListController.Callbacks(
             conversationId: conversationId, onEdit: onEdit, onReply: onReply,
             onImageTap: onImageTap, onActions: onActions)
+        controller.setVisualInsets(top: visualTopInset, bottom: visualBottomInset)
         controller.apply(messages: messages, isGroupchat: isGroupchat, avatarPaths: avatarPaths)
         if context.coordinator.lastScrollToken != scrollToBottomToken {
             context.coordinator.lastScrollToken = scrollToBottomToken
@@ -97,6 +100,8 @@ final class ChatListController: UITableViewController {
     private var isGroupchat = false
     private var hasLoaded = false
     private(set) var isAtBottom = true
+    private var visualTopInset: CGFloat = 0
+    private var visualBottomInset: CGFloat = 0
 
     /// Visual bottom = flipped origin. A little slack absorbs the rubber-band
     /// bounce and float imprecision so the button doesn't flicker at rest.
@@ -113,8 +118,9 @@ final class ChatListController: UITableViewController {
         tableView.backgroundColor = .clear
         tableView.allowsSelection = false
         tableView.keyboardDismissMode = .interactive
-        // SwiftUI's .safeAreaInset (the composer) already insets the bottom; the
-        // flip would otherwise apply UIKit's safe-area inset to the wrong edge.
+        // Insets are managed manually because the SwiftUI chrome floats over the
+        // table. The vertical flip swaps visual top/bottom, so UIKit's
+        // automatic safe-area insets would land on the wrong visual edge.
         tableView.contentInsetAdjustmentBehavior = .never
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
 
@@ -131,6 +137,27 @@ final class ChatListController: UITableViewController {
             return cell
         }
         dataSource.defaultRowAnimation = .fade
+    }
+
+    /// Insets expressed in visual coordinates. Because the table is vertically
+    /// flipped, visual bottom maps to UIKit's top inset and visual top maps to
+    /// UIKit's bottom inset.
+    func setVisualInsets(top: CGFloat, bottom: CGFloat) {
+        loadViewIfNeeded()
+        let top = max(0, top.rounded(.up))
+        let bottom = max(0, bottom.rounded(.up))
+        guard top != visualTopInset || bottom != visualBottomInset else { return }
+
+        let wasAtBottom = isAtBottom
+        visualTopInset = top
+        visualBottomInset = bottom
+        tableView.contentInset = UIEdgeInsets(top: bottom, left: 0, bottom: top, right: 0)
+        tableView.scrollIndicatorInsets = tableView.contentInset
+        if wasAtBottom {
+            scrollToBottom(animated: false)
+        } else {
+            updateBottomState()
+        }
     }
 
     @ViewBuilder
@@ -221,14 +248,22 @@ final class ChatListController: UITableViewController {
     func scrollToBottom(animated: Bool) {
         loadViewIfNeeded()
         guard !orderedIDs.isEmpty else { return }
-        // Row 0 = newest. scrollToRow computes the exact target offset (more
-        // robust than a raw setContentOffset) and natively cancels momentum.
-        // isAtBottom updates itself via scrollViewDidScroll as the glide lands.
-        tableView.scrollToRow(at: IndexPath(row: 0, section: 0), at: .top, animated: animated)
+        // Row 0 = newest. In the flipped table the visual bottom is UIKit's
+        // adjusted top inset, so this natively cancels momentum and glides to the
+        // pinned position while preserving the floating composer clearance.
+        tableView.setContentOffset(CGPoint(x: 0, y: bottomContentOffsetY), animated: animated)
     }
 
     override func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        let atBottom = scrollView.contentOffset.y <= Self.bottomThreshold
+        updateBottomState()
+    }
+
+    private var bottomContentOffsetY: CGFloat {
+        -tableView.adjustedContentInset.top
+    }
+
+    private func updateBottomState() {
+        let atBottom = tableView.contentOffset.y <= bottomContentOffsetY + Self.bottomThreshold
         if atBottom != isAtBottom {
             isAtBottom = atBottom
             onIsAtBottomChanged?(atBottom)

@@ -547,7 +547,15 @@ struct ContactsView: View {
     }
 }
 
+private struct ComposerHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct ChatView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
     @Namespace private var composerGlass
@@ -559,6 +567,13 @@ struct ChatView: View {
     @State private var showAttach = false
     /// Shared height for the composer's buttons and text field so they align.
     private let composerControlHeight: CGFloat = 44
+    /// Extra visible space between the newest message and the floating composer.
+    /// Keeps the pinned-bottom gap close to the vertical rhythm between rows.
+    private let composerMessageClearance: CGFloat = 8
+    private let topToolbarControlHeight: CGFloat = 44
+    private let topToolbarVerticalPadding: CGFloat = 6
+    private let topToolbarAvatarSize: CGFloat = 34
+    private let topMessageFadeHeight: CGFloat = 72
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showOccupants = false
@@ -575,6 +590,7 @@ struct ChatView: View {
     /// scroll-down button, and after sending.
     @State private var scrollToBottomToken = 0
     @State private var viewerItem: ImageViewerItem?
+    @State private var composerHeight: CGFloat = 0
 
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
@@ -628,14 +644,16 @@ struct ChatView: View {
             }
             inputBar
         }
-        // Translucent bar: a thin material that blurs the chat content scrolling
-        // up behind it. Extends past the bottom safe area so it reaches the
-        // screen edge under the home indicator.
-        .background {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .ignoresSafeArea(.container, edges: .bottom)
-        }
+    }
+
+    private var composerToolbar: some View {
+        composerArea
+            .fixedSize(horizontal: false, vertical: true)
+            .background {
+                GeometryReader { geo in
+                    Color.clear.preference(key: ComposerHeightKey.self, value: geo.size.height)
+                }
+            }
     }
 
     /// A dismissable banner (typing reply/edit context) shown above the input.
@@ -811,12 +829,14 @@ struct ChatView: View {
             } : nil)
     }
 
-    private var messageList: some View {
+    private func messageList(topChromeInset: CGFloat, bottomChromeInset: CGFloat) -> some View {
         InvertedMessageList(
             messages: chatMessages,
             conversationId: conversationId,
             isGroupchat: isGroupChat,
             avatarPaths: model.avatars,
+            visualTopInset: topChromeInset,
+            visualBottomInset: bottomChromeInset,
             model: model,
             isAtBottom: $isAtBottom,
             scrollToBottomToken: scrollToBottomToken,
@@ -825,13 +845,46 @@ struct ChatView: View {
             onImageTap: { path in viewerItem = ImageViewerItem(id: path) },
             onActions: { m in actionMsg = m }
         )
+        .ignoresSafeArea(.container, edges: .vertical)
         .overlay(alignment: .bottomTrailing) {
-            if !isAtBottom { scrollDownButton }
+            if !isAtBottom {
+                scrollDownButton(bottomChromeInset: bottomChromeInset)
+            }
         }
         .animation(.snappy(duration: 0.2), value: isAtBottom)
     }
 
-    private var scrollDownButton: some View {
+    private func bottomChromeInset(safeAreaBottom: CGFloat) -> CGFloat {
+        let toolbarHeight = max(composerHeight, composerControlHeight + 16)
+        return safeAreaBottom + toolbarHeight + composerMessageClearance
+    }
+
+    private func topChromeInset(safeAreaTop: CGFloat) -> CGFloat {
+        safeAreaTop + topToolbarControlHeight + topToolbarVerticalPadding * 2 + composerMessageClearance
+    }
+
+    private func topFadeHeight(safeAreaTop: CGFloat) -> CGFloat {
+        topChromeInset(safeAreaTop: safeAreaTop) + topMessageFadeHeight
+    }
+
+    private func topScreenFade(height: CGFloat) -> some View {
+        LinearGradient(
+            stops: [
+                .init(color: Color(.systemBackground).opacity(0.94), location: 0),
+                .init(color: Color(.systemBackground).opacity(0.82), location: 0.42),
+                .init(color: Color(.systemBackground).opacity(0.34), location: 0.72),
+                .init(color: Color(.systemBackground).opacity(0), location: 1),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .frame(height: height)
+        .frame(maxWidth: .infinity)
+        .ignoresSafeArea(.container, edges: .top)
+        .allowsHitTesting(false)
+    }
+
+    private func scrollDownButton(bottomChromeInset: CGFloat) -> some View {
         Button {
             scrollToBottomToken &+= 1   // the inverted table glides to row 0
         } label: {
@@ -844,17 +897,95 @@ struct ChatView: View {
         .contentShape(.circle)
         .accessibilityLabel("Scroll to latest messages")
         .padding(.trailing, 14)
-        .padding(.bottom, 10)
+        .padding(.bottom, bottomChromeInset + 8)
         .transition(.scale(scale: 0.5).combined(with: .opacity))
+    }
+
+    private func topToolbar(safeAreaTop: CGFloat) -> some View {
+        let fadeHeight = topFadeHeight(safeAreaTop: safeAreaTop)
+        return ZStack(alignment: .top) {
+            topScreenFade(height: fadeHeight)
+
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    topIconButton(systemImage: "chevron.left", accessibilityLabel: "Back") {
+                        dismiss()
+                    }
+
+                    headerAvatarButton
+
+                    titleButton
+                        .frame(height: topToolbarControlHeight)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .layoutPriority(1)
+
+                    topBellMenu
+                    if isGroupChat {
+                        topOccupantsButton
+                    }
+                    topLockButton
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, safeAreaTop + topToolbarVerticalPadding)
+                .popover(isPresented: $showFullTitle, arrowEdge: .top) {
+                    titlePopover
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: fadeHeight, alignment: .top)
+        .ignoresSafeArea(.container, edges: .top)
+    }
+
+    private func topIconButton(
+        systemImage: String,
+        accessibilityLabel: String,
+        tint: Color = .primary,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            topIconLabel(systemImage: systemImage, tint: tint)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func topIconLabel(systemImage: String, tint: Color = .primary) -> some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: topToolbarControlHeight, height: topToolbarControlHeight)
+            .glassEffect(.regular.interactive(), in: Circle())
+            .contentShape(Circle())
+    }
+
+    private var headerAvatarButton: some View {
+        let name: String = conversation?.name ?? "Chat"
+        let jid: String = conversation?.jid ?? ""
+        return Button {
+            showFullTitle = true
+        } label: {
+            AvatarView(
+                jid: jid,
+                name: name,
+                isGroup: isGroupChat,
+                size: topToolbarAvatarSize,
+                presence: isGroupChat ? nil : model.presence(for: jid),
+                avatarPath: model.avatars[jid],
+                requestAvatar: jid.isEmpty ? nil : { model.ensureAvatar(for: jid) })
+                .padding((topToolbarControlHeight - topToolbarAvatarSize) / 2)
+                .frame(width: topToolbarControlHeight, height: topToolbarControlHeight)
+                .glassEffect(.regular.interactive(), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(name) details")
     }
 
     private var titleButton: some View {
         let name: String = conversation?.name ?? "Chat"
-        // Plain left-aligned title (no glass bubble). It lives in the .principal
-        // slot, which spans the whole region between the back chevron and the
-        // trailing buttons; maxWidth: .infinity + leading alignment makes it
-        // hug the back button on the left and use all the space up to the
-        // trailing buttons, truncating only there.
+        // Plain left-aligned title. It uses all the space between the avatar and
+        // trailing buttons, truncating only when those controls need the room.
         return Button {
             showFullTitle = true
         } label: {
@@ -866,9 +997,6 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .popover(isPresented: $showFullTitle, arrowEdge: .top) {
-            titlePopover
-        }
     }
 
     private var titlePopover: some View {
@@ -892,7 +1020,7 @@ struct ChatView: View {
         .presentationCompactAdaptation(.popover)
     }
 
-    private var bellMenu: some View {
+    private var topBellMenu: some View {
         Menu {
             notifyOption("All messages", "on")
             if isGroupChat {
@@ -900,39 +1028,59 @@ struct ChatView: View {
             }
             notifyOption("Off", "off")
         } label: {
-            Label("Notifications", systemImage: bellIcon)
+            topIconLabel(systemImage: bellIcon)
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Notifications")
     }
 
-    private var occupantsButton: some View {
+    private var topOccupantsButton: some View {
         Button {
             model.requestOccupants(conversationId)
             showOccupants = true
         } label: {
-            // Label (not a bare Image) so the overflow menu shows a text title
-            // beside the icon; the bar still renders icon-only inline.
-            Label("Participants", systemImage: "person.2")
+            topIconLabel(systemImage: "person.2")
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Participants")
+    }
+
+    private var topLockButton: some View {
+        Button {
+            toggleEncryption()
+        } label: {
+            topIconLabel(systemImage: lockIcon, tint: lockTint)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(lockAccessibilityLabel)
+    }
+
+    private func toggleEncryption() {
+        let omemoOn: Bool = conversation?.encryption == "OMEMO"
+        let available: Bool = conversation?.encryptionAvailable ?? false
+        if available {
+            model.setEncryption(conversationId, omemo: !omemoOn)
+        } else {
+            showEncryptionHelp = true
         }
     }
 
-    private var lockButton: some View {
+    private var lockIcon: String {
         let omemoOn: Bool = conversation?.encryption == "OMEMO"
-        // OMEMO needs a private (members-only, non-anonymous) room; the bridge
-        // reports whether it's possible so we can disable the toggle otherwise.
         let available: Bool = conversation?.encryptionAvailable ?? false
-        // When unavailable, stay tappable and explain why (and offer a fix for
-        // owners) instead of being an inert disabled button.
-        return Button {
-            if available {
-                model.setEncryption(conversationId, omemo: !omemoOn)
-            } else {
-                showEncryptionHelp = true
-            }
-        } label: {
-            Label(available ? (omemoOn ? "Encryption on" : "Encryption off") : "Encryption unavailable",
-                  systemImage: available ? (omemoOn ? "lock.fill" : "lock.open") : "lock.slash")
-                .foregroundStyle(omemoOn && available ? Color.green : Color.secondary)
-        }
+        return available ? (omemoOn ? "lock.fill" : "lock.open") : "lock.slash"
+    }
+
+    private var lockTint: Color {
+        let omemoOn: Bool = conversation?.encryption == "OMEMO"
+        let available: Bool = conversation?.encryptionAvailable ?? false
+        return omemoOn && available ? .green : .secondary
+    }
+
+    private var lockAccessibilityLabel: String {
+        let omemoOn: Bool = conversation?.encryption == "OMEMO"
+        let available: Bool = conversation?.encryptionAvailable ?? false
+        return available ? (omemoOn ? "Encryption on" : "Encryption off") : "Encryption unavailable"
     }
 
     @ViewBuilder
@@ -958,24 +1106,35 @@ struct ChatView: View {
     }
 
     var body: some View {
-        messageList
-        // Tap anywhere in the chat to dismiss the attach expander (the system
-        // Menu used to give this for free). The composer itself is excluded —
-        // it's added below as a safeAreaInset, after this overlay — so the
-        // plus/X and the options stay tappable.
-        .overlay {
-            if showAttach {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                            showAttach = false
-                        }
+        GeometryReader { geo in
+            let topInset = topChromeInset(safeAreaTop: geo.safeAreaInsets.top)
+            let bottomInset = bottomChromeInset(safeAreaBottom: geo.safeAreaInsets.bottom)
+            messageList(topChromeInset: topInset, bottomChromeInset: bottomInset)
+                // Tap anywhere in the chat to dismiss the attach expander (the
+                // system Menu used to give this for free). The composer itself is
+                // added as a later overlay so the plus/X and options stay tappable.
+                .overlay {
+                    if showAttach {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                                    showAttach = false
+                                }
+                            }
                     }
-            }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            composerArea
+                }
+                .overlay(alignment: .bottom) {
+                    composerToolbar
+                }
+                .overlay(alignment: .top) {
+                    topToolbar(safeAreaTop: geo.safeAreaInsets.top)
+                }
+                .onPreferenceChange(ComposerHeightKey.self) { height in
+                    if abs(composerHeight - height) > 0.5 {
+                        composerHeight = height
+                    }
+                }
         }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker { url in
@@ -995,27 +1154,10 @@ struct ChatView: View {
                 if scoped { url.stopAccessingSecurityScopedResource() }
             }
         }
-        // Blank: the left-aligned title lives in the leading toolbar item; a
-        // navigationTitle here would render a second, centred copy.
+        // Blank: the custom top overlay renders the title.
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        // Translucent material nav bar (the inverted table doesn't drive
-        // SwiftUI's scroll-edge effect, so the bar background needs to be set
-        // explicitly). Content scrolls up behind it.
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                titleButton
-            }
-            .sharedBackgroundVisibility(.hidden)
-            ToolbarItemGroup(placement: .primaryAction) {
-                bellMenu
-                if isGroupChat {
-                    occupantsButton
-                }
-                lockButton
-            }
-        }
+        .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showOccupants, onDismiss: {
             // Start the DM only after the sheet has finished sliding away, so
             // the push into the new chat reads as a distinct second step.
