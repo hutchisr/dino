@@ -554,11 +554,9 @@ private struct ComposerHeightKey: PreferenceKey {
     }
 }
 
-private struct DraftAttachment: Identifiable, Equatable {
-    let id = UUID()
+private struct PendingFileSend {
     let url: URL
     let name: String
-    let byteCount: Int?
     let isImage: Bool
     let sizeLabel: String
 
@@ -567,7 +565,6 @@ private struct DraftAttachment: Identifiable, Equatable {
         self.name = url.lastPathComponent.isEmpty ? "File" : url.lastPathComponent
         let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
         let byteCount = (attrs?[.size] as? NSNumber)?.intValue
-        self.byteCount = byteCount
         if let byteCount, byteCount > 0 {
             self.sizeLabel = ByteCountFormatter.string(fromByteCount: Int64(byteCount), countStyle: .file)
         } else {
@@ -618,7 +615,7 @@ struct ChatView: View {
     @State private var viewerItem: ImageViewerItem?
     @State private var composerHeight: CGFloat = 0
     @State private var keyboardOverlap: CGFloat = 0
-    @State private var draftAttachments: [DraftAttachment] = []
+    @State private var pendingFileSend: PendingFileSend?
 
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
@@ -634,12 +631,11 @@ struct ChatView: View {
 
     private var hasComposerAccessory: Bool {
         model.chatStates[conversationId] == "composing" || editing != nil || replyingTo != nil
-            || !draftAttachments.isEmpty
+            || pendingFileSend != nil
     }
 
     private var shouldShowSendButton: Bool {
-        if editing != nil { return !draft.isEmpty }
-        return !draft.isEmpty || !draftAttachments.isEmpty
+        !draft.isEmpty
     }
 
     @ViewBuilder
@@ -680,8 +676,8 @@ struct ChatView: View {
                     }
                 }
             }
-            if !draftAttachments.isEmpty {
-                draftAttachmentStrip
+            if let pendingFileSend {
+                pendingFileSendPanel(pendingFileSend)
             }
             inputBar
         }
@@ -697,24 +693,11 @@ struct ChatView: View {
             }
     }
 
-    private var draftAttachmentStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(draftAttachments) { attachment in
-                    draftAttachmentPreview(attachment)
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
-        }
-    }
-
     @ViewBuilder
-    private func draftAttachmentPreview(_ attachment: DraftAttachment) -> some View {
-        ZStack(alignment: .topTrailing) {
-            if attachment.isImage {
-                CachedDiskImage(path: attachment.url.path, maxPixel: 360, contentMode: .fill) {
+    private func pendingFileSendPanel(_ file: PendingFileSend) -> some View {
+        HStack(spacing: 10) {
+            if file.isImage {
+                CachedDiskImage(path: file.url.path, maxPixel: 360, contentMode: .fill) {
                     Image(systemName: "photo")
                         .font(.title2)
                         .foregroundStyle(.secondary)
@@ -724,44 +707,54 @@ struct ChatView: View {
                 .frame(width: 76, height: 76)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             } else {
-                HStack(spacing: 10) {
-                    Image(systemName: "doc.fill")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 32)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(attachment.name)
-                            .font(.subheadline.weight(.medium))
-                            .lineLimit(1)
-                        if !attachment.sizeLabel.isEmpty {
-                            Text(attachment.sizeLabel)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                }
-                .frame(width: 190, height: 76)
-                .padding(.horizontal, 12)
-                .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                Image(systemName: "doc.fill")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 76, height: 76)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 16))
             }
 
+            VStack(alignment: .leading, spacing: 3) {
+                Text(file.name)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                if !file.sizeLabel.isEmpty {
+                    Text(file.sizeLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             Button {
-                removeDraftAttachment(attachment)
+                cancelPendingFileSend()
             } label: {
-                Image(systemName: "xmark.circle.fill")
+                Image(systemName: "xmark")
                     .font(.title3)
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(Color.secondary, Color(.systemBackground))
-                    .frame(width: 32, height: 32)
-                    .contentShape(Circle())
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .contentShape(.circle)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Remove \(attachment.name)")
-            .offset(x: 8, y: -8)
+            .accessibilityLabel("Cancel \(file.name)")
+
+            Button {
+                confirmPendingFileSend()
+            } label: {
+                Image(systemName: "paperplane.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.tint(.blue).interactive(), in: Circle())
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Send \(file.name)")
         }
+        .padding(.horizontal, 14)
         .padding(.top, 8)
-        .padding(.trailing, 8)
+        .padding(.bottom, 4)
     }
 
     /// A dismissable banner (typing reply/edit context) shown above the input.
@@ -912,17 +905,24 @@ struct ChatView: View {
         .buttonStyle(.plain)
     }
 
-    private func addDraftAttachment(_ url: URL) {
+    private func setPendingFileSend(_ url: URL) {
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-            draftAttachments.append(DraftAttachment(url: url))
-            showSend = true
+            pendingFileSend = PendingFileSend(url: url)
         }
     }
 
-    private func removeDraftAttachment(_ attachment: DraftAttachment) {
+    private func cancelPendingFileSend() {
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-            draftAttachments.removeAll { $0.id == attachment.id }
-            showSend = shouldShowSendButton
+            pendingFileSend = nil
+        }
+    }
+
+    private func confirmPendingFileSend() {
+        guard let pendingFileSend else { return }
+        scrollToBottomToken &+= 1
+        model.sendFile(conversationId, path: pendingFileSend.url.path)
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+            self.pendingFileSend = nil
         }
     }
 
@@ -932,23 +932,17 @@ struct ChatView: View {
             model.correctMessage(conversationId, item: editing.id, body: draft)
             self.editing = nil
             draft = ""
-            draftAttachments = []
             showSend = false
             model.setTyping(conversationId, false)
             return
         }
 
         let body = draft
-        let attachments = draftAttachments
         if !body.isEmpty {
             model.send(conversationId, body, replyTo: replyingTo?.id ?? 0)
         }
-        for attachment in attachments {
-            model.sendFile(conversationId, path: attachment.url.path)
-        }
         replyingTo = nil
         draft = ""
-        draftAttachments = []
         showSend = false
         model.setTyping(conversationId, false)
     }
@@ -966,7 +960,7 @@ struct ChatView: View {
             },
             onEdit: m.editable ? {
                 replyingTo = nil
-                draftAttachments = []
+                pendingFileSend = nil
                 editing = m
                 draft = m.body
             } : nil)
@@ -989,7 +983,7 @@ struct ChatView: View {
             scrollToBottomToken: scrollToBottomToken,
             onEdit: { m in
                 replyingTo = nil
-                draftAttachments = []
+                pendingFileSend = nil
                 editing = m
                 draft = m.body
             },
@@ -1333,7 +1327,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker { url in
-                addDraftAttachment(url)
+                setPendingFileSend(url)
             }
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
@@ -1343,7 +1337,7 @@ struct ChatView: View {
                     .appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent)
                 try? FileManager.default.removeItem(at: dest)
                 if (try? FileManager.default.copyItem(at: url, to: dest)) != nil {
-                    addDraftAttachment(dest)
+                    setPendingFileSend(dest)
                 }
                 if scoped { url.stopAccessingSecurityScopedResource() }
             }
