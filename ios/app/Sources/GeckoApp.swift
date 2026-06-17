@@ -617,6 +617,7 @@ struct ChatView: View {
     @State private var scrollToBottomToken = 0
     @State private var viewerItem: ImageViewerItem?
     @State private var composerHeight: CGFloat = 0
+    @State private var keyboardOverlap: CGFloat = 0
     @State private var draftAttachments: [DraftAttachment] = []
 
     private var conversation: XmppConversation? {
@@ -971,7 +972,11 @@ struct ChatView: View {
             } : nil)
     }
 
-    private func messageList(topChromeInset: CGFloat, bottomChromeInset: CGFloat) -> some View {
+    private func messageList(
+        topChromeInset: CGFloat,
+        bottomChromeInset: CGFloat,
+        scrollButtonBottomPadding: CGFloat
+    ) -> some View {
         InvertedMessageList(
             messages: chatMessages,
             conversationId: conversationId,
@@ -995,7 +1000,7 @@ struct ChatView: View {
         .ignoresSafeArea(.container, edges: .vertical)
         .overlay(alignment: .bottomTrailing) {
             if !isAtBottom {
-                scrollDownButton(bottomChromeInset: bottomChromeInset)
+                scrollDownButton(bottomPadding: scrollButtonBottomPadding)
             }
         }
         .animation(.snappy(duration: 0.2), value: isAtBottom)
@@ -1005,6 +1010,34 @@ struct ChatView: View {
         let toolbarHeight = max(composerHeight, composerControlHeight + composerInputVerticalPadding * 2)
         let transparentTopOverlap = hasComposerAccessory ? 0 : composerInputVerticalPadding
         return safeAreaBottom + toolbarHeight - transparentTopOverlap + composerMessageClearance
+    }
+
+    private func chromeSafeAreaBottom(from safeAreaBottom: CGFloat) -> CGFloat {
+        max(0, safeAreaBottom - keyboardOverlap)
+    }
+
+    private func scrollButtonBottomPadding(bottomChromeInset: CGFloat) -> CGFloat {
+        if keyboardOverlap > 0 {
+            let toolbarHeight = max(composerHeight, composerControlHeight + composerInputVerticalPadding * 2)
+            return toolbarHeight + composerInputVerticalPadding
+        }
+        return max(0, bottomChromeInset - composerInputVerticalPadding)
+    }
+
+    private func updateKeyboardOverlap(from note: Notification) {
+        guard
+            let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+            let window = scene.windows.first(where: \.isKeyWindow),
+            let screenFrame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        else {
+            keyboardOverlap = 0
+            return
+        }
+
+        let frame = window.convert(screenFrame, from: nil)
+        let overlap = window.bounds.intersection(frame)
+        let coversBottom = !overlap.isNull && overlap.maxY >= window.bounds.maxY - 1
+        keyboardOverlap = coversBottom ? overlap.height : 0
     }
 
     private func topChromeInset(safeAreaTop: CGFloat) -> CGFloat {
@@ -1032,9 +1065,8 @@ struct ChatView: View {
         .allowsHitTesting(false)
     }
 
-    private func scrollDownButton(bottomChromeInset: CGFloat) -> some View {
-        let bottomPadding = max(0, bottomChromeInset - composerInputVerticalPadding)
-        return Button {
+    private func scrollDownButton(bottomPadding: CGFloat) -> some View {
+        Button {
             scrollToBottomToken &+= 1   // the inverted table glides to row 0
         } label: {
             Image(systemName: "chevron.down")
@@ -1257,8 +1289,12 @@ struct ChatView: View {
     var body: some View {
         GeometryReader { geo in
             let topInset = topChromeInset(safeAreaTop: geo.safeAreaInsets.top)
-            let bottomInset = bottomChromeInset(safeAreaBottom: geo.safeAreaInsets.bottom)
-            messageList(topChromeInset: topInset, bottomChromeInset: bottomInset)
+            let bottomInset = bottomChromeInset(
+                safeAreaBottom: chromeSafeAreaBottom(from: geo.safeAreaInsets.bottom))
+            messageList(
+                topChromeInset: topInset,
+                bottomChromeInset: bottomInset,
+                scrollButtonBottomPadding: scrollButtonBottomPadding(bottomChromeInset: bottomInset))
                 // Tap anywhere in the chat to dismiss the attach expander (the
                 // system Menu used to give this for free). The composer itself is
                 // added as a later overlay so the plus/X and options stay tappable.
@@ -1284,6 +1320,16 @@ struct ChatView: View {
                         composerHeight = height
                     }
                 }
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIResponder.keyboardWillChangeFrameNotification
+        )) { note in
+            updateKeyboardOverlap(from: note)
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIResponder.keyboardWillHideNotification
+        )) { _ in
+            keyboardOverlap = 0
         }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker { url in
