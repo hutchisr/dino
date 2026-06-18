@@ -98,6 +98,7 @@ xcrun -sdk "$SDK" swiftc \
 
 cp "$HERE/Info.plist" "$APP/Info.plist"
 add_build_metadata "$APP/Info.plist"
+plutil -replace UIDeviceFamily -json '[1]' "$APP/Info.plist"
 # App icon: compile an asset catalog (actool) so the bundle ships Assets.car +
 # CFBundleIconName, which the App Store requires (loose PNGs aren't accepted). A
 # single 1024px universal icon lets actool rasterize every size it needs.

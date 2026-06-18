@@ -61,7 +61,8 @@ work here" companion.
 | `ios/app/Sources/` | The SwiftUI app. `GeckoApp.swift` (views, ~3k lines), `Model.swift` (`AppModel`, event decode, `ChatMessage`), plus per-screen files. |
 | `ios/app/GeckoKit/` | SwiftPM package of **pure, dependency-free helpers** — unit-tested on the host. See below. |
 | `ios/app/GeckoXMPP/` | **Scaffold only** (empty `Core/`, `Stanza/`). Reserved for in-progress clean-room/native-Swift XMPP work; nothing depends on it yet. |
-| `ios/app/build-app.sh` | Builds `Gecko.app` with plain `swiftc` (no Xcode project). `run` installs+launches in the Simulator. |
+| `Gecko.xcodeproj` | Xcode-managed app + Notification Service Extension targets that link against `ios/prefix/<target>`. |
+| `ios/app/build-app.sh` | Builds `Gecko.app` with plain `swiftc` for scripted builds/deploys. `run` installs+launches in the Simulator. |
 | `ios/app/deploy-phone.sh` | Build + re-sign + install on a physical iPhone via `devicectl`. |
 | `ios/app/deploy-testflight.sh` | Archive + upload to TestFlight. |
 | `ios/nse/` | Notification Service Extension — on-device push decrypt/filter (`NotificationService.swift`, `NSEFetcher.swift`). |

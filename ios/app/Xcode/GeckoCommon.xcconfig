@@ -1,0 +1,28 @@
+// Shared Xcode settings for the Gecko app and notification service extension.
+//
+// The Vala/GLib core still comes from ios/build-deps.sh + ios/build-core.sh.
+// Xcode chooses ios/prefix/sim-arm64 or ios/prefix/device-arm64 from the SDK.
+
+DEVELOPMENT_TEAM = 998J34UYP5
+CODE_SIGN_STYLE = Automatic
+MARKETING_VERSION = 0.1
+CURRENT_PROJECT_VERSION = 1
+IPHONEOS_DEPLOYMENT_TARGET = 26.0
+SUPPORTED_PLATFORMS = iphoneos iphonesimulator
+SUPPORTS_MACCATALYST = NO
+SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO
+TARGETED_DEVICE_FAMILY = 1
+ARCHS = arm64
+SWIFT_VERSION = 5.0
+CLANG_ENABLE_MODULES = YES
+ENABLE_BITCODE = NO
+
+GECKO_CORE_TARGET = device-arm64
+GECKO_CORE_TARGET[sdk=iphonesimulator*] = sim-arm64
+GECKO_CORE_PREFIX = $(SRCROOT)/ios/prefix/$(GECKO_CORE_TARGET)
+
+SWIFT_OBJC_BRIDGING_HEADER = $(SRCROOT)/ios/app/bridge.h
+HEADER_SEARCH_PATHS = $(inherited) $(GECKO_CORE_PREFIX)/include $(GECKO_CORE_PREFIX)/include/gee-0.8 $(GECKO_CORE_PREFIX)/include/gdk-pixbuf-2.0 $(GECKO_CORE_PREFIX)/include/libpng16 $(GECKO_CORE_PREFIX)/include/glib-2.0 $(GECKO_CORE_PREFIX)/lib/glib-2.0/include
+LIBRARY_SEARCH_PATHS = $(inherited) $(GECKO_CORE_PREFIX)/lib $(GECKO_CORE_PREFIX)/lib/gio/modules $(GECKO_CORE_PREFIX)/lib/dino/plugins
+OTHER_CFLAGS = $(inherited) -DFFI_STATIC_BUILD -DG_INTL_STATIC_COMPILATION -DPCRE2_STATIC
+OTHER_LDFLAGS = $(inherited) -ldinoios -ldino -lxmpp-vala -lqlite -lcrypto-vala -Xlinker -force_load -Xlinker $(GECKO_CORE_PREFIX)/lib/dino/plugins/omemo.a -Xlinker -force_load -Xlinker $(GECKO_CORE_PREFIX)/lib/dino/plugins/http-files.a -lsoup-3.0 -lnghttp2 -lsqlite3 -lpsl -lgee-0.8 -lgdk_pixbuf-2.0 -lpng16 -lgioopenssl -framework Security -lgio-2.0 -lz -lresolv -lgmodule-2.0 -lgobject-2.0 -lffi -lglib-2.0 -lintl -liconv -lm -lpcre2-8 -lssl -lcrypto -lgcrypt -lgpg-error -lomemo-c -lprotobuf-c -lsrtp2

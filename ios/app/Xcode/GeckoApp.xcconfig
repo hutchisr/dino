@@ -1,0 +1,7 @@
+#include "GeckoCommon.xcconfig"
+
+PRODUCT_NAME = Gecko
+PRODUCT_BUNDLE_IDENTIFIER = me.anemoneya.gecko
+INFOPLIST_FILE = ios/app/Info.plist
+CODE_SIGN_ENTITLEMENTS = ios/app/Gecko.entitlements
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon

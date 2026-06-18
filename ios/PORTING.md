@@ -53,7 +53,7 @@ Known gaps / not done:
 | `build-deps.sh` | Cross-compiles the dependency stack into `prefix/<target>`: GLib (+libffi, pcre2, proxy-libintl), libgee, gdk-pixbuf (+libpng), OpenSSL, glib-networking, libgpg-error, libgcrypt, protobuf-c, libomemo-c, libsrtp2, libpsl, libsoup3 (+nghttp2). Generates the Meson cross file. |
 | `build-core.sh` | Builds Dino (core + crypto-vala + omemo + http-files plugins + the bridge) against that prefix: `-Dui=disabled -Dicu=disabled -Dios-bridge=enabled -Dplugin-omemo=enabled -Dplugin-http-files=enabled`. |
 | `bridge/` | `dino_ios.vala`: boots a non-GTK `Dino.Application`, registers the statically linked plugins, and exposes a C API (`dinoios.h`) — events flow to Swift as JSON lines on a single callback. `tls_glue.c` statically registers the OpenSSL GIO TLS backend. |
-| `app/` | SwiftUI app (account setup, conversation list, chat view with OMEMO toggle). `build-app.sh` builds `DinoPoc.app` with plain `swiftc` (no Xcode project) and can install + launch it in the Simulator. |
+| `app/` | SwiftUI app (account setup, conversation list, chat view with OMEMO toggle). `../Gecko.xcodeproj` lets Xcode manage/build the app + notification service extension against the existing `ios/prefix/<target>` static core; `build-app.sh` remains the scriptable `swiftc` build/deploy path. |
 | `compat/ios-compat.h` | Declares symbols (`pipe2`, `dup3`, `getentropy`) that recent iOS SDKs export from libSystem but hide in headers, which otherwise breaks autoconf/Meson feature detection. |
 
 ## Reproduce
@@ -63,6 +63,10 @@ ios/build-deps.sh sim-arm64        # ~15 min, downloads sources
 ios/build-core.sh sim-arm64
 ios/app/build-app.sh run           # boots an iPhone simulator
 ```
+
+Or open `Gecko.xcodeproj` in Xcode and build the shared `Gecko` scheme. The
+scheme expects the matching static core prefix to exist first
+(`ios/prefix/sim-arm64` for Simulator, `ios/prefix/device-arm64` for device).
 
 The app supports headless automation for testing via environment variables
 (set through `SIMCTL_CHILD_*`): `DINO_AUTOLOGIN=jid:password`,

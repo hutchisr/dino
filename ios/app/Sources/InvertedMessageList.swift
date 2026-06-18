@@ -56,7 +56,9 @@ struct InvertedMessageList: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> ChatListController {
         let controller = ChatListController()
         controller.onIsAtBottomChanged = { [weak coordinator = context.coordinator] atBottom in
-            coordinator?.parent.isAtBottom = atBottom
+            DispatchQueue.main.async {
+                coordinator?.setIsAtBottom(atBottom)
+            }
         }
         return controller
     }
@@ -83,9 +85,27 @@ struct InvertedMessageList: UIViewControllerRepresentable {
     final class Coordinator {
         var parent: InvertedMessageList
         var lastScrollToken: Int
+        private var pendingIsAtBottom: Bool?
+        private var isAtBottomUpdateScheduled = false
+
         init(_ parent: InvertedMessageList) {
             self.parent = parent
             self.lastScrollToken = parent.scrollToBottomToken
+        }
+
+        func setIsAtBottom(_ atBottom: Bool) {
+            pendingIsAtBottom = atBottom
+            guard !isAtBottomUpdateScheduled else { return }
+
+            isAtBottomUpdateScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let atBottom = self.pendingIsAtBottom else { return }
+                self.pendingIsAtBottom = nil
+                self.isAtBottomUpdateScheduled = false
+                if self.parent.isAtBottom != atBottom {
+                    self.parent.isAtBottom = atBottom
+                }
+            }
         }
     }
 }

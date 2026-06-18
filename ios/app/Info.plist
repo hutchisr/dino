@@ -28,10 +28,6 @@
 	<string>26.0</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save received images to your photo library.</string>
-	<key>UIDeviceFamily</key>
-	<array>
-		<integer>1</integer>
-	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
