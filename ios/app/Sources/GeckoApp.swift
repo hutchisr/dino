@@ -1155,6 +1155,8 @@ struct ChatView: View {
     private func messageList(
         topChromeInset: CGFloat,
         bottomChromeInset: CGFloat,
+        scrollIndicatorTopInset: CGFloat,
+        scrollIndicatorBottomInset: CGFloat,
         scrollButtonBottomPadding: CGFloat
     ) -> some View {
         InvertedMessageList(
@@ -1164,6 +1166,8 @@ struct ChatView: View {
             avatarPaths: model.avatars,
             visualTopInset: topChromeInset,
             visualBottomInset: bottomChromeInset,
+            visualScrollIndicatorTopInset: scrollIndicatorTopInset,
+            visualScrollIndicatorBottomInset: scrollIndicatorBottomInset,
             model: model,
             isAtBottom: $isAtBottom,
             scrollToBottomToken: scrollToBottomToken,
@@ -1190,6 +1194,16 @@ struct ChatView: View {
         let toolbarHeight = max(composerHeight, composerControlHeight + composerInputVerticalPadding * 2)
         let transparentTopOverlap = hasComposerAccessory ? 0 : composerInputVerticalPadding
         return safeAreaBottom + toolbarHeight - transparentTopOverlap + composerMessageClearance
+    }
+
+    private func scrollIndicatorBottomInset() -> CGFloat {
+        let toolbarHeight = max(composerHeight, composerControlHeight + composerInputVerticalPadding * 2)
+        let transparentTopOverlap = hasComposerAccessory ? 0 : composerInputVerticalPadding
+        return max(0, toolbarHeight - transparentTopOverlap - composerInputVerticalPadding)
+    }
+
+    private func scrollIndicatorTopInset(safeAreaTop: CGFloat) -> CGFloat {
+        max(0, topChromeInset(safeAreaTop: safeAreaTop) - topToolbarVerticalPadding)
     }
 
     private func chromeSafeAreaBottom(from safeAreaBottom: CGFloat) -> CGFloat {
@@ -1469,11 +1483,15 @@ struct ChatView: View {
     var body: some View {
         GeometryReader { geo in
             let topInset = topChromeInset(safeAreaTop: geo.safeAreaInsets.top)
-            let bottomInset = bottomChromeInset(
-                safeAreaBottom: chromeSafeAreaBottom(from: geo.safeAreaInsets.bottom))
+            let chromeSafeAreaBottom = chromeSafeAreaBottom(from: geo.safeAreaInsets.bottom)
+            let bottomInset = bottomChromeInset(safeAreaBottom: chromeSafeAreaBottom)
+            let indicatorTopInset = scrollIndicatorTopInset(safeAreaTop: geo.safeAreaInsets.top)
+            let indicatorBottomInset = scrollIndicatorBottomInset()
             messageList(
                 topChromeInset: topInset,
                 bottomChromeInset: bottomInset,
+                scrollIndicatorTopInset: indicatorTopInset,
+                scrollIndicatorBottomInset: indicatorBottomInset,
                 scrollButtonBottomPadding: scrollButtonBottomPadding(bottomChromeInset: bottomInset))
                 // Tap anywhere in the chat to dismiss the attach expander (the
                 // system Menu used to give this for free). The composer itself is

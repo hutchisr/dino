@@ -7,26 +7,26 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B1872E1853A14959B41C6F76 /* AccountSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80496BD1D274570886D3D80 /* AccountSettings.swift */; };
-		B7ADDE41EBF745308582B887 /* BlockedContactsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C377EE663CA4986A7BD5314 /* BlockedContactsView.swift */; };
-		67D47FF8799E4FC7B8C5DFF1 /* DisplayFormatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = D928D500119B41A89B21FCEA /* DisplayFormatters.swift */; };
-		BC08A0C6135F49AFB5C4B2BD /* GeckoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF917E5E610B459F97F0C3BC /* GeckoApp.swift */; };
-		DA4CF9FE6B114B4DAA0E7C47 /* GeckoCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92F01BFA770407E89F9FDCF /* GeckoCore.swift */; };
-		F4F596488EF94917BA9FBF9C /* ImageViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87D35A637B324B49AA316922 /* ImageViewer.swift */; };
-		A0B32992BB1249CA8CF803EE /* InvertedMessageList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6942FA09807F4B429F97DB11 /* InvertedMessageList.swift */; };
-		E59885895E7C47EEAA461FA8 /* MemberDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86567832A6D1414586650107 /* MemberDetailView.swift */; };
 		00BECDA74D904337B8849545 /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC12B7DE8DF54966B1F7BB2D /* Model.swift */; };
-		F0411967E7AD452192EB9EA2 /* PhotoPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8841F1B93DC4153BCB80974 /* PhotoPicker.swift */; };
-		CE3C9C26CEF745BABEE94D68 /* PushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C8134A3F324831958C4628 /* PushRegistration.swift */; };
-		B674DCCC40514D13928F9F65 /* ReactionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C1D9EA0EDF44844A6F4B60E /* ReactionSheet.swift */; };
 		271BF8F58BAA41B092051CD9 /* RoomDetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B7F5BB0DF3E44EC8A5E8710 /* RoomDetailsView.swift */; };
-		E1060F31A33848E8A17F81BE /* ImageEncoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 583D2717B8994C76AABDE233 /* ImageEncoding.swift */; };
 		3933FB16B1CB49598388D85B /* ImageThumbnail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38386EE938FC4181A3DA8C74 /* ImageThumbnail.swift */; };
-		6C8B8E0B889046EE97952996 /* MessageFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0556F003C354589BE42AF2E /* MessageFormatting.swift */; };
-		65A181F9AA764BE488175CB1 /* NSEFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = EECED66A6D7B48228F265456 /* NSEFetcher.swift */; };
-		E4C1AE7D0AE04A0F927BCF1F /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45C570219B83445983AADDE0 /* NotificationService.swift */; };
 		3ACEF0702F234BC595A306EB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 283D9FF3CA014F1B9E429C76 /* Assets.xcassets */; };
-		555537F240C2471387A1786F /* NotificationService.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 2D7C0FD9534344FE87A8D88B /* NotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		555537F240C2471387A1786F /* NotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2D7C0FD9534344FE87A8D88B /* NotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		65A181F9AA764BE488175CB1 /* NSEFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = EECED66A6D7B48228F265456 /* NSEFetcher.swift */; };
+		67D47FF8799E4FC7B8C5DFF1 /* DisplayFormatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = D928D500119B41A89B21FCEA /* DisplayFormatters.swift */; };
+		6C8B8E0B889046EE97952996 /* MessageFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0556F003C354589BE42AF2E /* MessageFormatting.swift */; };
+		A0B32992BB1249CA8CF803EE /* InvertedMessageList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6942FA09807F4B429F97DB11 /* InvertedMessageList.swift */; };
+		B1872E1853A14959B41C6F76 /* AccountSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80496BD1D274570886D3D80 /* AccountSettings.swift */; };
+		B674DCCC40514D13928F9F65 /* ReactionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C1D9EA0EDF44844A6F4B60E /* ReactionSheet.swift */; };
+		B7ADDE41EBF745308582B887 /* BlockedContactsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C377EE663CA4986A7BD5314 /* BlockedContactsView.swift */; };
+		BC08A0C6135F49AFB5C4B2BD /* GeckoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF917E5E610B459F97F0C3BC /* GeckoApp.swift */; };
+		CE3C9C26CEF745BABEE94D68 /* PushRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C8134A3F324831958C4628 /* PushRegistration.swift */; };
+		DA4CF9FE6B114B4DAA0E7C47 /* GeckoCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92F01BFA770407E89F9FDCF /* GeckoCore.swift */; };
+		E1060F31A33848E8A17F81BE /* ImageEncoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 583D2717B8994C76AABDE233 /* ImageEncoding.swift */; };
+		E4C1AE7D0AE04A0F927BCF1F /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45C570219B83445983AADDE0 /* NotificationService.swift */; };
+		E59885895E7C47EEAA461FA8 /* MemberDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86567832A6D1414586650107 /* MemberDetailView.swift */; };
+		F0411967E7AD452192EB9EA2 /* PhotoPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8841F1B93DC4153BCB80974 /* PhotoPicker.swift */; };
+		F4F596488EF94917BA9FBF9C /* ImageViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87D35A637B324B49AA316922 /* ImageViewer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -40,60 +40,60 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		3C920AC5785D4AB38681ACD8 /* Embed App Extensions */ = {
+		3C920AC5785D4AB38681ACD8 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				555537F240C2471387A1786F /* NotificationService.appex in Embed App Extensions */,
+				555537F240C2471387A1786F /* NotificationService.appex in Embed Foundation Extensions */,
 			);
-			name = "Embed App Extensions";
+			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		54E4E5F8F02544428CAE3875 /* Gecko.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Gecko.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		2D7C0FD9534344FE87A8D88B /* NotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		C80496BD1D274570886D3D80 /* AccountSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettings.swift; sourceTree = "<group>"; };
-		6C377EE663CA4986A7BD5314 /* BlockedContactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockedContactsView.swift; sourceTree = "<group>"; };
-		D928D500119B41A89B21FCEA /* DisplayFormatters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayFormatters.swift; sourceTree = "<group>"; };
-		DF917E5E610B459F97F0C3BC /* GeckoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeckoApp.swift; sourceTree = "<group>"; };
-		D92F01BFA770407E89F9FDCF /* GeckoCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeckoCore.swift; sourceTree = "<group>"; };
-		87D35A637B324B49AA316922 /* ImageViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageViewer.swift; sourceTree = "<group>"; };
-		6942FA09807F4B429F97DB11 /* InvertedMessageList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvertedMessageList.swift; sourceTree = "<group>"; };
-		86567832A6D1414586650107 /* MemberDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemberDetailView.swift; sourceTree = "<group>"; };
-		BC12B7DE8DF54966B1F7BB2D /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
-		B8841F1B93DC4153BCB80974 /* PhotoPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPicker.swift; sourceTree = "<group>"; };
-		38C8134A3F324831958C4628 /* PushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistration.swift; sourceTree = "<group>"; };
-		1C1D9EA0EDF44844A6F4B60E /* ReactionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactionSheet.swift; sourceTree = "<group>"; };
-		7B7F5BB0DF3E44EC8A5E8710 /* RoomDetailsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomDetailsView.swift; sourceTree = "<group>"; };
-		583D2717B8994C76AABDE233 /* ImageEncoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageEncoding.swift; sourceTree = "<group>"; };
-		38386EE938FC4181A3DA8C74 /* ImageThumbnail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageThumbnail.swift; sourceTree = "<group>"; };
-		A0556F003C354589BE42AF2E /* MessageFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFormatting.swift; sourceTree = "<group>"; };
-		EECED66A6D7B48228F265456 /* NSEFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSEFetcher.swift; sourceTree = "<group>"; };
-		45C570219B83445983AADDE0 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
-		283D9FF3CA014F1B9E429C76 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		01F2E090870346138A09A1B7 /* bridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bridge.h; sourceTree = "<group>"; };
-		990D71EE09944E7AA9927B6C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		10A56DCB1B15485FAE84B1BF /* Gecko.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Gecko.entitlements; sourceTree = "<group>"; };
-		CA95354F18644AA088A235D8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		78AE92F169944F9D9A10CA6E /* NotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NotificationService.entitlements; sourceTree = "<group>"; };
-		88C0F2897A8749BAAF29D828 /* GeckoCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = GeckoCommon.xcconfig; sourceTree = "<group>"; };
+		1C1D9EA0EDF44844A6F4B60E /* ReactionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactionSheet.swift; sourceTree = "<group>"; };
+		283D9FF3CA014F1B9E429C76 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		2D7C0FD9534344FE87A8D88B /* NotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		3611CDF8792E4032A9CA8E9F /* GeckoApp.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = GeckoApp.xcconfig; sourceTree = "<group>"; };
+		38386EE938FC4181A3DA8C74 /* ImageThumbnail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageThumbnail.swift; sourceTree = "<group>"; };
+		38C8134A3F324831958C4628 /* PushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistration.swift; sourceTree = "<group>"; };
+		45C570219B83445983AADDE0 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
+		54E4E5F8F02544428CAE3875 /* Gecko.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Gecko.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		583D2717B8994C76AABDE233 /* ImageEncoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageEncoding.swift; sourceTree = "<group>"; };
+		6942FA09807F4B429F97DB11 /* InvertedMessageList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvertedMessageList.swift; sourceTree = "<group>"; };
+		6C377EE663CA4986A7BD5314 /* BlockedContactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockedContactsView.swift; sourceTree = "<group>"; };
+		78AE92F169944F9D9A10CA6E /* NotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NotificationService.entitlements; sourceTree = "<group>"; };
+		7B7F5BB0DF3E44EC8A5E8710 /* RoomDetailsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomDetailsView.swift; sourceTree = "<group>"; };
+		86567832A6D1414586650107 /* MemberDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemberDetailView.swift; sourceTree = "<group>"; };
+		87D35A637B324B49AA316922 /* ImageViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageViewer.swift; sourceTree = "<group>"; };
+		88C0F2897A8749BAAF29D828 /* GeckoCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = GeckoCommon.xcconfig; sourceTree = "<group>"; };
+		990D71EE09944E7AA9927B6C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A0556F003C354589BE42AF2E /* MessageFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFormatting.swift; sourceTree = "<group>"; };
+		B8841F1B93DC4153BCB80974 /* PhotoPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPicker.swift; sourceTree = "<group>"; };
+		BC12B7DE8DF54966B1F7BB2D /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
 		BC7D857E140F487AABAAD463 /* NotificationService.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = NotificationService.xcconfig; sourceTree = "<group>"; };
+		C80496BD1D274570886D3D80 /* AccountSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettings.swift; sourceTree = "<group>"; };
+		CA95354F18644AA088A235D8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		D928D500119B41A89B21FCEA /* DisplayFormatters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayFormatters.swift; sourceTree = "<group>"; };
+		D92F01BFA770407E89F9FDCF /* GeckoCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeckoCore.swift; sourceTree = "<group>"; };
+		DF917E5E610B459F97F0C3BC /* GeckoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeckoApp.swift; sourceTree = "<group>"; };
+		EECED66A6D7B48228F265456 /* NSEFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSEFetcher.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		FBD3E6C04AB74D67B1F17F62 /* Frameworks */ = {
+		57027478519A466392F207AE /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		57027478519A466392F207AE /* Frameworks */ = {
+		FBD3E6C04AB74D67B1F17F62 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -103,13 +103,24 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		B35DD798FA454C2DB674A63C = {
+		326619595CB94675BE434947 /* Xcode */ = {
 			isa = PBXGroup;
 			children = (
-				F839A99D21B243F6A1CBF227 /* ios/app */,
-				EF9EF84CF40648D5ABFD42A0 /* ios/nse */,
-				841D6DD1A69B405CBFE27820 /* Products */,
+				88C0F2897A8749BAAF29D828 /* GeckoCommon.xcconfig */,
+				3611CDF8792E4032A9CA8E9F /* GeckoApp.xcconfig */,
+				BC7D857E140F487AABAAD463 /* NotificationService.xcconfig */,
 			);
+			path = Xcode;
+			sourceTree = "<group>";
+		};
+		37BE050813A4493DBBE8EAEC /* GeckoKit/Sources/GeckoKit */ = {
+			isa = PBXGroup;
+			children = (
+				583D2717B8994C76AABDE233 /* ImageEncoding.swift */,
+				38386EE938FC4181A3DA8C74 /* ImageThumbnail.swift */,
+				A0556F003C354589BE42AF2E /* MessageFormatting.swift */,
+			);
+			path = GeckoKit/Sources/GeckoKit;
 			sourceTree = "<group>";
 		};
 		841D6DD1A69B405CBFE27820 /* Products */ = {
@@ -121,18 +132,13 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		F839A99D21B243F6A1CBF227 /* ios/app */ = {
+		B35DD798FA454C2DB674A63C = {
 			isa = PBXGroup;
 			children = (
-				E64F6FA9F6BD468187FD5D32 /* Sources */,
-				37BE050813A4493DBBE8EAEC /* GeckoKit */,
-				326619595CB94675BE434947 /* Xcode */,
-				283D9FF3CA014F1B9E429C76 /* Assets.xcassets */,
-				01F2E090870346138A09A1B7 /* bridge.h */,
-				990D71EE09944E7AA9927B6C /* Info.plist */,
-				10A56DCB1B15485FAE84B1BF /* Gecko.entitlements */,
+				F839A99D21B243F6A1CBF227 /* ios/app */,
+				EF9EF84CF40648D5ABFD42A0 /* ios/nse */,
+				841D6DD1A69B405CBFE27820 /* Products */,
 			);
-			path = ios/app;
 			sourceTree = "<group>";
 		};
 		E64F6FA9F6BD468187FD5D32 /* Sources */ = {
@@ -155,26 +161,6 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
-		37BE050813A4493DBBE8EAEC /* GeckoKit */ = {
-			isa = PBXGroup;
-			children = (
-				583D2717B8994C76AABDE233 /* ImageEncoding.swift */,
-				38386EE938FC4181A3DA8C74 /* ImageThumbnail.swift */,
-				A0556F003C354589BE42AF2E /* MessageFormatting.swift */,
-			);
-			path = GeckoKit/Sources/GeckoKit;
-			sourceTree = "<group>";
-		};
-		326619595CB94675BE434947 /* Xcode */ = {
-			isa = PBXGroup;
-			children = (
-				88C0F2897A8749BAAF29D828 /* GeckoCommon.xcconfig */,
-				3611CDF8792E4032A9CA8E9F /* GeckoApp.xcconfig */,
-				BC7D857E140F487AABAAD463 /* NotificationService.xcconfig */,
-			);
-			path = Xcode;
-			sourceTree = "<group>";
-		};
 		EF9EF84CF40648D5ABFD42A0 /* ios/nse */ = {
 			isa = PBXGroup;
 			children = (
@@ -184,6 +170,20 @@
 				78AE92F169944F9D9A10CA6E /* NotificationService.entitlements */,
 			);
 			path = ios/nse;
+			sourceTree = "<group>";
+		};
+		F839A99D21B243F6A1CBF227 /* ios/app */ = {
+			isa = PBXGroup;
+			children = (
+				E64F6FA9F6BD468187FD5D32 /* Sources */,
+				37BE050813A4493DBBE8EAEC /* GeckoKit/Sources/GeckoKit */,
+				326619595CB94675BE434947 /* Xcode */,
+				283D9FF3CA014F1B9E429C76 /* Assets.xcassets */,
+				01F2E090870346138A09A1B7 /* bridge.h */,
+				990D71EE09944E7AA9927B6C /* Info.plist */,
+				10A56DCB1B15485FAE84B1BF /* Gecko.entitlements */,
+			);
+			path = ios/app;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -196,7 +196,7 @@
 				BAC6D4659F824EFEA45A8E11 /* Sources */,
 				FBD3E6C04AB74D67B1F17F62 /* Frameworks */,
 				8437BBE24326448585C282EA /* Resources */,
-				3C920AC5785D4AB38681ACD8 /* Embed App Extensions */,
+				3C920AC5785D4AB38681ACD8 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
@@ -232,7 +232,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastUpgradeCheck = 2600;
+				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					05DD7C8D096A4936B5D1AFEE = {
 						CreatedOnToolsVersion = 26.0;
@@ -266,6 +266,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		406A575D023B4846B54E29AA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		8437BBE24326448585C282EA /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -274,16 +281,18 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		406A575D023B4846B54E29AA /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		45278C6B09974A87A199D39C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				65A181F9AA764BE488175CB1 /* NSEFetcher.swift in Sources */,
+				E4C1AE7D0AE04A0F927BCF1F /* NotificationService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		BAC6D4659F824EFEA45A8E11 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -307,15 +316,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		45278C6B09974A87A199D39C /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				65A181F9AA764BE488175CB1 /* NSEFetcher.swift in Sources */,
-				E4C1AE7D0AE04A0F927BCF1F /* NotificationService.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -327,62 +327,6 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		BD4C3628DA6E4118876F108E /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-				CLANG_WARN_BOOL_CONVERSION = YES;
-				CLANG_WARN_COMMA = YES;
-				CLANG_WARN_CONSTANT_CONVERSION = YES;
-				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN_ENUM_CONVERSION = YES;
-				CLANG_WARN_INFINITE_RECURSION = YES;
-				CLANG_WARN_INT_CONVERSION = YES;
-				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-				CLANG_WARN_STRICT_PROTOTYPES = YES;
-				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CLANG_WARN_UNREACHABLE_CODE = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = dwarf;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_TESTABILITY = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu17;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-				GCC_WARN_UNDECLARED_SELECTOR = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-				GCC_WARN_UNUSED_FUNCTION = YES;
-				GCC_WARN_UNUSED_VARIABLE = YES;
-				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
-				MTL_FAST_MATH = YES;
-				ONLY_ACTIVE_ARCH = YES;
-				SDKROOT = iphoneos;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-			};
-			name = Debug;
-		};
 		3E32042C96654F0F933D9ACE /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -416,6 +360,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -427,23 +372,17 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
 		};
-		D4D9667421A543EE9F398419 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			baseConfigurationReference = 3611CDF8792E4032A9CA8E9F /* GeckoApp.xcconfig */;
-			buildSettings = {
-				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-			};
-			name = Debug;
-		};
 		431C17683DC44D3E82A495DF /* Release */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 3611CDF8792E4032A9CA8E9F /* GeckoApp.xcconfig */;
 			buildSettings = {
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
@@ -464,6 +403,73 @@
 			};
 			name = Release;
 		};
+		BD4C3628DA6E4118876F108E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		D4D9667421A543EE9F398419 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 3611CDF8792E4032A9CA8E9F /* GeckoApp.xcconfig */;
+			buildSettings = {
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.social-networking";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -476,20 +482,20 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		979E3C10985F40F492DB4BF0 /* Build configuration list for PBXNativeTarget "Gecko" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				D4D9667421A543EE9F398419 /* Debug */,
-				431C17683DC44D3E82A495DF /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		28C72194780C4F21B020C95A /* Build configuration list for PBXNativeTarget "NotificationService" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				AD883542E68D4A6EA864CE87 /* Debug */,
 				B99D257362344CB189FDD5D5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		979E3C10985F40F492DB4BF0 /* Build configuration list for PBXNativeTarget "Gecko" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D4D9667421A543EE9F398419 /* Debug */,
+				431C17683DC44D3E82A495DF /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

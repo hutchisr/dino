@@ -43,6 +43,8 @@ struct InvertedMessageList: UIViewControllerRepresentable {
     let avatarPaths: [String: String]
     let visualTopInset: CGFloat
     let visualBottomInset: CGFloat
+    let visualScrollIndicatorTopInset: CGFloat
+    let visualScrollIndicatorBottomInset: CGFloat
     let model: AppModel
     @Binding var isAtBottom: Bool
     /// Bumped by the caller to request a programmatic scroll to the newest
@@ -69,7 +71,11 @@ struct InvertedMessageList: UIViewControllerRepresentable {
         controller.callbacks = ChatListController.Callbacks(
             conversationId: conversationId, onEdit: onEdit, onReply: onReply,
             onImageTap: onImageTap, onActions: onActions)
-        controller.setVisualInsets(top: visualTopInset, bottom: visualBottomInset)
+        controller.setVisualInsets(
+            top: visualTopInset,
+            bottom: visualBottomInset,
+            scrollIndicatorTop: visualScrollIndicatorTopInset,
+            scrollIndicatorBottom: visualScrollIndicatorBottomInset)
         controller.apply(messages: messages, isGroupchat: isGroupchat, avatarPaths: avatarPaths)
         if context.coordinator.lastScrollToken != scrollToBottomToken {
             context.coordinator.lastScrollToken = scrollToBottomToken
@@ -133,6 +139,8 @@ final class ChatListController: UITableViewController {
     private(set) var isAtBottom = true
     private var visualTopInset: CGFloat = 0
     private var visualBottomInset: CGFloat = 0
+    private var visualScrollIndicatorTopInset: CGFloat = 0
+    private var visualScrollIndicatorBottomInset: CGFloat = 0
     private var pendingBottomCorrection = false
     private var bottomCorrectionWorkItem: DispatchWorkItem?
 
@@ -197,17 +205,33 @@ final class ChatListController: UITableViewController {
     /// Insets expressed in visual coordinates. Because the table is vertically
     /// flipped, visual bottom maps to UIKit's top inset and visual top maps to
     /// UIKit's bottom inset.
-    func setVisualInsets(top: CGFloat, bottom: CGFloat) {
+    func setVisualInsets(
+        top: CGFloat,
+        bottom: CGFloat,
+        scrollIndicatorTop: CGFloat,
+        scrollIndicatorBottom: CGFloat
+    ) {
         loadViewIfNeeded()
         let top = max(0, top.rounded(.up))
         let bottom = max(0, bottom.rounded(.up))
-        guard top != visualTopInset || bottom != visualBottomInset else { return }
+        let scrollIndicatorTop = max(0, scrollIndicatorTop.rounded(.up))
+        let scrollIndicatorBottom = max(0, scrollIndicatorBottom.rounded(.up))
+        guard top != visualTopInset || bottom != visualBottomInset
+            || scrollIndicatorTop != visualScrollIndicatorTopInset
+            || scrollIndicatorBottom != visualScrollIndicatorBottomInset
+        else { return }
 
         let wasAtBottom = isAtBottom
         visualTopInset = top
         visualBottomInset = bottom
+        visualScrollIndicatorTopInset = scrollIndicatorTop
+        visualScrollIndicatorBottomInset = scrollIndicatorBottom
         tableView.contentInset = UIEdgeInsets(top: bottom, left: 0, bottom: top, right: 0)
-        tableView.scrollIndicatorInsets = tableView.contentInset
+        tableView.scrollIndicatorInsets = UIEdgeInsets(
+            top: scrollIndicatorBottom,
+            left: 0,
+            bottom: scrollIndicatorTop,
+            right: 0)
         if wasAtBottom {
             scrollToBottom(animated: false)
         } else {

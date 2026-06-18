@@ -170,11 +170,29 @@ final class AppModel: ObservableObject {
     var hasAccount: Bool { !accounts.isEmpty }
     var connected: Bool { accounts.contains { $0.state == "CONNECTED" } }
 
+    private func replaceNavigation(with path: [Int32]) {
+        guard navigation != path else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.navigation != path else { return }
+            self.navigation = path
+        }
+    }
+
+    private func pushNavigation(_ id: Int32) {
+        guard navigation.last != id else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.navigation.last != id else { return }
+            self.navigation.append(id)
+        }
+    }
+
     func boot() {
         if booted { return }
         booted = true
         GeckoCore.shared.onEvent = { [weak self] e in self?.handle(e) }
-        GeckoCore.shared.start()
+        DispatchQueue.global(qos: .userInitiated).async {
+            GeckoCore.shared.start()
+        }
     }
 
     func addAccount(jid: String, password: String) {
@@ -247,7 +265,7 @@ final class AppModel: ObservableObject {
 
     func closeConversation(_ id: Int32) {
         GeckoCore.shared.closeConversation(id)
-        if navigation.contains(id) { navigation = [] }
+        if navigation.contains(id) { replaceNavigation(with: []) }
     }
 
     func startOccupantDM(_ id: Int32, nick: String) {
@@ -344,7 +362,7 @@ final class AppModel: ObservableObject {
 
     func openChat(with jid: String) {
         if let existing = conversations.first(where: { $0.jid == jid }) {
-            navigation = [existing.id]
+            replaceNavigation(with: [existing.id])
         } else {
             pendingChatJid = jid
             startConversation(jid: jid)
@@ -405,7 +423,7 @@ final class AppModel: ObservableObject {
             accounts = []
             conversations = []
             messages = [:]
-            navigation = []
+            replaceNavigation(with: [])
             roster = []
             subscriptionRequests = []
             GeckoCore.shared.requestState()
@@ -457,7 +475,7 @@ final class AppModel: ObservableObject {
                 if let pending = pendingChatJid,
                    let conv = conversations.first(where: { $0.jid == pending }) {
                     pendingChatJid = nil
-                    navigation = [conv.id]
+                    replaceNavigation(with: [conv.id])
                 }
             }
         case "confirm_create_muc":
@@ -506,10 +524,10 @@ final class AppModel: ObservableObject {
                     myRole: e["my_role"] as? String ?? "none")
             }
         case "open_conversation":
-            if let id = e["id"] as? Int, navigation.last != Int32(id) {
+            if let id = e["id"] as? Int {
                 // Push so the new chat slides in over the current one (and Back
                 // returns to where you were, e.g. the group chat).
-                navigation.append(Int32(id))
+                pushNavigation(Int32(id))
             }
         case "avatar":
             if let jid = e["jid"] as? String, let path = e["path"] as? String {
@@ -605,7 +623,7 @@ final class AppModel: ObservableObject {
         if let jid = env["DINO_AUTOOPEN"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
                 guard let self, let conv = self.conversations.first(where: { $0.jid == jid }) else { return }
-                self.navigation = [conv.id]
+                self.replaceNavigation(with: [conv.id])
             }
         }
         if let jid = env["DINO_AUTOJOINMUC"] {
@@ -628,7 +646,7 @@ final class AppModel: ObservableObject {
         startConversation(jid: peer)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self, let conv = self.conversations.first(where: { $0.jid.hasPrefix(peer) }) else { return }
-            self.navigation = [conv.id]
+            self.replaceNavigation(with: [conv.id])
             if env["DINO_AUTOOMEMO"] != nil {
                 self.setEncryption(conv.id, omemo: true)
             }

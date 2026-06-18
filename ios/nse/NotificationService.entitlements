@@ -6,7 +6,5 @@
 	<array>
 		<string>group.me.anemoneya.gecko</string>
 	</array>
-	<key>com.apple.developer.usernotifications.filtering</key>
-	<true/>
 </dict>
 </plist>
