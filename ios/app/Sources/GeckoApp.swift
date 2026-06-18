@@ -41,6 +41,190 @@ struct GeckoApp: App {
     }
 }
 
+#if DEBUG
+@MainActor
+private enum GeckoPreviewFixtures {
+    static let account = XmppAccount(id: "rachel@example.org", state: "CONNECTED")
+
+    static let conversations: [XmppConversation] = [
+        XmppConversation(
+            id: 1,
+            account: "rachel@example.org",
+            jid: "anemone@xmpp.is",
+            name: "Anemone",
+            encryption: "OMEMO",
+            encryptionAvailable: true,
+            kind: "chat",
+            unread: 3,
+            preview: "Sent a few image-heavy test messages",
+            previewDirection: "in",
+            time: Date().addingTimeInterval(-180),
+            notify: "default",
+            notifyEffective: "on"
+        ),
+        XmppConversation(
+            id: 2,
+            account: "rachel@example.org",
+            jid: "gecko@conference.example.org",
+            name: "Gecko Dev",
+            encryption: "",
+            encryptionAvailable: false,
+            kind: "groupchat",
+            unread: 0,
+            preview: "I will test the new composer layout",
+            previewDirection: "out",
+            time: Date().addingTimeInterval(-3600),
+            notify: "default",
+            notifyEffective: "highlight"
+        ),
+        XmppConversation(
+            id: 3,
+            account: "rachel@example.org",
+            jid: "offline@example.org",
+            name: "Offline Contact",
+            encryption: "",
+            encryptionAvailable: false,
+            kind: "chat",
+            unread: 0,
+            preview: "See you later",
+            previewDirection: "in",
+            time: Date().addingTimeInterval(-86400),
+            notify: "default",
+            notifyEffective: "off"
+        ),
+    ]
+
+    static let messages: [ChatMessage] = [
+        ChatMessage(
+            id: 100,
+            content: "text",
+            direction: "in",
+            from: "anemone@xmpp.is",
+            fromDisplay: "Anemone",
+            body: "Can you check how this wraps in the new bubble layout?",
+            time: Date().addingTimeInterval(-600),
+            encryption: "OMEMO",
+            marked: "read"
+        ),
+        ChatMessage(
+            id: 101,
+            content: "text",
+            direction: "out",
+            from: "rachel@example.org",
+            body: "Yes. This gives us enough text to verify line wrapping, timestamps, and the outgoing bubble.",
+            time: Date().addingTimeInterval(-540),
+            encryption: "OMEMO",
+            editable: true,
+            reactions: [
+                Reaction(emoji: "👍", count: 2, me: true),
+                Reaction(emoji: "✨", count: 1, me: false),
+            ],
+            marked: "read",
+            quote: QuoteRef(item: 100, from: "Anemone", body: "Can you check how this wraps?")
+        ),
+        ChatMessage(
+            id: 102,
+            content: "text",
+            direction: "out",
+            from: "rachel@example.org",
+            body: "This one is queued while reconnecting.",
+            time: Date().addingTimeInterval(-60),
+            encryption: "OMEMO",
+            marked: "unsent"
+        ),
+        ChatMessage(
+            id: 103,
+            content: "file",
+            direction: "in",
+            from: "anemone@xmpp.is",
+            fromDisplay: "Anemone",
+            body: "",
+            time: Date().addingTimeInterval(-30),
+            encryption: "OMEMO",
+            fileName: "photo.jpg",
+            mime: "image/jpeg",
+            size: 2_400_000,
+            fileState: "not_started"
+        ),
+    ]
+
+    static func model() -> AppModel {
+        let model = AppModel()
+        model.ready = true
+        model.accounts = [account]
+        model.accountAlias = "Rachel"
+        model.conversations = conversations
+        model.messages = [1: messages]
+        model.roster = [
+            RosterContact(
+                id: "anemone@xmpp.is",
+                account: "rachel@example.org",
+                name: "Anemone",
+                subscription: "both",
+                show: "online"
+            ),
+            RosterContact(
+                id: "offline@example.org",
+                account: "rachel@example.org",
+                name: "Offline Contact",
+                subscription: "both",
+                show: "offline"
+            ),
+        ]
+        model.subscriptionRequests = ["newfriend@example.org"]
+        model.chatStates = [1: "composing"]
+        return model
+    }
+}
+
+#Preview("Conversation List") {
+    NavigationStack {
+        ConversationListView()
+            .environmentObject(GeckoPreviewFixtures.model())
+    }
+}
+
+#Preview("Conversation Rows") {
+    List {
+        ForEach(GeckoPreviewFixtures.conversations) { conv in
+            ConversationRow(
+                conv: conv,
+                presence: conv.isGroupchat ? nil : (conv.jid == "offline@example.org" ? "offline" : "online"),
+                avatarPath: nil,
+                requestAvatar: {}
+            )
+        }
+    }
+}
+
+#Preview("Chat") {
+    NavigationStack {
+        ChatView(conversationId: 1, talksToCore: false)
+            .environmentObject(GeckoPreviewFixtures.model())
+    }
+}
+
+#Preview("Message Bubbles") {
+    ScrollView {
+        VStack(spacing: 10) {
+            ForEach(GeckoPreviewFixtures.messages) { msg in
+                MessageBubble(
+                    msg: msg,
+                    inGroupchat: true,
+                    showSender: msg.direction == "in",
+                    onEdit: { _ in },
+                    onReply: { _ in },
+                    onActions: { _ in },
+                    onReaction: { _, _ in },
+                    onDownloadFile: { _ in }
+                )
+            }
+        }
+        .padding()
+    }
+}
+#endif
+
 struct RootView: View {
     @EnvironmentObject var model: AppModel
 
@@ -146,6 +330,7 @@ struct ConversationListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Int32.self) { id in
             ChatView(conversationId: id)
+                .environmentObject(model)
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -578,6 +763,7 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
+    var talksToCore: Bool = true
     @Namespace private var composerGlass
     @State private var draft = ""
     @State private var showSend = false
@@ -1373,12 +1559,14 @@ struct ChatView: View {
             }
         }
         .onAppear {
+            guard talksToCore else { return }
             model.openConversation(conversationId)
             model.focusConversation(conversationId)
             // So the encryption-help dialog knows whether you're the owner.
             if isGroupChat { model.requestRoomInfo(conversationId) }
         }
         .onDisappear {
+            guard talksToCore else { return }
             model.blurConversation(conversationId)
         }
         .confirmationDialog("Encryption unavailable", isPresented: $showEncryptionHelp, titleVisibility: .visible) {
