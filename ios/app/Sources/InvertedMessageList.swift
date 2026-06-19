@@ -11,6 +11,13 @@ private struct ChatRowModel: Equatable {
     let senderAvatarPath: String?
 }
 
+private struct ChatListRevision: Equatable {
+    let conversationId: Int32
+    let messages: Int
+    let avatars: Int
+    let isGroupchat: Bool
+}
+
 /// A table cell that reports **zero safe-area insets**. UIKit otherwise inflates
 /// a cell's layout margins by the safe-area inset as the cell nears a screen
 /// edge, which the `UIHostingConfiguration` host view picks up and turns into
@@ -38,9 +45,11 @@ private final class FlatCell: UITableViewCell {
 /// `UIHostingConfiguration`. (Reference: MeshCoreOne's ChatTableView.)
 struct InvertedMessageList: UIViewControllerRepresentable {
     let messages: [ChatMessage]           // chronological: oldest first
+    let messageRevision: Int
     let conversationId: Int32
     let isGroupchat: Bool
     let avatarPaths: [String: String]
+    let avatarRevision: Int
     let visualTopInset: CGFloat
     let visualBottomInset: CGFloat
     let visualScrollIndicatorTopInset: CGFloat
@@ -76,7 +85,14 @@ struct InvertedMessageList: UIViewControllerRepresentable {
             bottom: visualBottomInset,
             scrollIndicatorTop: visualScrollIndicatorTopInset,
             scrollIndicatorBottom: visualScrollIndicatorBottomInset)
-        controller.apply(messages: messages, isGroupchat: isGroupchat, avatarPaths: avatarPaths)
+        controller.apply(
+            messages: messages,
+            avatarPaths: avatarPaths,
+            revision: ChatListRevision(
+                conversationId: conversationId,
+                messages: messageRevision,
+                avatars: avatarRevision,
+                isGroupchat: isGroupchat))
         if context.coordinator.lastScrollToken != scrollToBottomToken {
             context.coordinator.lastScrollToken = scrollToBottomToken
             // Defer past this SwiftUI update: issuing the scroll from inside
@@ -135,6 +151,7 @@ final class ChatListController: UITableViewController {
     private var rowsByID: [Int32: ChatRowModel] = [:]
     private var orderedIDs: [Int32] = []        // reversed: newest (row 0) first
     private var isGroupchat = false
+    private var appliedRevision: ChatListRevision?
     private var hasLoaded = false
     private(set) var isAtBottom = true
     private var visualTopInset: CGFloat = 0
@@ -274,18 +291,27 @@ final class ChatListController: UITableViewController {
     /// animate; in-place content changes (marked state, file progress) reconfigure
     /// the affected cells. Follows the bottom on a new newest message only if we
     /// were already there.
-    func apply(messages: [ChatMessage], isGroupchat: Bool, avatarPaths: [String: String]) {
+    fileprivate func apply(
+        messages: [ChatMessage],
+        avatarPaths: [String: String],
+        revision: ChatListRevision
+    ) {
         loadViewIfNeeded()
-        self.isGroupchat = isGroupchat
+        if hasLoaded, appliedRevision == revision {
+            return
+        }
+
+        self.isGroupchat = revision.isGroupchat
+        appliedRevision = revision
 
         let cal = Calendar.current
         var chronological: [ChatRowModel] = []
         chronological.reserveCapacity(messages.count)
         for (i, msg) in messages.enumerated() {
             let newDay = i == 0 || !cal.isDate(msg.time, inSameDayAs: messages[i - 1].time)
-            let showSender = isGroupchat && msg.direction == "in"
+            let showSender = revision.isGroupchat && msg.direction == "in"
                 && (newDay || messages[i - 1].from != msg.from)
-            let avatarPath = isGroupchat && msg.direction == "in" ? avatarPaths[msg.from] : nil
+            let avatarPath = revision.isGroupchat && msg.direction == "in" ? avatarPaths[msg.from] : nil
             chronological.append(ChatRowModel(msg: msg, showDay: newDay,
                                               dayLabel: Self.dayLabel(msg.time),
                                               showSender: showSender,

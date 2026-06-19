@@ -164,11 +164,18 @@ final class AppModel: ObservableObject {
 
     private var pendingChatJid: String?
     private var requestedAvatars = Set<String>()
+    private var messageRevisions: [Int32: Int] = [:]
+    private var avatarRevision = 0
 
     private var booted = false
 
     var hasAccount: Bool { !accounts.isEmpty }
     var connected: Bool { accounts.contains { $0.state == "CONNECTED" } }
+    var avatarRevisionToken: Int { avatarRevision }
+
+    func messageRevision(for conversation: Int32) -> Int {
+        messageRevisions[conversation] ?? 0
+    }
 
     private func replaceNavigation(with path: [Int32]) {
         guard navigation != path else { return }
@@ -208,13 +215,19 @@ final class AppModel: ObservableObject {
     }
 
     func setAvatar(path: String) {
-        GeckoCore.shared.setAvatar(path: avatarPNG(from: path) ?? path)
-        // re-request our own avatar once published
-        if let jid = accounts.first?.id {
-            requestedAvatars.remove(jid)
-            avatars[jid] = nil
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                GeckoCore.shared.requestAvatar(jid: jid)
+        let source = path
+        Task {
+            let pngPath = await Task.detached(priority: .userInitiated) {
+                avatarPNG(from: source)
+            }.value
+            GeckoCore.shared.setAvatar(path: pngPath ?? source)
+            // re-request our own avatar once published
+            if let jid = accounts.first?.id {
+                requestedAvatars.remove(jid)
+                setAvatarPath(nil, for: jid)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    GeckoCore.shared.requestAvatar(jid: jid)
+                }
             }
         }
     }
@@ -308,7 +321,13 @@ final class AppModel: ObservableObject {
         GeckoCore.shared.mucSetModerated(id, moderated)
     }
     func setRoomAvatar(_ id: Int32, path: String) {
-        GeckoCore.shared.mucSetAvatar(id, path: avatarPNG(from: path) ?? path)
+        let source = path
+        Task {
+            let pngPath = await Task.detached(priority: .userInitiated) {
+                avatarPNG(from: source)
+            }.value
+            GeckoCore.shared.mucSetAvatar(id, path: pngPath ?? source)
+        }
     }
 
     func requestOccupants(_ id: Int32) {
@@ -423,6 +442,7 @@ final class AppModel: ObservableObject {
             accounts = []
             conversations = []
             messages = [:]
+            messageRevisions = [:]
             replaceNavigation(with: [])
             roster = []
             subscriptionRequests = []
@@ -454,7 +474,7 @@ final class AppModel: ObservableObject {
             // resource handover with the notification extension) — the live
             // connection state is already shown in the account row, so don't
             // interrupt with a modal alert.
-            NSLog("Gecko: connection error (%@)", e["source"] as? String ?? "?")
+            geckoDebugLog("Gecko: connection error (%@)", e["source"] as? String ?? "?")
         case "conversations":
             if let list = e["list"] as? [[String: Any]] {
                 conversations = list.compactMap { c in
@@ -484,7 +504,7 @@ final class AppModel: ObservableObject {
                 pendingMucCreate = PendingMucCreate(jid: jid, nick: (nick?.isEmpty ?? true) ? nil : nick)
             }
         case "push_state":
-            NSLog("gecko-push: server push enabled=%@", String(describing: e["enabled"]))
+            geckoDebugLog("gecko-push: server push enabled=%@", String(describing: e["enabled"]))
         case "chat_state":
             if let cid = e["conversation"] as? Int, let state = e["state"] as? String {
                 chatStates[Int32(cid)] = state
@@ -504,7 +524,7 @@ final class AppModel: ObservableObject {
                 }.sorted { $0.nick.lowercased() < $1.nick.lowercased() }
             }
         case "diag":
-            NSLog("Gecko-diag: %@", e["message"] as? String ?? "?")
+            geckoDebugLog("Gecko-diag: %@", e["message"] as? String ?? "?")
         case "self_presence":
             selfShow = e["show"] as? String ?? "online"
             selfStatus = e["status"] as? String ?? ""
@@ -531,7 +551,7 @@ final class AppModel: ObservableObject {
             }
         case "avatar":
             if let jid = e["jid"] as? String, let path = e["path"] as? String {
-                avatars[jid] = path
+                setAvatarPath(path, for: jid)
             }
         case "roster":
             if let list = e["list"] as? [[String: Any]] {
@@ -550,7 +570,9 @@ final class AppModel: ObservableObject {
             }
         case "history":
             if let cid = e["conversation"] as? Int, let items = e["items"] as? [[String: Any]] {
-                messages[Int32(cid)] = items.compactMap(Self.decodeMessage).sorted { $0.time < $1.time }
+                replaceMessages(
+                    items.compactMap(Self.decodeMessage).sorted { $0.time < $1.time },
+                    for: Int32(cid))
             }
         case "message", "item":
             if let m = Self.decodeMessage(e), let cid = e["conversation"] as? Int {
@@ -561,13 +583,25 @@ final class AppModel: ObservableObject {
                     list.append(m)
                     list.sort { $0.time < $1.time }
                 }
-                messages[Int32(cid)] = list
+                replaceMessages(list, for: Int32(cid))
             }
         case "error", "fatal":
             lastError = e["message"] as? String
         default:
             break
         }
+    }
+
+    private func replaceMessages(_ list: [ChatMessage], for cid: Int32) {
+        guard messages[cid] != list else { return }
+        messageRevisions[cid, default: 0] &+= 1
+        messages[cid] = list
+    }
+
+    private func setAvatarPath(_ path: String?, for jid: String) {
+        guard avatars[jid] != path else { return }
+        avatarRevision &+= 1
+        avatars[jid] = path
     }
 
     private static func decodeMessage(_ d: [String: Any]) -> ChatMessage? {

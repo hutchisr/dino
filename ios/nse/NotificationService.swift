@@ -1,3 +1,4 @@
+import Foundation
 import UserNotifications
 
 /// Notification Service Extension entry point.
@@ -13,12 +14,13 @@ import UserNotifications
 class NotificationService: UNNotificationServiceExtension {
     private var contentHandler: ((UNNotificationContent) -> Void)?
     private var bestAttempt: UNMutableNotificationContent?
+    private let finishLock = NSLock()
 
     override func didReceive(_ request: UNNotificationRequest,
                              withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void) {
         self.contentHandler = contentHandler
         guard let content = request.content.mutableCopy() as? UNMutableNotificationContent else {
-            contentHandler(request.content)
+            finish(request.content)
             return
         }
         self.bestAttempt = content
@@ -29,7 +31,7 @@ class NotificationService: UNNotificationServiceExtension {
         // limit so we beat serviceExtensionTimeWillExpire.
         NSEFetcher.fetch(timeoutMs: 24_000) { messages in
             guard let latest = messages.last else {
-                contentHandler(content)
+                self.finish(content)
                 return
             }
             if !latest.conversationJid.isEmpty {
@@ -43,7 +45,7 @@ class NotificationService: UNNotificationServiceExtension {
                 // (un-granted device) iOS substitutes the original payload, so
                 // this degrades to the generic "New message" rather than a
                 // wrong banner.
-                contentHandler(UNNotificationContent())
+                self.finish(UNNotificationContent())
                 return
             }
             if latest.isGroupchat {
@@ -56,14 +58,23 @@ class NotificationService: UNNotificationServiceExtension {
             if messages.count > 1 {
                 content.subtitle = "\(messages.count) new messages"
             }
-            contentHandler(content)
+            self.finish(content)
         }
     }
 
     override func serviceExtensionTimeWillExpire() {
         // Deliver whatever we have if we run out of time.
-        if let handler = contentHandler, let content = bestAttempt {
-            handler(content)
+        if let content = bestAttempt {
+            finish(content)
         }
+    }
+
+    private func finish(_ content: UNNotificationContent) {
+        finishLock.lock()
+        let handler = contentHandler
+        contentHandler = nil
+        bestAttempt = nil
+        finishLock.unlock()
+        handler?(content)
     }
 }

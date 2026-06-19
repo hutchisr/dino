@@ -39,7 +39,7 @@ final class GeckoCore {
                       cache: caches.appendingPathComponent("xdg-cache"))
 
         guard let container = fm.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) else {
-            NSLog("GeckoCore: App Group unavailable, using per-app storage")
+            geckoDebugLog("GeckoCore: App Group unavailable, using per-app storage")
             return (legacy.data.path, legacy.config.path, legacy.cache.path)
         }
         let shared = (data: container.appendingPathComponent("xdg-data"),
@@ -58,9 +58,9 @@ final class GeckoCore {
         do {
             try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fm.moveItem(at: from, to: to)
-            NSLog("GeckoCore: migrated %@ -> %@", from.path, to.path)
+            geckoDebugLog("GeckoCore: migrated %@ -> %@", from.path, to.path)
         } catch {
-            NSLog("GeckoCore: storage migration failed for %@: %@", from.path, error.localizedDescription)
+            geckoDebugLog("GeckoCore: storage migration failed for %@: %@", from.path, error.localizedDescription)
         }
     }
 
@@ -120,7 +120,7 @@ final class GeckoCore {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data),
               let dict = obj as? [String: Any] else {
-            NSLog("GeckoCore: undecodable event: %@", json)
+            geckoDebugLog("GeckoCore: undecodable event (%d bytes)", json.count)
             return
         }
         DispatchQueue.main.async { self.onEvent?(dict) }

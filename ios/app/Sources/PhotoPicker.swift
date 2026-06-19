@@ -31,8 +31,7 @@ struct PhotoPicker: UIViewControllerRepresentable {
             provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { [parent] url, _ in
                 guard let url else { return }
                 // the provider's URL is only valid inside this callback
-                let dest = FileManager.default.temporaryDirectory
-                    .appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent)
+                let dest = AttachmentStaging.temporaryCopyURL(for: url)
                 try? FileManager.default.removeItem(at: dest)
                 guard (try? FileManager.default.copyItem(at: url, to: dest)) != nil else { return }
                 DispatchQueue.main.async {

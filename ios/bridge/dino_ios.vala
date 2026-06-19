@@ -694,6 +694,16 @@ private static Conversation? conversation_by_id(int id) {
     return null;
 }
 
+private static bool is_temp_staging_path(string path) {
+    string tmp = Environment.get_tmp_dir();
+    string prefix = tmp.has_suffix("/") ? tmp : tmp + "/";
+    return path.has_prefix(prefix);
+}
+
+private static void remove_temp_staging_path(string path) {
+    if (is_temp_staging_path(path)) FileUtils.remove(path);
+}
+
 public void add_account(string jid_str, string password) {
     string j = jid_str; string p = password;
     Idle.add(() => {
@@ -1813,9 +1823,13 @@ public void send_file(int conversation_id, string path) {
         fm.is_upload_available.begin(c, (_, res) => {
             if (!fm.is_upload_available.end(res)) {
                 emit("{\"type\":\"error\",\"message\":\"File upload is not available on this server\"}");
+                remove_temp_staging_path(p);
                 return;
             }
-            fm.send_file.begin(File.new_for_path(p), c);
+            fm.send_file.begin(File.new_for_path(p), c, (_, send_res) => {
+                fm.send_file.end(send_res);
+                remove_temp_staging_path(p);
+            });
         });
         return Source.REMOVE;
     });

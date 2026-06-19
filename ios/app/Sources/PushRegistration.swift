@@ -78,13 +78,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
-        NSLog("gecko-push: APNs token %@", hex)
+        geckoDebugLog("gecko-push: APNs token %@", redactedIdentifier(hex))
         AppDelegate.onToken?(hex)
     }
 
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        NSLog("gecko-push: APNs registration failed: %@", error.localizedDescription)
+        geckoDebugLog("gecko-push: APNs registration failed: %@", error.localizedDescription)
     }
 
     /// User tapped a notification — open the conversation it belongs to (the
@@ -115,7 +115,7 @@ enum PushRegistration {
 
     static func start() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            NSLog("gecko-push: notification permission granted=%d", granted ? 1 : 0)
+            geckoDebugLog("gecko-push: notification permission granted=%d", granted ? 1 : 0)
             guard granted else { return }
             DispatchQueue.main.async {
                 UIApplication.shared.registerForRemoteNotifications()

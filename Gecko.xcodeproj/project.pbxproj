@@ -15,6 +15,9 @@
 		65A181F9AA764BE488175CB1 /* NSEFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = EECED66A6D7B48228F265456 /* NSEFetcher.swift */; };
 		67D47FF8799E4FC7B8C5DFF1 /* DisplayFormatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = D928D500119B41A89B21FCEA /* DisplayFormatters.swift */; };
 		6C8B8E0B889046EE97952996 /* MessageFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0556F003C354589BE42AF2E /* MessageFormatting.swift */; };
+		A1B2C3D4E5F6478899AA0001 /* AttachmentStaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0011 /* AttachmentStaging.swift */; };
+		A1B2C3D4E5F6478899AA0002 /* PrivacyFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0012 /* PrivacyFormatting.swift */; };
+		A1B2C3D4E5F6478899AA0003 /* DebugLogging.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0013 /* DebugLogging.swift */; };
 		A0B32992BB1249CA8CF803EE /* InvertedMessageList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6942FA09807F4B429F97DB11 /* InvertedMessageList.swift */; };
 		B1872E1853A14959B41C6F76 /* AccountSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80496BD1D274570886D3D80 /* AccountSettings.swift */; };
 		B674DCCC40514D13928F9F65 /* ReactionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C1D9EA0EDF44844A6F4B60E /* ReactionSheet.swift */; };
@@ -74,6 +77,9 @@
 		88C0F2897A8749BAAF29D828 /* GeckoCommon.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = GeckoCommon.xcconfig; sourceTree = "<group>"; };
 		990D71EE09944E7AA9927B6C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A0556F003C354589BE42AF2E /* MessageFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageFormatting.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6478899AA0011 /* AttachmentStaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentStaging.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6478899AA0012 /* PrivacyFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyFormatting.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6478899AA0013 /* DebugLogging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogging.swift; sourceTree = "<group>"; };
 		B8841F1B93DC4153BCB80974 /* PhotoPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPicker.swift; sourceTree = "<group>"; };
 		BC12B7DE8DF54966B1F7BB2D /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
 		BC7D857E140F487AABAAD463 /* NotificationService.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = NotificationService.xcconfig; sourceTree = "<group>"; };
@@ -116,9 +122,11 @@
 		37BE050813A4493DBBE8EAEC /* GeckoKit/Sources/GeckoKit */ = {
 			isa = PBXGroup;
 			children = (
+				A1B2C3D4E5F6478899AA0011 /* AttachmentStaging.swift */,
 				583D2717B8994C76AABDE233 /* ImageEncoding.swift */,
 				38386EE938FC4181A3DA8C74 /* ImageThumbnail.swift */,
 				A0556F003C354589BE42AF2E /* MessageFormatting.swift */,
+				A1B2C3D4E5F6478899AA0012 /* PrivacyFormatting.swift */,
 			);
 			path = GeckoKit/Sources/GeckoKit;
 			sourceTree = "<group>";
@@ -146,6 +154,7 @@
 			children = (
 				C80496BD1D274570886D3D80 /* AccountSettings.swift */,
 				6C377EE663CA4986A7BD5314 /* BlockedContactsView.swift */,
+				A1B2C3D4E5F6478899AA0013 /* DebugLogging.swift */,
 				D928D500119B41A89B21FCEA /* DisplayFormatters.swift */,
 				DF917E5E610B459F97F0C3BC /* GeckoApp.swift */,
 				D92F01BFA770407E89F9FDCF /* GeckoCore.swift */,
@@ -302,6 +311,7 @@
 				67D47FF8799E4FC7B8C5DFF1 /* DisplayFormatters.swift in Sources */,
 				BC08A0C6135F49AFB5C4B2BD /* GeckoApp.swift in Sources */,
 				DA4CF9FE6B114B4DAA0E7C47 /* GeckoCore.swift in Sources */,
+				A1B2C3D4E5F6478899AA0003 /* DebugLogging.swift in Sources */,
 				F4F596488EF94917BA9FBF9C /* ImageViewer.swift in Sources */,
 				A0B32992BB1249CA8CF803EE /* InvertedMessageList.swift in Sources */,
 				E59885895E7C47EEAA461FA8 /* MemberDetailView.swift in Sources */,
@@ -310,9 +320,11 @@
 				CE3C9C26CEF745BABEE94D68 /* PushRegistration.swift in Sources */,
 				B674DCCC40514D13928F9F65 /* ReactionSheet.swift in Sources */,
 				271BF8F58BAA41B092051CD9 /* RoomDetailsView.swift in Sources */,
+				A1B2C3D4E5F6478899AA0001 /* AttachmentStaging.swift in Sources */,
 				E1060F31A33848E8A17F81BE /* ImageEncoding.swift in Sources */,
 				3933FB16B1CB49598388D85B /* ImageThumbnail.swift in Sources */,
 				6C8B8E0B889046EE97952996 /* MessageFormatting.swift in Sources */,
+				A1B2C3D4E5F6478899AA0002 /* PrivacyFormatting.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -748,10 +748,9 @@ private struct PendingFileSend {
     init(url: URL) {
         self.url = url
         self.name = url.lastPathComponent.isEmpty ? "File" : url.lastPathComponent
-        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
-        let byteCount = (attrs?[.size] as? NSNumber)?.intValue
+        let byteCount = AttachmentStaging.byteCount(at: url)
         if let byteCount, byteCount > 0 {
-            self.sizeLabel = ByteCountFormatter.string(fromByteCount: Int64(byteCount), countStyle: .file)
+            self.sizeLabel = ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
         } else {
             self.sizeLabel = ""
         }
@@ -1092,15 +1091,22 @@ struct ChatView: View {
     }
 
     private func setPendingFileSend(_ url: URL) {
+        guard acceptAttachmentForStaging(url) else { return }
+        let old = pendingFileSend
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             pendingFileSend = PendingFileSend(url: url)
+        }
+        if old?.url != url {
+            cleanupTemporaryAttachment(old)
         }
     }
 
     private func cancelPendingFileSend() {
+        let old = pendingFileSend
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             pendingFileSend = nil
         }
+        cleanupTemporaryAttachment(old)
     }
 
     private func confirmPendingFileSend() {
@@ -1110,6 +1116,27 @@ struct ChatView: View {
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             self.pendingFileSend = nil
         }
+    }
+
+    private func acceptAttachmentForStaging(_ url: URL) -> Bool {
+        let byteCount = AttachmentStaging.byteCount(at: url)
+        guard !AttachmentStaging.canStageFile(byteCount: byteCount) else { return true }
+        cleanupTemporaryAttachment(at: url)
+        let limit = ByteCountFormatter.string(
+            fromByteCount: AttachmentStaging.maxByteCount,
+            countStyle: .file)
+        model.lastError = "This file is too large to send. The local staging limit is \(limit)."
+        return false
+    }
+
+    private func cleanupTemporaryAttachment(_ file: PendingFileSend?) {
+        guard let file else { return }
+        cleanupTemporaryAttachment(at: file.url)
+    }
+
+    private func cleanupTemporaryAttachment(at url: URL) {
+        guard AttachmentStaging.isInTemporaryDirectory(url) else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 
     private func sendCurrentDraft() {
@@ -1161,9 +1188,11 @@ struct ChatView: View {
     ) -> some View {
         InvertedMessageList(
             messages: chatMessages,
+            messageRevision: model.messageRevision(for: conversationId),
             conversationId: conversationId,
             isGroupchat: isGroupChat,
             avatarPaths: model.avatars,
+            avatarRevision: model.avatarRevisionToken,
             visualTopInset: topChromeInset,
             visualBottomInset: bottomChromeInset,
             visualScrollIndicatorTopInset: scrollIndicatorTopInset,
@@ -1537,8 +1566,11 @@ struct ChatView: View {
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
             if case .success(let url) = result {
                 let scoped = url.startAccessingSecurityScopedResource()
-                let dest = FileManager.default.temporaryDirectory
-                    .appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent)
+                guard acceptAttachmentForStaging(url) else {
+                    if scoped { url.stopAccessingSecurityScopedResource() }
+                    return
+                }
+                let dest = AttachmentStaging.temporaryCopyURL(for: url)
                 try? FileManager.default.removeItem(at: dest)
                 if (try? FileManager.default.copyItem(at: url, to: dest)) != nil {
                     setPendingFileSend(dest)
