@@ -16,6 +16,12 @@ Configuration (environment):
                   "0" production (ad-hoc/TestFlight). Both are tried — this is
                   only the preference; tokens for the other env fall back
                   automatically. (default 1)
+  XMPP_PING_INTERVAL seconds between server pings; 0 disables active pings
+                  (default 60)
+  XMPP_PING_TIMEOUT  seconds to wait before forcing an XMPP reconnect
+                  (default 15)
+  XMPP_RECONNECT_INITIAL first reconnect delay in seconds (default 1)
+  XMPP_RECONNECT_MAX     maximum reconnect delay in seconds (default 60)
 """
 import asyncio
 import json
@@ -25,6 +31,7 @@ import re
 import signal
 import sys
 import time
+from contextlib import suppress
 
 import httpx
 import jwt
@@ -107,19 +114,30 @@ class Apns:
         log.warning("APNs BadDeviceToken on all environments for %s…", device_token[:8])
         return status
 
+    async def close(self):
+        await self.http.aclose()
+
 
 class PushBot(slixmpp.ClientXMPP):
-    def __init__(self, jid: str, password: str, apns: Apns):
+    def __init__(self, jid: str, password: str, apns: Apns, *,
+                 filters: dict[str, dict] | None = None,
+                 ping_interval: float = 60.0,
+                 ping_timeout: float = 15.0):
         super().__init__(jid, password)
         self.apns = apns
         # device token -> {"muted": set of bare jids,
         #                  "mention": {bare jid: nick}}
-        self.filters: dict[str, dict] = {}
+        self.filters: dict[str, dict] = filters if filters is not None else {}
+        self.ping_interval = ping_interval
+        self.ping_timeout = ping_timeout
+        self._ping_task: asyncio.Task | None = None
         self.add_event_handler("session_start", self.on_start)
+        self.add_event_handler("disconnected", self.on_disconnected)
         self.add_event_handler("message", self.on_message)
         self.register_plugin("xep_0030")
         self.register_plugin("xep_0060")
         self.register_plugin("xep_0198")
+        self.register_plugin("xep_0199")
         # XEP-0357 sends the push publish as an iq-set to the app server
         self.register_handler(CoroutineCallback(
             "xep0357-publish",
@@ -128,7 +146,47 @@ class PushBot(slixmpp.ClientXMPP):
 
     async def on_start(self, _event):
         self.send_presence()
+        self.start_ping_monitor()
         log.info("connected as %s", self.boundjid.full)
+
+    def on_disconnected(self, reason):
+        self.stop_ping_monitor()
+        if reason == "shutdown":
+            log.info("XMPP disconnected for shutdown")
+            return
+        if reason:
+            log.warning("XMPP disconnected: %s", reason)
+        else:
+            log.warning("XMPP disconnected")
+
+    def start_ping_monitor(self):
+        self.stop_ping_monitor()
+        if self.ping_interval <= 0 or self.ping_timeout <= 0:
+            return
+        self._ping_task = asyncio.create_task(self.ping_monitor())
+
+    def stop_ping_monitor(self):
+        if self._ping_task is not None:
+            self._ping_task.cancel()
+            self._ping_task = None
+
+    async def ping_monitor(self):
+        try:
+            while True:
+                await asyncio.sleep(self.ping_interval)
+                try:
+                    await self["xep_0199"].ping(self.boundjid.host, timeout=self.ping_timeout)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.warning("XMPP ping failed; forcing reconnect", exc_info=True)
+                    self.disconnect(
+                        wait=0,
+                        reason=f"Ping timeout after {self.ping_timeout:g}s",
+                        ignore_send_queue=True)
+                    return
+        except asyncio.CancelledError:
+            pass
 
     def on_message(self, msg):
         """Clients send their notification filters in a custom element
@@ -237,8 +295,112 @@ class PushBot(slixmpp.ClientXMPP):
         log.info("push -> %s… (%s)", node[:8], status)
 
 
-def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+def env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        sys.exit(f"{name} must be a number, got {raw!r}")
+
+
+def stop_bot(bot):
+    if hasattr(bot, "cancel_connection_attempt"):
+        bot.cancel_connection_attempt()
+    bot.disconnect(wait=0, reason="shutdown", ignore_send_queue=True)
+
+
+async def wait_for_disconnect_or_stop(bot, disconnected, stop_event: asyncio.Event) -> bool:
+    disconnect_task = asyncio.ensure_future(disconnected)
+    stop_task = asyncio.create_task(stop_event.wait())
+    done, pending = await asyncio.wait(
+        {disconnect_task, stop_task},
+        return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+    for task in pending:
+        with suppress(asyncio.CancelledError):
+            await task
+
+    if stop_task in done:
+        stop_bot(bot)
+        if not disconnect_task.done():
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(disconnect_task, timeout=2)
+        return True
+
+    if disconnect_task in done:
+        disconnect_task.result()
+    return stop_event.is_set()
+
+
+async def sleep_or_stop(delay: float, stop_event: asyncio.Event, sleep=asyncio.sleep):
+    if delay <= 0 or stop_event.is_set():
+        return
+    sleep_task = asyncio.create_task(sleep(delay))
+    stop_task = asyncio.create_task(stop_event.wait())
+    done, pending = await asyncio.wait(
+        {sleep_task, stop_task},
+        return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+    for task in pending:
+        with suppress(asyncio.CancelledError):
+            await task
+    if sleep_task in done:
+        sleep_task.result()
+
+
+async def run_xmpp_forever(jid: str, password: str, apns: Apns, stop_event: asyncio.Event, *,
+                           bot_factory=PushBot,
+                           sleep=asyncio.sleep,
+                           reconnect_initial: float = 1.0,
+                           reconnect_max: float = 60.0,
+                           ping_interval: float = 60.0,
+                           ping_timeout: float = 15.0):
+    reconnect_initial = max(0.0, reconnect_initial)
+    reconnect_max = max(reconnect_initial, reconnect_max)
+    reconnect_delay = reconnect_initial
+    filters: dict[str, dict] = {}
+
+    while not stop_event.is_set():
+        bot = bot_factory(
+            jid,
+            password,
+            apns,
+            filters=filters,
+            ping_interval=ping_interval,
+            ping_timeout=ping_timeout)
+        session_started = asyncio.Event()
+        bot.add_event_handler(
+            "session_start",
+            lambda _event: session_started.set(),
+            disposable=True)
+        disconnected = bot.disconnected
+
+        log.info("connecting to XMPP as %s", jid)
+        try:
+            bot.connect()
+            stopped = await wait_for_disconnect_or_stop(bot, disconnected, stop_event)
+        except asyncio.CancelledError:
+            stop_bot(bot)
+            raise
+        except Exception:
+            log.exception("XMPP client loop failed")
+            stopped = stop_event.is_set()
+        if stopped:
+            break
+
+        if session_started.is_set():
+            reconnect_delay = reconnect_initial
+        log.warning("reconnecting to XMPP in %.1fs", reconnect_delay)
+        await sleep_or_stop(reconnect_delay, stop_event, sleep)
+        next_delay = reconnect_delay * 2 if reconnect_delay > 0 else 1.0
+        reconnect_delay = min(reconnect_max, max(reconnect_initial, next_delay))
+
+
+async def async_main():
     try:
         jid = os.environ["XMPP_JID"]
         password = os.environ["XMPP_PASSWORD"]
@@ -246,15 +408,36 @@ def main():
     except KeyError as e:
         sys.exit(f"missing required environment variable: {e}")
 
-    bot = PushBot(jid, password, apns)
-    bot.connect()
-    loop = asyncio.get_event_loop()
-    # exit promptly on SIGTERM so k8s Recreate rollouts don't hang
-    loop.add_signal_handler(signal.SIGTERM, loop.stop)
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    def request_stop(sig_name):
+        log.info("received %s; shutting down", sig_name)
+        stop_event.set()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, request_stop, sig.name)
+        except NotImplementedError:
+            pass
+
     try:
-        loop.run_forever()
-    except KeyboardInterrupt:
-        pass
+        await run_xmpp_forever(
+            jid,
+            password,
+            apns,
+            stop_event,
+            reconnect_initial=env_float("XMPP_RECONNECT_INITIAL", 1.0),
+            reconnect_max=env_float("XMPP_RECONNECT_MAX", 60.0),
+            ping_interval=env_float("XMPP_PING_INTERVAL", 60.0),
+            ping_timeout=env_float("XMPP_PING_TIMEOUT", 15.0))
+    finally:
+        await apns.close()
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":

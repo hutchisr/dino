@@ -25,6 +25,8 @@ APNS_KEY_ID=XXXXXXXXXX \
 APNS_TEAM_ID=998J34UYP5 \
 APNS_TOPIC=me.anemoneya.gecko \
 APNS_SANDBOX=1 \
+XMPP_PING_INTERVAL=60 \
+XMPP_PING_TIMEOUT=15 \
 venv/bin/python gecko_push_proxy.py
 ```
 
@@ -33,6 +35,12 @@ sandbox, for development-signed/Simulator builds; `0` = production, for
 ad-hoc / TestFlight / App Store). It is not a hard switch: a token for the
 other environment is retried automatically on `BadDeviceToken` and the working
 environment is cached per token, so one proxy serves both kinds of build.
+
+The proxy supervises its XMPP session and reconnects after disconnects. It also
+pings the XMPP server every `XMPP_PING_INTERVAL` seconds so stale TCP sessions
+are noticed; set `XMPP_PING_INTERVAL=0` to disable active pings. Reconnect
+backoff starts at `XMPP_RECONNECT_INITIAL` seconds and caps at
+`XMPP_RECONNECT_MAX` seconds.
 
 ## Tests
 

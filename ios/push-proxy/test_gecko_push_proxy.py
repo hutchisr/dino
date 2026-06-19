@@ -15,6 +15,7 @@ Run (uses the proxy's venv, which already has the deps):
 """
 import json
 import logging
+import asyncio
 import unittest
 from types import SimpleNamespace
 from xml.etree import ElementTree as ET
@@ -100,6 +101,53 @@ class FakeMsg:
         raise KeyError(key)
 
 
+class FakeReconnectBot:
+    """Tiny stand-in for PushBot used by reconnect supervisor tests."""
+
+    instances = []
+
+    def __init__(self, jid, password, apns, *, filters, ping_interval, ping_timeout):
+        self.jid = jid
+        self.password = password
+        self.apns = apns
+        self.filters = filters
+        self.ping_interval = ping_interval
+        self.ping_timeout = ping_timeout
+        self.disconnected = asyncio.get_running_loop().create_future()
+        self.handlers = {}
+        self.connect_calls = 0
+        self.cancel_calls = 0
+        self.disconnect_calls = []
+        FakeReconnectBot.instances.append(self)
+
+    def add_event_handler(self, name, handler, disposable=False):
+        self.handlers.setdefault(name, []).append(handler)
+
+    def fire(self, name, event=None):
+        for handler in self.handlers.get(name, []):
+            handler(event)
+
+    def connect(self):
+        self.connect_calls += 1
+        future = asyncio.get_running_loop().create_future()
+        future.set_result(None)
+        return future
+
+    def disconnect(self, wait=2.0, reason=None, ignore_send_queue=False):
+        self.disconnect_calls.append((wait, reason, ignore_send_queue))
+        self.lose_connection()
+        future = asyncio.get_running_loop().create_future()
+        future.set_result(None)
+        return future
+
+    def cancel_connection_attempt(self):
+        self.cancel_calls += 1
+
+    def lose_connection(self):
+        if not self.disconnected.done():
+            self.disconnected.set_result(True)
+
+
 # --- Apns.push() fallback -------------------------------------------------
 
 class TestApnsFallback(unittest.IsolatedAsyncioTestCase):
@@ -143,6 +191,75 @@ class TestApnsFallback(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await apns.push("tok", {}), 400)
         self.assertEqual(apns._calls, ["sandbox", "production"])
         self.assertNotIn("tok", apns.token_env)
+
+
+# --- XMPP reconnect supervisor -------------------------------------------
+
+class TestReconnectSupervisor(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        FakeReconnectBot.instances = []
+
+    async def wait_for_instances(self, count):
+        for _ in range(20):
+            if len(FakeReconnectBot.instances) >= count:
+                return
+            await asyncio.sleep(0)
+        self.fail(f"expected {count} bot instances, got {len(FakeReconnectBot.instances)}")
+
+    async def test_reconnects_after_disconnect_and_preserves_filters(self):
+        stop_event = asyncio.Event()
+        sleep_calls = []
+
+        async def fast_sleep(delay):
+            sleep_calls.append(delay)
+
+        task = asyncio.create_task(proxy.run_xmpp_forever(
+            "push@example.com/proxy",
+            "secret",
+            object(),
+            stop_event,
+            bot_factory=FakeReconnectBot,
+            sleep=fast_sleep,
+            reconnect_initial=0.25,
+            reconnect_max=1.0,
+            ping_interval=9.0,
+            ping_timeout=4.0))
+
+        await self.wait_for_instances(1)
+        first = FakeReconnectBot.instances[0]
+        self.assertEqual(first.connect_calls, 1)
+        self.assertEqual(first.ping_interval, 9.0)
+        self.assertEqual(first.ping_timeout, 4.0)
+        first.filters["tok"] = {"muted": set(), "mention": {}}
+        first.fire("session_start")
+        first.lose_connection()
+
+        await self.wait_for_instances(2)
+        second = FakeReconnectBot.instances[1]
+        self.assertEqual(sleep_calls, [0.25])
+        self.assertIs(second.filters, first.filters)
+        self.assertIn("tok", second.filters)
+
+        stop_event.set()
+        await task
+        self.assertEqual(second.disconnect_calls, [(0, "shutdown", True)])
+
+    async def test_stop_event_disconnects_current_bot(self):
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(proxy.run_xmpp_forever(
+            "push@example.com/proxy",
+            "secret",
+            object(),
+            stop_event,
+            bot_factory=FakeReconnectBot,
+            reconnect_initial=0.25))
+
+        await self.wait_for_instances(1)
+        first = FakeReconnectBot.instances[0]
+        stop_event.set()
+        await task
+        self.assertEqual(first.cancel_calls, 1)
+        self.assertEqual(first.disconnect_calls, [(0, "shutdown", True)])
 
 
 # --- PushBot.handle_publish() filtering / bodiless-drop / summary ----------

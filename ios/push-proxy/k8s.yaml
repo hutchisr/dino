@@ -31,7 +31,7 @@ spec:
         - name: regcred
       containers:
         - name: proxy
-          image: lax.vultrcr.com/mercury/gecko-push-proxy:v12
+          image: lax.vultrcr.com/mercury/gecko-push-proxy:v14
           envFrom:
             - secretRef:
                 name: gecko-push
@@ -43,6 +43,10 @@ spec:
             - name: APNS_SANDBOX
               value: "1"   # which APNs env to try first; the other is tried on
                            # BadDeviceToken, so dev + ad-hoc/TestFlight both work
+            - name: XMPP_PING_INTERVAL
+              value: "60"
+            - name: XMPP_PING_TIMEOUT
+              value: "15"
           volumeMounts:
             - name: apns-key
               mountPath: /secrets
