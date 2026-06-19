@@ -41,6 +41,18 @@ struct SwiftUIMessageList: View {
     /// arrivals animate (and only while already pinned).
     @State private var didInitialScroll = false
 
+    /// Intent to stay glued to the newest message. Starts true (we open at the
+    /// bottom) and is re-asserted as content settles; only the user scrolling
+    /// away from the bottom clears it, and scrolling back (or the scroll-down
+    /// button / sending) re-arms it. Kept separate from `isAtBottom` because the
+    /// live geometry transiently reads "not at bottom" while image rows grow.
+    @State private var stickToBottom = true
+
+    /// True while the user is physically driving the scroll (drag/inertia), so
+    /// content-growth re-pins don't fight their finger and only their own
+    /// scrolling changes `stickToBottom`.
+    @State private var userInteracting = false
+
     /// Slack (points) for the at-bottom test so the button doesn't flicker at
     /// rest under rubber-banding / sub-pixel offsets. Matches the spirit of the
     /// inverted table's 8pt threshold but a touch looser for SwiftUI's geometry.
@@ -75,7 +87,27 @@ struct SwiftUIMessageList: View {
                 return max(0, bottomOffsetY - geo.contentOffset.y)
             } action: { _, distanceFromBottom in
                 let atBottom = distanceFromBottom <= Self.bottomThreshold
-                if isAtBottom != atBottom { isAtBottom = atBottom }
+                // While we intend to stay glued and the user isn't dragging,
+                // treat a gap opened purely by content growth as still-at-bottom,
+                // so the scroll-down button doesn't flash while images load —
+                // we're about to snap back to the newest message.
+                let effectiveAtBottom = atBottom || (stickToBottom && !userInteracting)
+                if isAtBottom != effectiveAtBottom { isAtBottom = effectiveAtBottom }
+                // Only the user's own scrolling releases or re-arms the glue.
+                if userInteracting { stickToBottom = atBottom }
+            }
+            // Stay pinned to the newest message as the content height settles
+            // after open — a LazyVStack with image rows keeps growing as those
+            // rows materialise and decode (and on-device the image previews
+            // render later still), which would otherwise leave us parked just
+            // above the last message. Re-pin on every growth while we intend to
+            // stay glued; only a deliberate user scroll releases that intent.
+            .onScrollGeometryChange(for: CGFloat.self) { geo in
+                geo.contentSize.height
+            } action: { _, _ in
+                if didInitialScroll && stickToBottom && !userInteracting {
+                    scrollToNewest(proxy, animated: false, initial: false)
+                }
             }
             // Open pinned to the newest message. We deliberately do NOT use
             // `.defaultScrollAnchor(.bottom)`: on a ScrollView that starts empty
@@ -86,12 +118,21 @@ struct SwiftUIMessageList: View {
             .onChange(of: messageRevision) { _, _ in
                 if !didInitialScroll {
                     scrollToNewest(proxy, animated: false, initial: true)
-                } else if isAtBottom {
+                } else if stickToBottom {
                     scrollToNewest(proxy, animated: true, initial: false)
                 }
             }
             .onChange(of: scrollToBottomToken) { _, _ in
+                stickToBottom = true
                 scrollToNewest(proxy, animated: true, initial: false)
+            }
+            // The user's own dragging/flinging is the only thing that releases
+            // the stick-to-bottom intent; track when they're driving the scroll
+            // so content-growth re-pins never fight a finger.
+            .onScrollPhaseChange { _, phase, _ in
+                userInteracting = phase == .tracking
+                    || phase == .interacting
+                    || phase == .decelerating
             }
         }
     }
@@ -100,7 +141,10 @@ struct SwiftUIMessageList: View {
     /// first open-at-bottom jump and flips `didInitialScroll`.
     private func scrollToNewest(_ proxy: ScrollViewProxy, animated: Bool, initial: Bool) {
         guard let last = rows.last?.id else { return }
-        if initial { didInitialScroll = true }
+        if initial {
+            didInitialScroll = true
+            stickToBottom = true
+        }
         // Defer a tick so the LazyVStack has materialised the row before we ask
         // the reader to bring it into view.
         DispatchQueue.main.async {
