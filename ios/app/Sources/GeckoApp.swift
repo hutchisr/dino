@@ -803,6 +803,12 @@ struct ChatView: View {
     @State private var keyboardOverlap: CGFloat = 0
     @State private var pendingFileSend: PendingFileSend?
 
+    /// Experimental: render the chat with the pure-SwiftUI `SwiftUIMessageList`
+    /// instead of the UIKit-backed `InvertedMessageList`. Toggle in Account
+    /// settings (Developer). Default on while the SwiftUI list is under
+    /// evaluation; the UIKit list is still available via the toggle.
+    @AppStorage("experimentalSwiftUIMessageList") private var useSwiftUIMessageList = true
+
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
     }
@@ -1201,30 +1207,49 @@ struct ChatView: View {
         scrollIndicatorBottomInset: CGFloat,
         scrollButtonBottomPadding: CGFloat
     ) -> some View {
-        InvertedMessageList(
-            messages: chatMessages,
-            messageRevision: model.messageRevision(for: conversationId),
-            conversationId: conversationId,
-            isGroupchat: isGroupChat,
-            avatarPaths: model.avatars,
-            avatarRevision: model.avatarRevisionToken,
-            visualTopInset: topChromeInset,
-            visualBottomInset: bottomChromeInset,
-            visualScrollIndicatorTopInset: scrollIndicatorTopInset,
-            visualScrollIndicatorBottomInset: scrollIndicatorBottomInset,
-            model: model,
-            isAtBottom: $isAtBottom,
-            scrollToBottomToken: scrollToBottomToken,
-            onEdit: { m in
-                replyingTo = nil
-                pendingFileSend = nil
-                editing = m
-                draft = m.body
-            },
-            onReply: { m in editing = nil; replyingTo = m },
-            onImageTap: { path in viewerItem = ImageViewerItem(id: path) },
-            onActions: { m in actionMsg = m }
-        )
+        Group {
+            if useSwiftUIMessageList {
+                SwiftUIMessageList(
+                    messages: chatMessages,
+                    messageRevision: model.messageRevision(for: conversationId),
+                    conversationId: conversationId,
+                    isGroupchat: isGroupChat,
+                    avatarPaths: model.avatars,
+                    avatarRevision: model.avatarRevisionToken,
+                    visualTopInset: topChromeInset,
+                    visualBottomInset: bottomChromeInset,
+                    visualScrollIndicatorTopInset: scrollIndicatorTopInset,
+                    visualScrollIndicatorBottomInset: scrollIndicatorBottomInset,
+                    model: model,
+                    isAtBottom: $isAtBottom,
+                    scrollToBottomToken: scrollToBottomToken,
+                    onEdit: editFromList,
+                    onReply: { m in editing = nil; replyingTo = m },
+                    onImageTap: { path in viewerItem = ImageViewerItem(id: path) },
+                    onActions: { m in actionMsg = m }
+                )
+            } else {
+                InvertedMessageList(
+                    messages: chatMessages,
+                    messageRevision: model.messageRevision(for: conversationId),
+                    conversationId: conversationId,
+                    isGroupchat: isGroupChat,
+                    avatarPaths: model.avatars,
+                    avatarRevision: model.avatarRevisionToken,
+                    visualTopInset: topChromeInset,
+                    visualBottomInset: bottomChromeInset,
+                    visualScrollIndicatorTopInset: scrollIndicatorTopInset,
+                    visualScrollIndicatorBottomInset: scrollIndicatorBottomInset,
+                    model: model,
+                    isAtBottom: $isAtBottom,
+                    scrollToBottomToken: scrollToBottomToken,
+                    onEdit: editFromList,
+                    onReply: { m in editing = nil; replyingTo = m },
+                    onImageTap: { path in viewerItem = ImageViewerItem(id: path) },
+                    onActions: { m in actionMsg = m }
+                )
+            }
+        }
         .ignoresSafeArea(.container, edges: .vertical)
         .overlay(alignment: .bottomTrailing) {
             if !isAtBottom {
@@ -1232,6 +1257,14 @@ struct ChatView: View {
             }
         }
         .animation(.snappy(duration: 0.2), value: isAtBottom)
+    }
+
+    /// Shared "begin editing this message" action for both list backends.
+    private func editFromList(_ m: ChatMessage) {
+        replyingTo = nil
+        pendingFileSend = nil
+        editing = m
+        draft = m.body
     }
 
     private func bottomChromeInset(safeAreaBottom: CGFloat) -> CGFloat {
