@@ -760,7 +760,6 @@ private struct PendingFileSend {
 }
 
 struct ChatView: View {
-    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
     var talksToCore: Bool = true
@@ -779,10 +778,7 @@ struct ChatView: View {
     /// row-to-row rhythm instead of leaving a visibly larger composer gap.
     private let composerMessageClearance: CGFloat = 3
     private let topToolbarMessageClearance: CGFloat = 8
-    private let topToolbarControlHeight: CGFloat = 44
     private let topToolbarVerticalPadding: CGFloat = 6
-    private let topToolbarAvatarSize: CGFloat = 34
-    private let topMessageFadeHeight: CGFloat = 72
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showOccupants = false
@@ -1317,28 +1313,10 @@ struct ChatView: View {
     }
 
     private func topChromeInset(safeAreaTop: CGFloat) -> CGFloat {
-        safeAreaTop + topToolbarControlHeight + topToolbarVerticalPadding * 2 + topToolbarMessageClearance
-    }
-
-    private func topFadeHeight(safeAreaTop: CGFloat) -> CGFloat {
-        topChromeInset(safeAreaTop: safeAreaTop) + topMessageFadeHeight
-    }
-
-    private func topScreenFade(height: CGFloat) -> some View {
-        LinearGradient(
-            stops: [
-                .init(color: Color(.systemBackground).opacity(0.94), location: 0),
-                .init(color: Color(.systemBackground).opacity(0.82), location: 0.42),
-                .init(color: Color(.systemBackground).opacity(0.34), location: 0.72),
-                .init(color: Color(.systemBackground).opacity(0), location: 1),
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .frame(height: height)
-        .frame(maxWidth: .infinity)
-        .ignoresSafeArea(.container, edges: .top)
-        .allowsHitTesting(false)
+        // The system navigation bar occupies the top safe area; the message list
+        // ignores that safe area and scrolls under the glass bar, so we only add
+        // a little breathing room below the bar before the first message.
+        safeAreaTop + topToolbarMessageClearance
     }
 
     private func scrollDownButton(bottomPadding: CGFloat) -> some View {
@@ -1358,102 +1336,70 @@ struct ChatView: View {
         .transition(.scale(scale: 0.5).combined(with: .opacity))
     }
 
-    private func topToolbar(safeAreaTop: CGFloat) -> some View {
-        let fadeHeight = topFadeHeight(safeAreaTop: safeAreaTop)
-        return ZStack(alignment: .top) {
-            topScreenFade(height: fadeHeight)
-
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    topIconButton(systemImage: "chevron.left", accessibilityLabel: "Back") {
-                        dismiss()
-                    }
-
-                    headerAvatarButton
-
-                    titleButton
-                        .frame(height: topToolbarControlHeight)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .layoutPriority(1)
-
-                    topBellMenu
-                    if isGroupChat {
-                        topOccupantsButton
-                    }
-                    topLockButton
+    @ToolbarContentBuilder
+    private var chatToolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            chatTitleItem
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                notifyOption("All messages", "on")
+                if isGroupChat {
+                    notifyOption("Only when mentioned", "highlight")
                 }
-                .padding(.horizontal, 8)
-                .padding(.top, safeAreaTop + topToolbarVerticalPadding)
-                .popover(isPresented: $showFullTitle, arrowEdge: .top) {
-                    titlePopover
+                notifyOption("Off", "off")
+            } label: {
+                Image(systemName: bellIcon)
+            }
+            .accessibilityLabel("Notifications")
+        }
+        if isGroupChat {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    model.requestOccupants(conversationId)
+                    showOccupants = true
+                } label: {
+                    Image(systemName: "person.2")
                 }
+                .accessibilityLabel("Participants")
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: fadeHeight, alignment: .top)
-        .ignoresSafeArea(.container, edges: .top)
-    }
-
-    private func topIconButton(
-        systemImage: String,
-        accessibilityLabel: String,
-        tint: Color = .primary,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            topIconLabel(systemImage: systemImage, tint: tint)
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                toggleEncryption()
+            } label: {
+                Image(systemName: lockIcon)
+                    .foregroundStyle(lockTint)
+            }
+            .accessibilityLabel(lockAccessibilityLabel)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
     }
 
-    private func topIconLabel(systemImage: String, tint: Color = .primary) -> some View {
-        Image(systemName: systemImage)
-            .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(tint)
-            .frame(width: topToolbarControlHeight, height: topToolbarControlHeight)
-            .glassEffect(.regular.interactive(), in: Circle())
-            .contentShape(Circle())
-    }
-
-    private var headerAvatarButton: some View {
+    /// The tappable avatar+name shown in the navigation bar's principal slot.
+    /// Tapping reveals the full title/JID popover (long names truncate inline).
+    private var chatTitleItem: some View {
         let name: String = conversation?.name ?? "Chat"
         let jid: String = conversation?.jid ?? ""
         return Button {
             showFullTitle = true
         } label: {
-            AvatarView(
-                jid: jid,
-                name: name,
-                isGroup: isGroupChat,
-                size: topToolbarAvatarSize,
-                presence: isGroupChat ? nil : model.presence(for: jid),
-                avatarPath: model.avatars[jid],
-                requestAvatar: jid.isEmpty ? nil : { model.ensureAvatar(for: jid) })
-                .padding((topToolbarControlHeight - topToolbarAvatarSize) / 2)
-                .frame(width: topToolbarControlHeight, height: topToolbarControlHeight)
-                .glassEffect(.regular.interactive(), in: Circle())
-                .contentShape(Circle())
+            HStack(spacing: 8) {
+                AvatarView(
+                    jid: jid, name: name, isGroup: isGroupChat, size: 30,
+                    presence: isGroupChat ? nil : model.presence(for: jid),
+                    avatarPath: model.avatars[jid],
+                    requestAvatar: jid.isEmpty ? nil : { model.ensureAvatar(for: jid) })
+                Text(name)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundStyle(Color.primary)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(name) details")
-    }
-
-    private var titleButton: some View {
-        let name: String = conversation?.name ?? "Chat"
-        // Plain left-aligned title. It uses all the space between the avatar and
-        // trailing buttons, truncating only when those controls need the room.
-        return Button {
-            showFullTitle = true
-        } label: {
-            Text(name)
-                .font(.headline)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .foregroundStyle(Color.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        .popover(isPresented: $showFullTitle, arrowEdge: .top) {
+            titlePopover
         }
-        .buttonStyle(.plain)
     }
 
     private var titlePopover: some View {
@@ -1475,41 +1421,6 @@ struct ChatView: View {
         }
         .padding(12)
         .presentationCompactAdaptation(.popover)
-    }
-
-    private var topBellMenu: some View {
-        Menu {
-            notifyOption("All messages", "on")
-            if isGroupChat {
-                notifyOption("Only when mentioned", "highlight")
-            }
-            notifyOption("Off", "off")
-        } label: {
-            topIconLabel(systemImage: bellIcon)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Notifications")
-    }
-
-    private var topOccupantsButton: some View {
-        Button {
-            model.requestOccupants(conversationId)
-            showOccupants = true
-        } label: {
-            topIconLabel(systemImage: "person.2")
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Participants")
-    }
-
-    private var topLockButton: some View {
-        Button {
-            toggleEncryption()
-        } label: {
-            topIconLabel(systemImage: lockIcon, tint: lockTint)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(lockAccessibilityLabel)
     }
 
     private func toggleEncryption() {
@@ -1595,9 +1506,6 @@ struct ChatView: View {
                 .overlay(alignment: .bottom) {
                     composerToolbar
                 }
-                .overlay(alignment: .top) {
-                    topToolbar(safeAreaTop: geo.safeAreaInsets.top)
-                }
                 .onPreferenceChange(ComposerHeightKey.self) { height in
                     if abs(composerHeight - height) > 0.5 {
                         composerHeight = height
@@ -1634,10 +1542,9 @@ struct ChatView: View {
                 if scoped { url.stopAccessingSecurityScopedResource() }
             }
         }
-        // Blank: the custom top overlay renders the title.
-        .navigationTitle("")
+        .navigationTitle(conversation?.name ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .navigationBar)
+        .toolbar { chatToolbar }
         .sheet(isPresented: $showOccupants, onDismiss: {
             // Start the DM only after the sheet has finished sliding away, so
             // the push into the new chat reads as a distinct second step.
