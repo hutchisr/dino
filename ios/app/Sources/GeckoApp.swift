@@ -1707,6 +1707,19 @@ struct MessageBubble: View {
     var onImageRendered: (() -> Void)? = nil
 
     @State private var dragOffset: CGFloat = 0
+    @State private var replyArmed = false
+
+    private let replyTriggerOffset: CGFloat = 56
+    private let replyMaxOffset: CGFloat = 78
+
+    private var replyProgress: CGFloat {
+        min(dragOffset / replyTriggerOffset, 1)
+    }
+
+    private var replyIndicatorOpacity: Double {
+        guard dragOffset > 4 else { return 0 }
+        return Double(min(dragOffset / 36, 1))
+    }
 
     @ViewBuilder
     private var markIcon: some View {
@@ -1743,14 +1756,30 @@ struct MessageBubble: View {
     }
 
     var body: some View {
+        ZStack(alignment: .leading) {
+            replyIndicator
+                .padding(.leading, 2)
+            bubbleRow
+                .offset(x: dragOffset)
+        }
+        .contentShape(Rectangle())
+        .gesture(replySwipeGesture)
+    }
+
+    private var replyIndicator: some View {
+        Image(systemName: "arrowshape.turn.up.left.fill")
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(replyArmed ? Color.accentColor : Color.secondary)
+            .frame(width: 34, height: 34)
+            .background(Circle().fill(Color(.secondarySystemBackground).opacity(0.9)))
+            .scaleEffect(0.82 + replyProgress * 0.18)
+            .opacity(replyIndicatorOpacity)
+            .allowsHitTesting(false)
+    }
+
+    private var bubbleRow: some View {
         HStack(alignment: .top, spacing: 8) {
             if msg.direction == "out" { Spacer(minLength: 40) }
-            if dragOffset > 8 {
-                Image(systemName: "arrowshape.turn.up.left.fill")
-                    .foregroundStyle(.secondary)
-                    .opacity(Double(min(dragOffset / 60, 1)))
-                    .frame(maxHeight: .infinity, alignment: .center)
-            }
             if inGroupchat && msg.direction == "in" {
                 if showSender {
                     AvatarView(jid: msg.from, name: msg.fromDisplay, isGroup: false, size: 30,
@@ -1832,23 +1861,39 @@ struct MessageBubble: View {
             }
             if msg.direction != "out" { Spacer(minLength: 40) }
         }
-        .offset(x: dragOffset)
-        .animation(.spring(duration: 0.25), value: dragOffset == 0)
-        .gesture(
-            DragGesture(minimumDistance: 25)
-                .onChanged { value in
-                    // horizontal pull to the right only; vertical stays scroll
-                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                    dragOffset = max(0, min(value.translation.width, 90))
+    }
+
+    private var replySwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 25)
+            .onChanged { value in
+                // Horizontal pull to the right only; vertical motion stays scroll.
+                guard value.translation.width > 0,
+                      abs(value.translation.width) > abs(value.translation.height) else { return }
+                dragOffset = replyOffset(for: value.translation.width)
+                let armed = value.translation.width >= replyTriggerOffset
+                if armed && !replyArmed {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 }
-                .onEnded { _ in
-                    if dragOffset > 55 {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        onReply?(msg)
-                    }
+                replyArmed = armed
+            }
+            .onEnded { value in
+                let shouldReply = value.translation.width >= replyTriggerOffset
+                    && abs(value.translation.width) > abs(value.translation.height)
+                if shouldReply {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    onReply?(msg)
+                }
+                withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
                     dragOffset = 0
+                    replyArmed = false
                 }
-        )
+            }
+    }
+
+    private func replyOffset(for translation: CGFloat) -> CGFloat {
+        guard translation > replyTriggerOffset else { return max(0, translation) }
+        let extra = (translation - replyTriggerOffset) * 0.35
+        return min(replyMaxOffset, replyTriggerOffset + extra)
     }
 }
 
