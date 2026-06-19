@@ -353,7 +353,7 @@ public void start(owned EventCb cb) {
             push_conversations();
         });
         si.get_module(Dino.CounterpartInteractionManager.IDENTITY).received_state.connect((conversation, state) => {
-            emit(@"{\"type\":\"chat_state\",\"conversation\":$(conversation.id),\"state\":\"$(esc(state))\"}");
+            emit(chat_state_json(conversation, state));
         });
         si.get_module(Dino.AvatarManager.IDENTITY).received_avatar.connect((jid, account) => {
             push_avatar(account, jid);
@@ -692,6 +692,34 @@ private static Conversation? conversation_by_id(int id) {
         if (c.id == id) return c;
     }
     return null;
+}
+
+private static string typing_names_json(Conversation c, out bool has_typing) {
+    has_typing = false;
+    Gee.List<Xmpp.Jid>? jids = app.stream_interactor
+        .get_module(Dino.CounterpartInteractionManager.IDENTITY)
+        .get_typing_jids(c);
+    if (jids == null || jids.size == 0) return "[]";
+
+    var b = new StringBuilder("[");
+    bool first = true;
+    foreach (Xmpp.Jid jid in jids) {
+        string name = Dino.get_participant_display_name(app.stream_interactor, c, jid);
+        if (!first) b.append_c(',');
+        first = false;
+        has_typing = true;
+        b.append("\"%s\"".printf(esc(name)));
+    }
+    b.append("]");
+    return b.str;
+}
+
+private static string chat_state_json(Conversation c, string state) {
+    bool has_typing;
+    string names = typing_names_json(c, out has_typing);
+    string effective_state = has_typing ? Xmpp.Xep.ChatStateNotifications.STATE_COMPOSING : state;
+    return "{\"type\":\"chat_state\",\"conversation\":%d,\"state\":\"%s\",\"typing_names\":%s}".printf(
+        c.id, esc(effective_state), names);
 }
 
 private static bool is_temp_staging_path(string path) {

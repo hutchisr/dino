@@ -145,6 +145,7 @@ final class AppModel: ObservableObject {
     @Published var subscriptionRequests: [String] = []
     @Published var avatars: [String: String] = [:]      // bare jid -> file path
     @Published var chatStates: [Int32: String] = [:]    // conversation id -> XEP-0085 state
+    @Published var typingNames: [Int32: [String]] = [:]
     @Published var occupants: [Int32: [Occupant]] = [:]
     @Published var roomInfo: [Int32: RoomInfo] = [:]
     @Published var selfShow = "online"     // online | away | dnd | xa
@@ -175,6 +176,11 @@ final class AppModel: ObservableObject {
 
     func messageRevision(for conversation: Int32) -> Int {
         messageRevisions[conversation] ?? 0
+    }
+
+    func typingIndicatorText(for conversationId: Int32) -> String? {
+        guard chatStates[conversationId] == "composing" else { return nil }
+        return typingIndicatorLabel(names: typingNames[conversationId] ?? [])
     }
 
     private func replaceNavigation(with path: [Int32]) {
@@ -507,7 +513,15 @@ final class AppModel: ObservableObject {
             geckoDebugLog("gecko-push: server push enabled=%@", String(describing: e["enabled"]))
         case "chat_state":
             if let cid = e["conversation"] as? Int, let state = e["state"] as? String {
-                chatStates[Int32(cid)] = state
+                let conversationId = Int32(cid)
+                let names = e["typing_names"] as? [String] ?? []
+                if state == "composing" || !names.isEmpty {
+                    chatStates[conversationId] = "composing"
+                    typingNames[conversationId] = names
+                } else {
+                    chatStates[conversationId] = state
+                    typingNames[conversationId] = []
+                }
             }
         case "occupants":
             if let cid = e["conversation"] as? Int, let list = e["list"] as? [[String: Any]] {

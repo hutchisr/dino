@@ -173,6 +173,7 @@ private enum GeckoPreviewFixtures {
         ]
         model.subscriptionRequests = ["newfriend@example.org"]
         model.chatStates = [1: "composing"]
+        model.typingNames = [1: ["Anemone"]]
         return model
     }
 }
@@ -815,7 +816,7 @@ struct ChatView: View {
     }
 
     private var hasComposerAccessory: Bool {
-        model.chatStates[conversationId] == "composing" || editing != nil || replyingTo != nil
+        model.typingIndicatorText(for: conversationId) != nil || editing != nil || replyingTo != nil
             || pendingFileSend != nil
     }
 
@@ -829,9 +830,9 @@ struct ChatView: View {
         // without it the banners (a bare ViewBuilder tuple) laid out wrong and
         // the reply preview ended up under the input.
         VStack(spacing: 0) {
-            if model.chatStates[conversationId] == "composing" {
+            if let typingText = model.typingIndicatorText(for: conversationId) {
                 HStack {
-                    Text("typing…")
+                    Text(typingText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
