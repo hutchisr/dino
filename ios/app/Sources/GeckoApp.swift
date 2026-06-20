@@ -1696,14 +1696,12 @@ struct MessageBubble: View {
     }
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            replyIndicator
-                .padding(.leading, 2)
-            bubbleRow
-                .offset(x: dragOffset)
-        }
-        .contentShape(Rectangle())
-        .gesture(replySwipeGesture)
+        // The whole row slides right on swipe; the reply icon is anchored to the
+        // bubble's leading edge (a leading-aligned background on the bubble) and
+        // counter-offset by the drag so it holds still, getting revealed from
+        // beneath the bubble as it slides off it.
+        bubbleRow
+            .offset(x: dragOffset)
     }
 
     private var replyIndicator: some View {
@@ -1775,10 +1773,25 @@ struct MessageBubble: View {
                 .padding(.vertical, 6)
                 .background(msg.direction == "out" ? Color.accentColor.opacity(0.2) : Color(.secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
+                // Reply affordance parked just behind the bubble's leading edge
+                // and counter-offset by the drag, so it holds still while the
+                // bubble slides off it — revealed from beneath the bubble for both
+                // incoming and outgoing messages (it lives at the bubble, not at
+                // the row's edge). Hidden at rest via `replyIndicatorOpacity`.
+                .background(alignment: .leading) {
+                    replyIndicator
+                        .offset(x: -dragOffset)
+                }
+                .contentShape(Rectangle())
                 .onLongPressGesture(minimumDuration: 0.35) {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     onActions?(msg)
                 }
+                // Slide-to-reply is anchored to the bubble itself, not the whole
+                // row — dragging the empty gutter beside a message no longer arms
+                // a reply. The whole row still slides as visual feedback (the
+                // offset lives on `bubbleRow`).
+                .gesture(replySwipeGesture)
                 if !msg.reactions.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(msg.reactions, id: \.emoji) { r in
@@ -1804,7 +1817,13 @@ struct MessageBubble: View {
     }
 
     private var replySwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 25)
+        // Measure in the GLOBAL space, not the bubble's local space: the gesture
+        // lives on the bubble, but the bubble is the view we shift by `dragOffset`.
+        // In local coordinates that shift moves the view out from under the finger,
+        // shrinking the translation, which shrinks the offset — a feedback loop
+        // that makes the bubble vibrate. Global coordinates are immune to the
+        // view's own offset, so the translation tracks the finger cleanly.
+        DragGesture(minimumDistance: 25, coordinateSpace: .global)
             .onChanged { value in
                 // Horizontal pull to the right only; vertical motion stays scroll.
                 guard value.translation.width > 0,
