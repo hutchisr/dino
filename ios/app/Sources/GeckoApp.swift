@@ -1724,6 +1724,11 @@ struct MessageBubble: View {
                                avatarPath: senderAvatarPath,
                                requestAvatar: { onAvatarNeeded?(msg.from) })
                         .padding(.top, showSender ? 16 : 0)
+                        // Sit in front of the reply icon (a background of the
+                        // bubble): as the row slides on swipe, the avatar passes
+                        // over the stationary icon and should occlude it, just
+                        // like the bubble does.
+                        .zIndex(1)
                 } else {
                     Color.clear.frame(width: 30, height: 1)
                 }
