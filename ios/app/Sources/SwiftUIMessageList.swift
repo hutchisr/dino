@@ -53,6 +53,25 @@ struct SwiftUIMessageList: View {
     /// scrolling changes `stickToBottom`.
     @State private var userInteracting = false
 
+    /// Briefly flipped true to cancel any in-flight momentum/slide before a
+    /// programmatic scroll-to-bottom, so the glide starts from rest instead of
+    /// fighting a decelerating scroll. Toggling `.scrollDisabled` halts the
+    /// active scroll immediately; we drop it again on the next run loop.
+    @State private var haltScroll = false
+
+    /// Latest measured remaining downward travel (points to the bottom). Parked
+    /// in a reference holder so updating it on every scroll frame doesn't
+    /// invalidate the view; read when scrolling to the bottom to scale the
+    /// animation duration to the distance (a roughly constant glide speed,
+    /// instead of a fixed time that whips past from far up).
+    @State private var metrics = ScrollMetrics()
+
+    /// Mutable scroll metrics kept OUT of `@State`-tracked value storage so
+    /// per-frame writes don't re-render the list.
+    private final class ScrollMetrics {
+        var distanceFromBottom: CGFloat = 0
+    }
+
     /// Slack (points) for the at-bottom test so the button doesn't flicker at
     /// rest under rubber-banding / sub-pixel offsets. Matches the spirit of the
     /// inverted table's 8pt threshold but a touch looser for SwiftUI's geometry.
@@ -69,6 +88,7 @@ struct SwiftUIMessageList: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
+            .scrollDisabled(haltScroll)
             // The chat chrome (top bar, composer) floats over the list, so inset
             // the content (and the scroll indicators independently) to clear it.
             .contentMargins(.top, max(0, visualTopInset), for: .scrollContent)
@@ -86,6 +106,7 @@ struct SwiftUIMessageList: View {
                     - geo.containerSize.height - geo.contentInsets.top
                 return max(0, bottomOffsetY - geo.contentOffset.y)
             } action: { _, distanceFromBottom in
+                metrics.distanceFromBottom = distanceFromBottom
                 let atBottom = distanceFromBottom <= Self.bottomThreshold
                 // While we intend to stay glued and the user isn't dragging,
                 // treat a gap opened purely by content growth as still-at-bottom,
@@ -124,7 +145,14 @@ struct SwiftUIMessageList: View {
             }
             .onChange(of: scrollToBottomToken) { _, _ in
                 stickToBottom = true
-                scrollToNewest(proxy, animated: true, initial: false)
+                // Cancel any in-flight momentum/slide first (toggling
+                // `.scrollDisabled` halts a decelerating scroll immediately), then
+                // glide from rest on the next run loop so the two don't fight.
+                haltScroll = true
+                DispatchQueue.main.async {
+                    haltScroll = false
+                    scrollToNewest(proxy, animated: true, initial: false)
+                }
             }
             // The user's own dragging/flinging is the only thing that releases
             // the stick-to-bottom intent; track when they're driving the scroll
@@ -149,7 +177,13 @@ struct SwiftUIMessageList: View {
         // the reader to bring it into view.
         DispatchQueue.main.async {
             if animated {
-                withAnimation(.easeOut(duration: 0.2)) {
+                // Scale the duration with the distance to the bottom so a scroll
+                // from far up doesn't whip past in a fixed-time blur — keep a
+                // roughly constant glide speed, clamped so short hops stay snappy
+                // and very long ones don't drag.
+                let distance = metrics.distanceFromBottom
+                let duration = min(0.7, max(0.25, distance / 5000))
+                withAnimation(.easeInOut(duration: duration)) {
                     proxy.scrollTo(last, anchor: .bottom)
                 }
             } else {
