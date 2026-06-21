@@ -26,6 +26,11 @@ struct GeckoApp: App {
                 PushRegistration.clearDelivered()
                 if model.ready && model.hasAccount {
                     GeckoCore.shared.appForegrounded()
+                    // The notification-service extension may have stored new
+                    // messages in the shared DB while we were suspended; reload
+                    // so the open chat doesn't miss them (no in-process signal
+                    // fires for another process's writes).
+                    model.refreshAfterForeground()
                 }
             case .background:
                 // Cleanly disconnect (after a short grace delay) so iOS doesn't

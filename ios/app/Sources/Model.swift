@@ -411,6 +411,23 @@ final class AppModel: ObservableObject {
         GeckoCore.shared.requestMessages(conversation: id)
     }
 
+    /// Re-read state from the shared DB when returning to the foreground.
+    ///
+    /// While the app is suspended the notification-service extension (a
+    /// separate process) can receive, decrypt and store new messages directly
+    /// in the shared DB. No in-process `new_item` signal fires for those
+    /// writes, and if the chat they belong to is already the open one its
+    /// `onAppear` won't re-run on foreground — so without an explicit refresh
+    /// those messages stay missing from the open chat until it's left and
+    /// reopened. Reloading the open conversation's messages (and the
+    /// conversation list previews/unread counts) from the DB picks them up.
+    func refreshAfterForeground() {
+        GeckoCore.shared.requestState()
+        if let id = navigation.last {
+            GeckoCore.shared.requestMessages(conversation: id)
+        }
+    }
+
     func send(_ id: Int32, _ body: String, replyTo: Int32 = 0) {
         GeckoCore.shared.sendText(conversation: id, body: body, replyTo: replyTo)
     }
