@@ -99,7 +99,177 @@ private enum GeckoPreviewFixtures {
         ),
     ]
 
+    /// A real on-disk image so the "downloaded image" fixtures render an actual
+    /// picture (the bubble loads from `msg.path`). Rendered once to a temp file.
+    static let sampleImagePath: String = {
+        let size = CGSize(width: 1200, height: 800)
+        let image = UIGraphicsImageRenderer(size: size).image { ctx in
+            let colors = [UIColor.systemIndigo.cgColor, UIColor.systemTeal.cgColor]
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                         colors: colors as CFArray, locations: [0, 1]) {
+                ctx.cgContext.drawLinearGradient(
+                    gradient, start: .zero,
+                    end: CGPoint(x: size.width, y: size.height), options: [])
+            }
+            let text = "Sample image" as NSString
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.boldSystemFont(ofSize: 72),
+                .foregroundColor: UIColor.white,
+            ]
+            let textSize = text.size(withAttributes: attrs)
+            text.draw(at: CGPoint(x: (size.width - textSize.width) / 2,
+                                  y: (size.height - textSize.height) / 2),
+                      withAttributes: attrs)
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gecko-preview-sample.jpg")
+        if let data = image.jpegData(compressionQuality: 0.9) {
+            try? data.write(to: url)
+        }
+        return url.path
+    }()
+
     static let messages: [ChatMessage] = [
+        ChatMessage(
+            id: 88,
+            content: "text",
+            direction: "in",
+            from: "anemone@xmpp.is",
+            fromDisplay: "Anemone",
+            body: "Morning! Did the new build land on your phone yet?",
+            time: Date().addingTimeInterval(-3600),
+            encryption: "OMEMO",
+            marked: "read"
+        ),
+        ChatMessage(
+            id: 89,
+            content: "text",
+            direction: "out",
+            from: "rachel@example.org",
+            body: "Just installed it. Pulling up a chat now to look at the bubbles.",
+            time: Date().addingTimeInterval(-3540),
+            encryption: "OMEMO",
+            editable: true,
+            marked: "read"
+        ),
+        ChatMessage(
+            id: 90,
+            content: "text",
+            direction: "in",
+            from: "anemone@xmpp.is",
+            fromDisplay: "Anemone",
+            body: "The corners look much cleaner now. Padding feels right too.",
+            time: Date().addingTimeInterval(-3480),
+            encryption: "OMEMO",
+            marked: "read"
+        ),
+        ChatMessage(
+            id: 91,
+            content: "text",
+            direction: "out",
+            from: "rachel@example.org",
+            body: "Yeah, I tightened the inset and fixed the timestamp baseline.",
+            time: Date().addingTimeInterval(-3420),
+            encryption: "OMEMO",
+            editable: true,
+            marked: "read"
+        ),
+        ChatMessage(
+            id: 92,
+            content: "text",
+            direction: "in",
+            from: "anemone@xmpp.is",
+            fromDisplay: "Anemone",
+            body: "Here's the screenshot from my device so you can compare side by side.",
+            time: Date().addingTimeInterval(-3000),
+            encryption: "OMEMO",
+            marked: "read"
+        ),
+        ChatMessage(
+            id: 93,
+            content: "file",
+            direction: "in",
+            from: "anemone@xmpp.is",
+            fromDisplay: "Anemone",
+            body: "",
+            time: Date().addingTimeInterval(-2940),
+            encryption: "OMEMO",
+            fileName: "sunset.jpg",
+            mime: "image/jpeg",
+            size: 1_280_000,
+            fileState: "complete",
+            path: sampleImagePath,
+            marked: "read"
+        ),
+        ChatMessage(
+            id: 94,
+            content: "text",
+            direction: "out",
+            from: "rachel@example.org",
+            body: "That gradient renders crisp — thumbnail downsampling is working nicely.",
+            time: Date().addingTimeInterval(-2880),
+            encryption: "OMEMO",
+            editable: true,
+            reactions: [
+                Reaction(emoji: "🔥", count: 1, me: false),
+            ],
+            marked: "read"
+        ),
+        ChatMessage(
+            id: 95,
+            content: "text",
+            direction: "in",
+            from: "anemone@xmpp.is",
+            fromDisplay: "Anemone",
+            body: "Let's also check a really long paragraph so we can see how the bubble wraps across several lines and whether the timestamp still sits where it should at the very bottom.",
+            time: Date().addingTimeInterval(-2400),
+            encryption: "OMEMO",
+            marked: "read"
+        ),
+        ChatMessage(
+            id: 96,
+            content: "text",
+            direction: "out",
+            from: "rachel@example.org",
+            body: "Wrapping looks good even at four or five lines.",
+            time: Date().addingTimeInterval(-2340),
+            encryption: "OMEMO",
+            editable: true,
+            marked: "read"
+        ),
+        ChatMessage(
+            id: 97,
+            content: "text",
+            direction: "in",
+            from: "offline@example.org",
+            fromDisplay: "Sam",
+            body: "Jumping in from the group to test the sender header.",
+            time: Date().addingTimeInterval(-1800),
+            encryption: "OMEMO",
+            marked: "read"
+        ),
+        ChatMessage(
+            id: 98,
+            content: "text",
+            direction: "in",
+            from: "anemone@xmpp.is",
+            fromDisplay: "Anemone",
+            body: "And another one right after to verify consecutive grouping.",
+            time: Date().addingTimeInterval(-1500),
+            encryption: "OMEMO",
+            marked: "read"
+        ),
+        ChatMessage(
+            id: 99,
+            content: "text",
+            direction: "out",
+            from: "rachel@example.org",
+            body: "Looks great. Scrolling through more than a page now.",
+            time: Date().addingTimeInterval(-1200),
+            encryption: "OMEMO",
+            editable: true,
+            marked: "read"
+        ),
         ChatMessage(
             id: 100,
             content: "text",
