@@ -993,7 +993,8 @@ struct ChatView: View {
     }
 
     private var hasComposerAccessory: Bool {
-        editing != nil || replyingTo != nil || pendingFileSend != nil
+        model.typingIndicatorText(for: conversationId) != nil
+            || editing != nil || replyingTo != nil || pendingFileSend != nil
     }
 
     private var shouldShowSendButton: Bool {
@@ -1006,6 +1007,23 @@ struct ChatView: View {
         // without it the banners (a bare ViewBuilder tuple) laid out wrong and
         // the reply preview ended up under the input.
         VStack(spacing: 0) {
+            if let typingText = model.typingIndicatorText(for: conversationId) {
+                HStack {
+                    Text(typingText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        // Glass capsule (matching the composer chrome) so it
+                        // stays legible over message content scrolling behind the
+                        // floating composer, without a flat opaque fill.
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .glassEffect(.regular, in: Capsule())
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 2)
+            }
             if editing != nil {
                 composerBanner(icon: "pencil", cancelLabel: "Cancel edit") {
                     editing = nil
@@ -1032,26 +1050,6 @@ struct ChatView: View {
                 pendingFileSendPanel(pendingFileSend)
             }
             inputBar
-        }
-    }
-
-    @ViewBuilder
-    private var typingIndicatorOverlay: some View {
-        if let typingText = model.typingIndicatorText(for: conversationId) {
-            HStack {
-                Text(typingText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .glassEffect(.regular, in: Capsule())
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 14)
-            .padding(.bottom, typingIndicatorBottomPadding())
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-            .allowsHitTesting(false)
         }
     }
 
@@ -1466,11 +1464,6 @@ struct ChatView: View {
         return max(0, bottomChromeInset - composerInputVerticalPadding)
     }
 
-    private func typingIndicatorBottomPadding() -> CGFloat {
-        let toolbarHeight = max(composerHeight, composerControlHeight + composerInputVerticalPadding * 2)
-        return toolbarHeight + 4
-    }
-
     private func updateKeyboardOverlap(from note: Notification) {
         guard
             let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
@@ -1674,9 +1667,6 @@ struct ChatView: View {
                                 }
                             }
                     }
-                }
-                .overlay(alignment: .bottom) {
-                    typingIndicatorOverlay
                 }
                 .overlay(alignment: .bottom) {
                     composerToolbar
