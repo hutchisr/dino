@@ -221,7 +221,8 @@ private enum GeckoPreviewFixtures {
             direction: "in",
             from: "anemone@xmpp.is",
             fromDisplay: "Anemone",
-            body: "Let's also check a really long paragraph so we can see how the bubble wraps across several lines and whether the timestamp still sits where it should at the very bottom.",
+            body: "Let's also check a really long paragraph so we can see how the bubble wraps across "
+                + "several lines and whether the timestamp still sits where it should at the very bottom.",
             time: Date().addingTimeInterval(-2400),
             encryption: "OMEMO",
             marked: "read"
@@ -1194,39 +1195,48 @@ struct ChatView: View {
                     }
                 }
 
-                TextField("Message", text: $draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    // Grow with the text up to a cap, then scroll internally.
-                    .lineLimit(1...6)
-                    // Vertical inset too (not just horizontal) so multi-line text
-                    // stays inside the capsule instead of spilling past its
-                    // rounded top/bottom edges.
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 11)
-                    .frame(minHeight: composerControlHeight)
-                    // RoundedRectangle, not Capsule: a wide multi-line field made
-                    // a Capsule rounds its left/right ends into big semicircles
-                    // (radius = half the height) that clip the text. Fixed 22pt
-                    // corners keep a full-width text area; at one line (44pt tall)
-                    // it still reads as a pill.
-                    .glassEffect(.regular, in: .rect(cornerRadius: 22))
-                    .glassEffectID("composerField", in: composerGlass)
-                    .onChange(of: draft) { _, value in
-                        if editing == nil {
-                            model.setTyping(conversationId, !value.isEmpty)
-                        }
-                        // Drive the send button's presence explicitly so it
-                        // morphs in/out (split from / merge into the field) on
-                        // BOTH first keystroke and delete-to-empty — relying on
-                        // an implicit .animation(value:) didn't animate the
-                        // structural removal on delete.
-                        // Snappy so the button reaches its tappable position
-                        // fast — a slow morph leaves it briefly unresponsive
-                        // right after a send (while it animates back in).
-                        withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                            showSend = shouldShowSendButton
-                        }
+                ZStack(alignment: .topLeading) {
+                    if draft.isEmpty {
+                        Text("Message")
+                            .foregroundStyle(.secondary)
+                            .allowsHitTesting(false)
                     }
+                    PasteAwareComposerTextView(
+                        text: $draft,
+                        maxLines: 6,
+                        canPasteImages: editing == nil,
+                        onImagePaste: stagePastedImage
+                    )
+                }
+                // Vertical inset too (not just horizontal) so multi-line text
+                // stays inside the capsule instead of spilling past its
+                // rounded top/bottom edges.
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+                .frame(maxWidth: .infinity, minHeight: composerControlHeight)
+                // RoundedRectangle, not Capsule: a wide multi-line field made
+                // a Capsule rounds its left/right ends into big semicircles
+                // (radius = half the height) that clip the text. Fixed 22pt
+                // corners keep a full-width text area; at one line (44pt tall)
+                // it still reads as a pill.
+                .glassEffect(.regular, in: .rect(cornerRadius: 22))
+                .glassEffectID("composerField", in: composerGlass)
+                .onChange(of: draft) { _, value in
+                    if editing == nil {
+                        model.setTyping(conversationId, !value.isEmpty)
+                    }
+                    // Drive the send button's presence explicitly so it
+                    // morphs in/out (split from / merge into the field) on
+                    // BOTH first keystroke and delete-to-empty — relying on
+                    // an implicit .animation(value:) didn't animate the
+                    // structural removal on delete.
+                    // Snappy so the button reaches its tappable position
+                    // fast — a slow morph leaves it briefly unresponsive
+                    // right after a send (while it animates back in).
+                    withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                        showSend = shouldShowSendButton
+                    }
+                }
 
                 if showSend {
                     // Blue send button that fluidly splits out of the text
@@ -1305,6 +1315,27 @@ struct ChatView: View {
         model.sendFile(conversationId, path: pendingFileSend.url.path)
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             self.pendingFileSend = nil
+        }
+    }
+
+    private func stagePastedImage(_ image: ComposerPastedImage) {
+        guard editing == nil else { return }
+        let byteCount = Int64(image.data.count)
+        guard AttachmentStaging.canStageFile(byteCount: byteCount) else {
+            let limit = ByteCountFormatter.string(
+                fromByteCount: AttachmentStaging.maxByteCount,
+                countStyle: .file)
+            model.lastError = "This image is too large to send. The local staging limit is \(limit)."
+            return
+        }
+
+        let url = AttachmentStaging.temporaryPastedImageURL(fileExtension: image.fileExtension)
+        do {
+            try image.data.write(to: url, options: .atomic)
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { showAttach = false }
+            setPendingFileSend(url)
+        } catch {
+            model.lastError = "Could not paste this image."
         }
     }
 

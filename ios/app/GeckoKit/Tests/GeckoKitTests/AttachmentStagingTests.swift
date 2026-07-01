@@ -23,6 +23,26 @@ final class AttachmentStagingTests: XCTestCase {
         XCTAssertEqual(staged.path, "/tmp/gecko/00000000-0000-0000-0000-000000000123-cat.jpg")
     }
 
+    func testTemporaryPastedImageURLUsesReadableNameAndExtension() {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-000000000123")!
+        let temp = URL(fileURLWithPath: "/tmp/gecko")
+        let staged = AttachmentStaging.temporaryPastedImageURL(
+            fileExtension: "PNG",
+            in: temp,
+            id: id)
+        XCTAssertEqual(staged.path, "/tmp/gecko/00000000-0000-0000-0000-000000000123-Pasted Image.png")
+    }
+
+    func testTemporaryPastedImageURLHandlesLeadingDot() {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-000000000123")!
+        let temp = URL(fileURLWithPath: "/tmp/gecko")
+        let staged = AttachmentStaging.temporaryPastedImageURL(
+            fileExtension: ".jpg",
+            in: temp,
+            id: id)
+        XCTAssertEqual(staged.path, "/tmp/gecko/00000000-0000-0000-0000-000000000123-Pasted Image.jpg")
+    }
+
     func testTemporaryDirectoryCheckDoesNotMatchSiblingPrefix() {
         let temp = URL(fileURLWithPath: "/tmp/gecko")
         XCTAssertTrue(AttachmentStaging.isInTemporaryDirectory(

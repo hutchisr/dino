@@ -22,6 +22,18 @@ enum AttachmentStaging {
         return temporaryDirectory.appendingPathComponent("\(id.uuidString)-\(name)")
     }
 
+    static func temporaryPastedImageURL(
+        fileExtension: String,
+        in temporaryDirectory: URL = FileManager.default.temporaryDirectory,
+        id: UUID = UUID()
+    ) -> URL {
+        let trimmedExtension = fileExtension
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".").union(.whitespacesAndNewlines))
+            .lowercased()
+        let name = trimmedExtension.isEmpty ? "Pasted Image" : "Pasted Image.\(trimmedExtension)"
+        return temporaryDirectory.appendingPathComponent("\(id.uuidString)-\(name)")
+    }
+
     static func isInTemporaryDirectory(
         _ url: URL,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory
