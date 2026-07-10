@@ -105,3 +105,28 @@ final class LinkifiedBodyTests: XCTestCase {
         XCTAssertEqual(found.first?.url.scheme, "mailto")
     }
 }
+
+final class DeliveryMarkReconciliationTests: XCTestCase {
+    func testInitialSendStillShowsAsSending() {
+        XCTAssertEqual(
+            reconciledDeliveryMark(previous: nil, incoming: "sending"),
+            "sending")
+    }
+
+    func testRetryKeepsAlreadyPendingMessagePending() {
+        var mark: String? = nil
+        for incoming in ["unsent", "sending", "unsent", "sending"] {
+            mark = reconciledDeliveryMark(previous: mark, incoming: incoming)
+        }
+
+        XCTAssertEqual(mark, "unsent")
+    }
+
+    func testConfirmedAndTerminalStatesReplacePending() {
+        for incoming in ["sent", "received", "acknowledged", "read", "error", "wontsend"] {
+            XCTAssertEqual(
+                reconciledDeliveryMark(previous: "unsent", incoming: incoming),
+                incoming)
+        }
+    }
+}

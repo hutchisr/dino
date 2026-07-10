@@ -511,7 +511,7 @@ private static string content_item_json(string type, Dino.ContentItem item, Conv
             app.stream_interactor.get_module(Dino.MessageCorrection.IDENTITY).is_own_correction_allowed(conversation, m);
         string from_display = Dino.get_participant_display_name(app.stream_interactor, conversation, m.from);
         return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"text\",\"direction\":\"%s\",\"from\":\"%s\",\"from_display\":\"%s\",\"body\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"editable\":%s,\"marked\":\"%s\",\"quote\":%s,\"reactions\":%s}".printf(
-            type, conversation.id, item.id, direction, esc(m.from.to_string()), esc(from_display), esc(display_body(m)), m.time.to_unix(), enc_name(m.encryption),
+            type, conversation.id, item.id, direction, esc(m.from.to_string()), esc(from_display), esc(display_body(m)), item.time.to_unix(), enc_name(m.encryption),
             editable ? "true" : "false", marked_name(m.marked), quote_json(m, conversation), reactions_json(item, conversation));
     }
     var fi = item as Dino.FileItem;
@@ -1350,8 +1350,39 @@ public void request_messages(int conversation_id, int count) {
         Conversation? c = conversation_by_id(cid);
         if (c == null) return Source.REMOVE;
         var items = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).get_n_latest(c, n);
+        string next_before = items.size > 0 ? items.get(0).id.to_string() : "null";
         var b = new StringBuilder();
-        b.append_printf("{\"type\":\"history\",\"conversation\":%d,\"items\":[", cid);
+        b.append_printf("{\"type\":\"history\",\"conversation\":%d,\"complete\":%s,\"next_before\":%s,\"items\":[",
+            cid, items.size < n ? "true" : "false", next_before);
+        bool first = true;
+        foreach (Dino.ContentItem item in items) {
+            if (!first) b.append_c(',');
+            first = false;
+            b.append(content_item_json("item", item, c));
+        }
+        b.append("]}");
+        emit(b.str);
+        return Source.REMOVE;
+    });
+}
+
+public void request_messages_before(int conversation_id, int before_item_id, int count) {
+    int cid = conversation_id; int before_id = before_item_id; int n = count;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) return Source.REMOVE;
+        var store = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY);
+        Dino.ContentItem? before = store.get_item_by_id(c, before_id);
+        if (before == null) {
+            emit("{\"type\":\"history_before\",\"conversation\":%d,\"before\":%d,\"complete\":true,\"next_before\":null,\"items\":[]}"
+                .printf(cid, before_id));
+            return Source.REMOVE;
+        }
+        var items = store.get_before(c, before, n);
+        string next_before = items.size > 0 ? items.get(0).id.to_string() : "null";
+        var b = new StringBuilder();
+        b.append_printf("{\"type\":\"history_before\",\"conversation\":%d,\"before\":%d,\"complete\":%s,\"next_before\":%s,\"items\":[",
+            cid, before_id, items.size < n ? "true" : "false", next_before);
         bool first = true;
         foreach (Dino.ContentItem item in items) {
             if (!first) b.append_c(',');

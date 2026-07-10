@@ -131,6 +131,12 @@ struct ChatMessage: Identifiable, Equatable {
         let ext = (fileName as NSString).pathExtension.lowercased()
         return ["png", "jpg", "jpeg", "gif", "webp", "heic", "bmp"].contains(ext)
     }
+
+    var isVideo: Bool {
+        if mime.hasPrefix("video/") { return true }
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        return ["mp4", "m4v", "mov", "qt", "3gp", "3g2"].contains(ext)
+    }
 }
 
 @MainActor
@@ -165,6 +171,9 @@ final class AppModel: ObservableObject {
 
     private var pendingChatJid: String?
     private var requestedAvatars = Set<String>()
+    private let messagePageSize: Int32 = 50
+    private var historyPagination: [Int32: HistoryPagination] = [:]
+    private var replacingMessageHistory = Set<Int32>()
     private var messageRevisions: [Int32: Int] = [:]
     private var avatarRevision = 0
 
@@ -408,7 +417,16 @@ final class AppModel: ObservableObject {
     }
 
     func openConversation(_ id: Int32) {
-        GeckoCore.shared.requestMessages(conversation: id)
+        historyPagination[id] = HistoryPagination()
+        replacingMessageHistory.insert(id)
+        GeckoCore.shared.requestMessages(conversation: id, count: messagePageSize)
+    }
+
+    func requestOlderMessages(_ id: Int32) {
+        var paging = historyPagination[id] ?? HistoryPagination()
+        guard let before = paging.beginOlderRequest() else { return }
+        historyPagination[id] = paging
+        GeckoCore.shared.requestMessagesBefore(conversation: id, before: before, count: messagePageSize)
     }
 
     /// Re-read state from the shared DB when returning to the foreground.
@@ -466,6 +484,8 @@ final class AppModel: ObservableObject {
             conversations = []
             messages = [:]
             messageRevisions = [:]
+            historyPagination = [:]
+            replacingMessageHistory = []
             replaceNavigation(with: [])
             roster = []
             subscriptionRequests = []
@@ -601,20 +621,61 @@ final class AppModel: ObservableObject {
             }
         case "history":
             if let cid = e["conversation"] as? Int, let items = e["items"] as? [[String: Any]] {
-                replaceMessages(
-                    items.compactMap(Self.decodeMessage).sorted { $0.time < $1.time },
-                    for: Int32(cid))
+                let conversationId = Int32(cid)
+                let complete = (e["complete"] as? Bool) ?? (items.count < Int(messagePageSize))
+                let oldestItemID = Self.historyNextBeforeItemID(e, items: items)
+                let decoded = items.compactMap(Self.decodeMessage).sorted { lhs, rhs in
+                    if lhs.time == rhs.time { return lhs.id < rhs.id }
+                    return lhs.time < rhs.time
+                }
+                var paging = historyPagination[conversationId] ?? HistoryPagination()
+                if replacingMessageHistory.remove(conversationId) != nil {
+                    paging.replaceWithLatestPage(oldestItemID: oldestItemID, complete: complete)
+                    replaceMessages(decoded, for: conversationId)
+                } else {
+                    paging.refreshLatestPage(oldestItemID: oldestItemID, complete: complete)
+                    reconcileLatestMessages(items, complete: complete, for: conversationId)
+                }
+                historyPagination[conversationId] = paging
+                if decoded.isEmpty, (messages[conversationId] ?? []).isEmpty,
+                   !paging.reachedBeginning {
+                    requestOlderMessages(conversationId)
+                }
+            }
+        case "history_before":
+            if let cid = e["conversation"] as? Int,
+               let items = e["items"] as? [[String: Any]],
+               let rawBefore = e["before"] as? Int,
+               let before = Int32(exactly: rawBefore) {
+                let conversationId = Int32(cid)
+                let complete = (e["complete"] as? Bool) ?? (items.count < Int(messagePageSize))
+                let oldestItemID = Self.historyNextBeforeItemID(e, items: items)
+                var paging = historyPagination[conversationId] ?? HistoryPagination()
+                if paging.receiveOlderPage(
+                    requestedBeforeItemID: before,
+                    oldestItemID: oldestItemID,
+                    complete: complete
+                ) {
+                    historyPagination[conversationId] = paging
+                    let previousMessageCount = messages[conversationId]?.count ?? 0
+                    let decoded = items.compactMap(Self.decodeMessage).sorted { lhs, rhs in
+                        if lhs.time == rhs.time { return lhs.id < rhs.id }
+                        return lhs.time < rhs.time
+                    }
+                    mergeMessages(decoded, for: conversationId)
+                    // If the raw page added no rendered row (unsupported items,
+                    // or an item already merged from an out-of-window update),
+                    // neither list gets a layout/appearance trigger for the next
+                    // page, so advance again here.
+                    if (messages[conversationId]?.count ?? 0) == previousMessageCount,
+                       !paging.reachedBeginning {
+                        requestOlderMessages(conversationId)
+                    }
+                }
             }
         case "message", "item":
             if let m = Self.decodeMessage(e), let cid = e["conversation"] as? Int {
-                var list = messages[Int32(cid)] ?? []
-                if let i = list.firstIndex(where: { $0.id == m.id }) {
-                    list[i] = m
-                } else {
-                    list.append(m)
-                    list.sort { $0.time < $1.time }
-                }
-                replaceMessages(list, for: Int32(cid))
+                mergeMessages([m], for: Int32(cid))
             }
         case "error", "fatal":
             lastError = e["message"] as? String
@@ -624,9 +685,79 @@ final class AppModel: ObservableObject {
     }
 
     private func replaceMessages(_ list: [ChatMessage], for cid: Int32) {
-        guard messages[cid] != list else { return }
+        let previousMarks = Dictionary(
+            uniqueKeysWithValues: (messages[cid] ?? []).map { ($0.id, $0.marked) })
+        let reconciled = list.map { incoming in
+            var message = incoming
+            message.marked = reconciledDeliveryMark(
+                previous: previousMarks[message.id],
+                incoming: message.marked)
+            return message
+        }
+        guard messages[cid] != reconciled else { return }
         messageRevisions[cid, default: 0] &+= 1
-        messages[cid] = list
+        messages[cid] = reconciled
+    }
+
+    private func mergeMessages(_ incoming: [ChatMessage], for cid: Int32) {
+        guard !incoming.isEmpty else { return }
+        var byID = Dictionary(uniqueKeysWithValues: (messages[cid] ?? []).map { ($0.id, $0) })
+        for message in incoming {
+            byID[message.id] = message
+        }
+        replaceMessages(byID.values.sorted { lhs, rhs in
+            if lhs.time == rhs.time { return lhs.id < rhs.id }
+            return lhs.time < rhs.time
+        }, for: cid)
+    }
+
+    /// Treat the newest history page as authoritative while retaining any older
+    /// pages already loaded above it. The raw page supplies the cursor even when
+    /// it contains content types this UI does not render (for example calls).
+    private func reconcileLatestMessages(
+        _ rawItems: [[String: Any]],
+        complete: Bool,
+        for cid: Int32
+    ) {
+        let incoming = rawItems.compactMap(Self.decodeMessage)
+        var retained: [ChatMessage] = []
+        if !complete, let boundary = rawItems.compactMap(Self.messageCursor).min(by: Self.cursorIsEarlier) {
+            retained = (messages[cid] ?? []).filter { message in
+                message.time < boundary.time
+                    || (message.time == boundary.time && message.id < boundary.id)
+            }
+        }
+
+        var byID = Dictionary(uniqueKeysWithValues: retained.map { ($0.id, $0) })
+        for message in incoming {
+            byID[message.id] = message
+        }
+        replaceMessages(byID.values.sorted { lhs, rhs in
+            if lhs.time == rhs.time { return lhs.id < rhs.id }
+            return lhs.time < rhs.time
+        }, for: cid)
+    }
+
+    private static func messageCursor(_ item: [String: Any]) -> (time: Date, id: Int32)? {
+        guard let seconds = item["time"] as? Int, let id = item["item"] as? Int else { return nil }
+        return (Date(timeIntervalSince1970: TimeInterval(seconds)), Int32(id))
+    }
+
+    private static func cursorIsEarlier(
+        _ lhs: (time: Date, id: Int32),
+        _ rhs: (time: Date, id: Int32)
+    ) -> Bool {
+        if lhs.time == rhs.time { return lhs.id < rhs.id }
+        return lhs.time < rhs.time
+    }
+
+    private static func historyNextBeforeItemID(
+        _ event: [String: Any],
+        items: [[String: Any]]
+    ) -> Int32? {
+        let rawID = (event["next_before"] as? Int) ?? (items.first?["item"] as? Int)
+        guard let rawID, let itemID = Int32(exactly: rawID), itemID > 0 else { return nil }
+        return itemID
     }
 
     private func setAvatarPath(_ path: String?, for jid: String) {

@@ -178,9 +178,12 @@ struct AccountSettingsView: View {
                 }
             }
             .sheet(isPresented: $showPhotoPicker) {
-                PhotoPicker { url in
-                    model.setAvatar(path: url.path)
-                }
+                PhotoPicker(
+                    allowsVideos: false,
+                    onPicked: { url in model.setAvatar(path: url.path) },
+                    onTooLarge: {
+                        model.lastError = AttachmentStaging.tooLargeMessage(noun: "image")
+                    })
             }
             .onAppear {
                 model.requestAccountDetails()

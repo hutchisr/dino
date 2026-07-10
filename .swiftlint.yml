@@ -1,10 +1,20 @@
-# SwiftLint config for the iOS app (ios/app/Sources) + NSE (ios/nse).
+# SwiftLint config for the iOS app, GeckoKit, and NSE.
 # Tuned to this codebase's conventions so the linter surfaces real problems
 # rather than style noise:
 #  - short local names (e, c, jid, me) are idiomatic here
 #  - a couple of types are naturally large (AppModel, the event dispatcher)
 #  - trailing commas in multi-line literals are intentional (clean diffs)
 # The bug-catching rules (unused bindings/params, force casts, etc.) stay on.
+
+# Restrict discovery to code owned by this repository. The checkout also holds
+# multi-gigabyte generated dependency/build trees; recursively walking the repo
+# root can overflow SwiftLint's file collector before linting begins.
+included:
+  - ios/app/Sources
+  - ios/app/GeckoKit/Package.swift
+  - ios/app/GeckoKit/Sources
+  - ios/app/GeckoKit/Tests
+  - ios/nse
 
 excluded:
   - "**/.build"      # SwiftPM build dir (GeckoKit) — generated sources

@@ -1,7 +1,13 @@
 import SwiftUI
 import UIKit
+import AVKit
 
 struct ImageViewerItem: Identifiable {
+    let id: String
+    var path: String { id }
+}
+
+struct VideoViewerItem: Identifiable {
     let id: String
     var path: String { id }
 }
@@ -75,6 +81,52 @@ struct ImageViewer: View {
         if !Task.isCancelled {
             image = decoded
             failed = decoded == nil
+        }
+    }
+}
+
+struct VideoViewer: View {
+    let path: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer?
+
+    private var url: URL {
+        URL(fileURLWithPath: path)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+            }
+            .toolbarBackground(.black.opacity(0.6), for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+        }
+        .background(Color.black)
+        .onAppear {
+            let p = AVPlayer(url: url)
+            player = p
+            p.play()
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
         }
     }
 }

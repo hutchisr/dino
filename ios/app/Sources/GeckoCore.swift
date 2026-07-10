@@ -113,6 +113,9 @@ final class GeckoCore {
     func requestState() { dino_ios_request_state() }
     func startConversation(jid: String) { dino_ios_start_conversation(jid) }
     func requestMessages(conversation: Int32, count: Int32 = 50) { dino_ios_request_messages(conversation, count) }
+    func requestMessagesBefore(conversation: Int32, before item: Int32, count: Int32 = 50) {
+        dino_ios_request_messages_before(conversation, item, count)
+    }
     func sendText(conversation: Int32, body: String, replyTo: Int32 = 0) { dino_ios_send_text(conversation, body, replyTo) }
     func setEncryption(conversation: Int32, omemo: Bool) { dino_ios_set_encryption(conversation, omemo ? 1 : 0) }
 

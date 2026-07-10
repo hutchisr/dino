@@ -34,12 +34,31 @@ struct SwiftUIMessageList: View {
     let onEdit: (ChatMessage) -> Void
     let onReply: (ChatMessage) -> Void
     let onImageTap: (String) -> Void
+    let onVideoTap: (String) -> Void
+    let onLoadOlder: () -> Void
     let onActions: (ChatMessage) -> Void
 
     /// Tracks whether the initial "open pinned to the newest message" scroll has
     /// happened. The first populated layout jumps to the bottom instantly; later
     /// arrivals animate (and only while already pinned).
     @State private var didInitialScroll = false
+
+    /// Older-history paging stays disabled until scroll visibility confirms the
+    /// initial jump has put the newest row at the measured bottom. Otherwise the
+    /// oldest row's first appearance at the ScrollView's default top position
+    /// immediately requests page two.
+    @State private var canLoadOlder = false
+    @State private var visibleOldestID: Int32?
+    @State private var visibleNewestID: Int32?
+    /// Prevent repeated visibility/layout callbacks from requesting the same
+    /// page boundary more than once.
+    @State private var requestedOldestID: Int32?
+
+    /// The newest row we've already pinned after a layout pass. If content
+    /// grows for a different newest message, let that growth animate instead of
+    /// using the image-settling snap correction.
+    @State private var lastSettledNewestID: Int32?
+    @State private var animateBottomGrowthForNewestID: Int32?
 
     /// Intent to stay glued to the newest message. Starts true (we open at the
     /// bottom) and is re-asserted as content settles; only the user scrolling
@@ -70,6 +89,7 @@ struct SwiftUIMessageList: View {
     /// per-frame writes don't re-render the list.
     private final class ScrollMetrics {
         var distanceFromBottom: CGFloat = 0
+        var isAtBottom = false
     }
 
     /// Slack (points) for the at-bottom test so the button doesn't flicker at
@@ -84,8 +104,15 @@ struct SwiftUIMessageList: View {
                     ForEach(rows) { row in
                         rowView(row)
                             .id(row.msg.id)
+                            .onScrollVisibilityChange(threshold: 0.01) { visible in
+                                updateBoundaryVisibility(for: row.msg.id, visible: visible)
+                            }
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .opacity))
                     }
                 }
+                .animation(.spring(response: 0.32, dampingFraction: 0.86), value: newestMessageID)
             }
             .scrollDismissesKeyboard(.interactively)
             .scrollDisabled(haltScroll)
@@ -108,6 +135,7 @@ struct SwiftUIMessageList: View {
             } action: { _, distanceFromBottom in
                 metrics.distanceFromBottom = distanceFromBottom
                 let atBottom = distanceFromBottom <= Self.bottomThreshold
+                metrics.isAtBottom = atBottom
                 // While we intend to stay glued and the user isn't dragging,
                 // treat a gap opened purely by content growth as still-at-bottom,
                 // so the scroll-down button doesn't flash while images load —
@@ -116,6 +144,7 @@ struct SwiftUIMessageList: View {
                 if isAtBottom != effectiveAtBottom { isAtBottom = effectiveAtBottom }
                 // Only the user's own scrolling releases or re-arms the glue.
                 if userInteracting { stickToBottom = atBottom }
+                enableOlderLoadingIfReady()
             }
             // Stay pinned to the newest message as the content height settles
             // after open — a LazyVStack with image rows keeps growing as those
@@ -127,7 +156,9 @@ struct SwiftUIMessageList: View {
                 geo.contentSize.height
             } action: { _, _ in
                 if didInitialScroll && stickToBottom && !userInteracting {
-                    scrollToNewest(proxy, animated: false, initial: false)
+                    let animated = shouldAnimateBottomGrowth
+                    if animated { animateBottomGrowthForNewestID = nil }
+                    scrollToNewest(proxy, animated: animated, initial: false)
                 }
             }
             // Open pinned to the newest message. We deliberately do NOT use
@@ -136,10 +167,12 @@ struct SwiftUIMessageList: View {
             // blank (FB-worthy SwiftUI bug). Instead we bring the last row into
             // view imperatively via the reader.
             .onAppear { scrollToNewest(proxy, animated: false, initial: true) }
-            .onChange(of: messageRevision) { _, _ in
+            .onChange(of: newestMessageID) { _, newest in
+                guard let newest else { return }
                 if !didInitialScroll {
                     scrollToNewest(proxy, animated: false, initial: true)
                 } else if stickToBottom {
+                    animateBottomGrowthForNewestID = newest
                     scrollToNewest(proxy, animated: true, initial: false)
                 }
             }
@@ -172,6 +205,9 @@ struct SwiftUIMessageList: View {
         if initial {
             didInitialScroll = true
             stickToBottom = true
+            lastSettledNewestID = last
+            animateBottomGrowthForNewestID = nil
+            enableOlderLoadingIfReady()
         }
         // Defer a tick so the LazyVStack has materialised the row before we ask
         // the reader to bring it into view.
@@ -189,7 +225,60 @@ struct SwiftUIMessageList: View {
             } else {
                 proxy.scrollTo(last, anchor: .bottom)
             }
+            if newestMessageID == last {
+                lastSettledNewestID = last
+                if animateBottomGrowthForNewestID == last {
+                    animateBottomGrowthForNewestID = nil
+                }
+            }
         }
+    }
+
+    private func updateBoundaryVisibility(for id: Int32, visible: Bool) {
+        if visible {
+            if id == oldestMessageID {
+                visibleOldestID = id
+                requestOlderIfNeeded()
+            }
+            if id == newestMessageID {
+                visibleNewestID = id
+                enableOlderLoadingIfReady()
+            }
+        } else {
+            if visibleOldestID == id { visibleOldestID = nil }
+            if visibleNewestID == id { visibleNewestID = nil }
+        }
+    }
+
+    private func enableOlderLoadingIfReady() {
+        guard !canLoadOlder,
+              didInitialScroll,
+              metrics.isAtBottom,
+              visibleNewestID == newestMessageID else { return }
+        canLoadOlder = true
+        requestOlderIfNeeded()
+    }
+
+    private func requestOlderIfNeeded() {
+        guard canLoadOlder,
+              let oldest = oldestMessageID,
+              visibleOldestID == oldest,
+              requestedOldestID != oldest else { return }
+        requestedOldestID = oldest
+        onLoadOlder()
+    }
+
+    private var newestMessageID: Int32? {
+        messages.last?.id
+    }
+
+    private var oldestMessageID: Int32? {
+        messages.first?.id
+    }
+
+    private var shouldAnimateBottomGrowth: Bool {
+        guard let newest = newestMessageID else { return false }
+        return animateBottomGrowthForNewestID == newest || lastSettledNewestID != newest
     }
 
     /// Chronological rows (oldest first) with neighbour-derived day-separator and
@@ -226,7 +315,7 @@ struct SwiftUIMessageList: View {
             MessageBubble(msg: row.msg, inGroupchat: isGroupchat, showSender: row.showSender,
                           senderAvatarPath: row.senderAvatarPath,
                           onEdit: onEdit, onReply: onReply,
-                          onImageTap: onImageTap, onActions: onActions,
+                          onImageTap: onImageTap, onVideoTap: onVideoTap, onActions: onActions,
                           onAvatarNeeded: { model.ensureAvatar(for: $0) },
                           onReaction: { emoji, add in
                               model.setReaction(conversationId, item: row.msg.id, emoji: emoji, add: add)
@@ -235,7 +324,7 @@ struct SwiftUIMessageList: View {
                               model.downloadFile(conversationId, item: item)
                           })
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, ChatLayout.horizontalPadding)
         .padding(.vertical, 3)
     }
 

@@ -2,6 +2,10 @@ import SwiftUI
 import UIKit
 import PhotosUI
 
+enum ChatLayout {
+    static let horizontalPadding: CGFloat = 16
+}
+
 @main
 struct GeckoApp: App {
     @StateObject private var model = AppModel()
@@ -504,6 +508,7 @@ struct ConversationListView: View {
                 }
             }
         }
+        .contentMargins(.horizontal, ChatLayout.horizontalPadding, for: .scrollContent)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Int32.self) { id in
             ChatView(conversationId: id)
@@ -920,6 +925,7 @@ private struct PendingFileSend {
     let url: URL
     let name: String
     let isImage: Bool
+    let isVideo: Bool
     let sizeLabel: String
 
     init(url: URL) {
@@ -932,6 +938,8 @@ private struct PendingFileSend {
             self.sizeLabel = ""
         }
         self.isImage = ThumbnailLoader.pixelSize(path: url.path) != nil
+        let ext = (url.lastPathComponent as NSString).pathExtension.lowercased()
+        self.isVideo = ["mp4", "m4v", "mov", "qt", "3gp", "3g2"].contains(ext)
     }
 }
 
@@ -948,6 +956,11 @@ struct ChatView: View {
     @State private var showAttach = false
     /// Shared height for the composer's buttons and text field so they align.
     private let composerControlHeight: CGFloat = 44
+    private let floatingButtonSize: CGFloat = 44
+    private let floatingOverlaySpacing: CGFloat = 8
+    /// Match the standard iOS navigation bar side inset so the custom bottom
+    /// chrome lines up with the system toolbar above it.
+    private let composerHorizontalPadding: CGFloat = ChatLayout.horizontalPadding
     private let composerInputVerticalPadding: CGFloat = 8
     /// Extra visible space between the newest message and the floating composer.
     /// Rows already have 3pt bottom padding, so another 3pt matches the 6pt
@@ -971,6 +984,7 @@ struct ChatView: View {
     /// scroll-down button, and after sending.
     @State private var scrollToBottomToken = 0
     @State private var viewerItem: ImageViewerItem?
+    @State private var videoViewerItem: VideoViewerItem?
     @State private var composerHeight: CGFloat = 0
     @State private var keyboardOverlap: CGFloat = 0
     @State private var pendingFileSend: PendingFileSend?
@@ -994,8 +1008,7 @@ struct ChatView: View {
     }
 
     private var hasComposerAccessory: Bool {
-        model.typingIndicatorText(for: conversationId) != nil
-            || editing != nil || replyingTo != nil || pendingFileSend != nil
+        editing != nil || replyingTo != nil || pendingFileSend != nil
     }
 
     private var shouldShowSendButton: Bool {
@@ -1008,23 +1021,6 @@ struct ChatView: View {
         // without it the banners (a bare ViewBuilder tuple) laid out wrong and
         // the reply preview ended up under the input.
         VStack(spacing: 0) {
-            if let typingText = model.typingIndicatorText(for: conversationId) {
-                HStack {
-                    Text(typingText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        // Glass capsule (matching the composer chrome) so it
-                        // stays legible over message content scrolling behind the
-                        // floating composer, without a flat opaque fill.
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .glassEffect(.regular, in: Capsule())
-                    Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 2)
-            }
             if editing != nil {
                 composerBanner(icon: "pencil", cancelLabel: "Cancel edit") {
                     editing = nil
@@ -1065,6 +1061,32 @@ struct ChatView: View {
     }
 
     @ViewBuilder
+    private var typingIndicatorOverlay: some View {
+        if let typingText = model.typingIndicatorText(for: conversationId) {
+            HStack {
+                Spacer(minLength: 0)
+                Text(typingText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .glassEffect(.regular, in: Capsule())
+                    .frame(maxWidth: 260, alignment: .trailing)
+            }
+            .padding(.leading, composerHorizontalPadding)
+            .padding(
+                .trailing,
+                composerHorizontalPadding
+                    + (isAtBottom ? 0 : floatingButtonSize + floatingOverlaySpacing))
+            .padding(.bottom, typingIndicatorBottomPadding)
+            .allowsHitTesting(false)
+            .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
     private func pendingFileSendPanel(_ file: PendingFileSend) -> some View {
         HStack(spacing: 10) {
             if file.isImage {
@@ -1077,6 +1099,14 @@ struct ChatView: View {
                 }
                 .frame(width: 76, height: 76)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            } else if file.isVideo {
+                CachedVideoThumbnail(path: file.url.path,
+                                     box: CGSize(width: 76, height: 76),
+                                     maxPixel: 360,
+                                     playSize: 34)
+                    .frame(width: 76, height: 76)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             } else {
                 Image(systemName: "doc.fill")
                     .font(.title2)
@@ -1123,7 +1153,7 @@ struct ChatView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Send \(file.name)")
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, composerHorizontalPadding)
         .padding(.top, 8)
         .padding(.bottom, 4)
     }
@@ -1153,7 +1183,7 @@ struct ChatView: View {
         .padding(.trailing, 4)
         .padding(.vertical, 4)
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
-        .padding(.horizontal, 14)
+        .padding(.horizontal, composerHorizontalPadding)
         .padding(.top, 6)
         .padding(.bottom, 2)
     }
@@ -1259,7 +1289,7 @@ struct ChatView: View {
                     .accessibilityLabel(editing != nil ? "Save edit" : "Send")
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, composerHorizontalPadding)
             .padding(.vertical, composerInputVerticalPadding)
         }
     }
@@ -1322,10 +1352,7 @@ struct ChatView: View {
         guard editing == nil else { return }
         let byteCount = Int64(image.data.count)
         guard AttachmentStaging.canStageFile(byteCount: byteCount) else {
-            let limit = ByteCountFormatter.string(
-                fromByteCount: AttachmentStaging.maxByteCount,
-                countStyle: .file)
-            model.lastError = "This image is too large to send. The local staging limit is \(limit)."
+            model.lastError = AttachmentStaging.tooLargeMessage(noun: "image")
             return
         }
 
@@ -1343,11 +1370,12 @@ struct ChatView: View {
         let byteCount = AttachmentStaging.byteCount(at: url)
         guard !AttachmentStaging.canStageFile(byteCount: byteCount) else { return true }
         cleanupTemporaryAttachment(at: url)
-        let limit = ByteCountFormatter.string(
-            fromByteCount: AttachmentStaging.maxByteCount,
-            countStyle: .file)
-        model.lastError = "This file is too large to send. The local staging limit is \(limit)."
+        reportAttachmentTooLarge()
         return false
+    }
+
+    private func reportAttachmentTooLarge() {
+        model.lastError = AttachmentStaging.tooLargeMessage(noun: "file")
     }
 
     private func cleanupTemporaryAttachment(_ file: PendingFileSend?) {
@@ -1426,6 +1454,8 @@ struct ChatView: View {
                     onEdit: editFromList,
                     onReply: { m in editing = nil; replyingTo = m },
                     onImageTap: { path in viewerItem = ImageViewerItem(id: path) },
+                    onVideoTap: { path in videoViewerItem = VideoViewerItem(id: path) },
+                    onLoadOlder: { model.requestOlderMessages(conversationId) },
                     onActions: { m in actionMsg = m }
                 )
             } else {
@@ -1446,6 +1476,8 @@ struct ChatView: View {
                     onEdit: editFromList,
                     onReply: { m in editing = nil; replyingTo = m },
                     onImageTap: { path in viewerItem = ImageViewerItem(id: path) },
+                    onVideoTap: { path in videoViewerItem = VideoViewerItem(id: path) },
+                    onLoadOlder: { model.requestOlderMessages(conversationId) },
                     onActions: { m in actionMsg = m }
                 )
             }
@@ -1495,6 +1527,11 @@ struct ChatView: View {
         return max(0, bottomChromeInset - composerInputVerticalPadding)
     }
 
+    private var typingIndicatorBottomPadding: CGFloat {
+        max(composerHeight, composerControlHeight + composerInputVerticalPadding * 2)
+            + composerMessageClearance
+    }
+
     private func updateKeyboardOverlap(from note: Notification) {
         guard
             let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
@@ -1525,12 +1562,12 @@ struct ChatView: View {
             Image(systemName: "chevron.down")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Color.primary)
-                .frame(width: 44, height: 44)
+                .frame(width: floatingButtonSize, height: floatingButtonSize)
         }
         .glassEffect(.regular.interactive(), in: .circle)
         .contentShape(.circle)
         .accessibilityLabel("Scroll to latest messages")
-        .padding(.trailing, 14)
+        .padding(.trailing, composerHorizontalPadding)
         .padding(.bottom, bottomPadding)
         .transition(.scale(scale: 0.5).combined(with: .opacity))
     }
@@ -1702,6 +1739,11 @@ struct ChatView: View {
                 .overlay(alignment: .bottom) {
                     composerToolbar
                 }
+                .overlay(alignment: .bottomTrailing) {
+                    typingIndicatorOverlay
+                        .animation(.easeInOut(duration: 0.18),
+                                   value: model.typingIndicatorText(for: conversationId) != nil)
+                }
                 .onPreferenceChange(ComposerHeightKey.self) { height in
                     if abs(composerHeight - height) > 0.5 {
                         composerHeight = height
@@ -1719,9 +1761,10 @@ struct ChatView: View {
             keyboardOverlap = 0
         }
         .sheet(isPresented: $showPhotoPicker) {
-            PhotoPicker { url in
-                setPendingFileSend(url)
-            }
+            PhotoPicker(
+                allowsVideos: true,
+                onPicked: { url in setPendingFileSend(url) },
+                onTooLarge: reportAttachmentTooLarge)
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
             if case .success(let url) = result {
@@ -1740,6 +1783,7 @@ struct ChatView: View {
         }
         .navigationTitle(conversation?.name ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarRole(.editor)
         .toolbar { chatToolbar }
         .sheet(isPresented: $showOccupants, onDismiss: {
             // Start the DM only after the sheet has finished sliding away, so
@@ -1757,6 +1801,9 @@ struct ChatView: View {
         }
         .fullScreenCover(item: $viewerItem) { item in
             ImageViewer(path: item.path)
+        }
+        .fullScreenCover(item: $videoViewerItem) { item in
+            VideoViewer(path: item.path)
         }
         .sheet(item: $actionMsg) { m in
             reactionSheet(for: m)
@@ -1836,6 +1883,7 @@ struct MessageBubble: View {
     var onEdit: ((ChatMessage) -> Void)? = nil
     var onReply: ((ChatMessage) -> Void)? = nil
     var onImageTap: ((String) -> Void)? = nil
+    var onVideoTap: ((String) -> Void)? = nil
     var onActions: ((ChatMessage) -> Void)? = nil
     var onAvatarNeeded: ((String) -> Void)? = nil
     var onReaction: ((String, Bool) -> Void)? = nil
@@ -1954,7 +2002,8 @@ struct MessageBubble: View {
                         .padding(.bottom, 2)
                     }
                     if msg.isFile {
-                        FileContent(msg: msg, onImageTap: onImageTap, onDownloadFile: onDownloadFile,
+                        FileContent(msg: msg, onImageTap: onImageTap, onVideoTap: onVideoTap,
+                                    onDownloadFile: onDownloadFile,
                                     onImageRendered: onImageRendered)
                     } else {
                         messageBody(msg.body)
@@ -2112,9 +2161,88 @@ struct CachedThumbnail: View {
     }
 }
 
+/// Inline video poster backed by AVFoundation's first-frame generator. The frame
+/// stays fixed while the poster lands so rows do not resize during scrolling;
+/// aspect-fit keeps portrait and square videos uncropped inside that frame.
+struct CachedVideoThumbnail: View {
+    private struct Request: Hashable {
+        let path: String
+        let maxPixel: Int
+    }
+
+    let path: String
+    /// The box the preview is fit into.
+    let box: CGSize
+    let maxPixel: Int
+    let playSize: CGFloat
+    @State private var image: UIImage?
+    @State private var loadedRequest: Request?
+
+    init(
+        path: String,
+        box: CGSize = CGSize(width: 220, height: 124),
+        maxPixel: Int = 840,
+        playSize: CGFloat = 50
+    ) {
+        self.path = path
+        self.box = box
+        self.maxPixel = maxPixel
+        self.playSize = playSize
+        let request = Request(path: path, maxPixel: maxPixel)
+        let cached = ThumbnailLoader.cachedVideoThumbnail(path: path, maxPixel: maxPixel)
+        _image = State(initialValue: cached)
+        _loadedRequest = State(initialValue: cached == nil ? nil : request)
+    }
+
+    var body: some View {
+        let request = Request(path: path, maxPixel: maxPixel)
+        ZStack {
+            Group {
+                if let image, loadedRequest == request {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(.secondarySystemBackground))
+                }
+            }
+            .frame(width: box.width, height: box.height)
+            .clipped()
+
+            Image(systemName: "play.fill")
+                .font(.system(size: playSize * 0.44, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.leading, playSize * 0.06)
+                .frame(width: playSize, height: playSize)
+                .background(.black.opacity(0.36), in: Circle())
+        }
+        .frame(width: box.width, height: box.height)
+        .task(id: request) {
+            if let cached = ThumbnailLoader.cachedVideoThumbnail(
+                path: request.path,
+                maxPixel: request.maxPixel) {
+                image = cached
+                loadedRequest = request
+                return
+            }
+            image = nil
+            loadedRequest = nil
+            let decoded = await ThumbnailLoader.loadVideoThumbnail(
+                path: request.path,
+                maxPixel: request.maxPixel)
+            if !Task.isCancelled {
+                image = decoded
+                loadedRequest = request
+            }
+        }
+    }
+}
+
 struct FileContent: View {
     let msg: ChatMessage
     var onImageTap: ((String) -> Void)? = nil
+    var onVideoTap: ((String) -> Void)? = nil
     var onDownloadFile: ((Int32) -> Void)? = nil
     var onImageRendered: (() -> Void)? = nil
 
@@ -2145,10 +2273,19 @@ struct FileContent: View {
                 .onTapGesture {
                     onImageTap?(msg.path)
                 }
+        } else if msg.fileState == "complete", msg.isVideo, !msg.path.isEmpty {
+            Button {
+                onVideoTap?(msg.path)
+            } label: {
+                CachedVideoThumbnail(path: msg.path)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(videoAccessibilityLabel)
         } else if msg.fileState == "complete", !msg.path.isEmpty {
-            // No inline preview for this type (video, pdf, …) — hand it to the
-            // share sheet so the user can open it in any app that handles it,
-            // save it to Files, etc.
+            // No inline preview for this type — hand it to the share sheet so
+            // the user can open it in any app that handles it, save it to
+            // Files, etc.
             ShareLink(item: URL(fileURLWithPath: msg.path)) { fileRow }
                 .buttonStyle(.plain)
         } else {
@@ -2169,7 +2306,7 @@ struct FileContent: View {
             case "failed":
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(.red)
             case "complete":
-                Image(systemName: msg.isImage ? "photo" : "doc.fill").foregroundStyle(.secondary)
+                Image(systemName: completeIcon).foregroundStyle(.secondary)
             default:
                 Image(systemName: "arrow.down.circle").font(.title3)
             }
@@ -2183,5 +2320,16 @@ struct FileContent: View {
                 .font(.caption2).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var completeIcon: String {
+        if msg.isImage { return "photo" }
+        if msg.isVideo { return "play.rectangle.fill" }
+        return "doc.fill"
+    }
+
+    private var videoAccessibilityLabel: String {
+        let name = msg.fileName.isEmpty ? "video" : msg.fileName
+        return "Play \(name)"
     }
 }

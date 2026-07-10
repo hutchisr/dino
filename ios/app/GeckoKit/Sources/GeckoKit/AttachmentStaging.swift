@@ -13,6 +13,11 @@ enum AttachmentStaging {
         return byteCount >= 0 && byteCount <= maxByteCount
     }
 
+    static func tooLargeMessage(noun: String) -> String {
+        let limit = ByteCountFormatter.string(fromByteCount: maxByteCount, countStyle: .file)
+        return "This \(noun) is too large to send. The local staging limit is \(limit)."
+    }
+
     static func temporaryCopyURL(
         for source: URL,
         in temporaryDirectory: URL = FileManager.default.temporaryDirectory,

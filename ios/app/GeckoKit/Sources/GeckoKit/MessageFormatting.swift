@@ -6,6 +6,15 @@ import Foundation
 
 private let messageLinkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
 
+/// Keeps a queued message visibly pending while the core makes another send
+/// attempt. A retry reports `sending` before room/encryption readiness can put
+/// it straight back to `unsent`; that provisional transition should not make
+/// an already-pending row look as though it has left the queue.
+func reconciledDeliveryMark(previous: String?, incoming: String) -> String {
+    if previous == "unsent", incoming == "sending" { return "unsent" }
+    return incoming
+}
+
 /// Message text with tappable links (URLs, emails); falls back to plain text.
 /// Sets Foundation's native `.link` attribute, which SwiftUI's Text renders as
 /// a tappable link.

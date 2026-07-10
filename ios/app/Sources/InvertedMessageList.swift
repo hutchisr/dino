@@ -62,6 +62,8 @@ struct InvertedMessageList: UIViewControllerRepresentable {
     let onEdit: (ChatMessage) -> Void
     let onReply: (ChatMessage) -> Void
     let onImageTap: (String) -> Void
+    let onVideoTap: (String) -> Void
+    let onLoadOlder: () -> Void
     let onActions: (ChatMessage) -> Void
 
     func makeUIViewController(context: Context) -> ChatListController {
@@ -76,10 +78,16 @@ struct InvertedMessageList: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: ChatListController, context: Context) {
         context.coordinator.parent = self
+        let shouldScrollToBottom = context.coordinator.lastScrollToken != scrollToBottomToken
+        if shouldScrollToBottom {
+            context.coordinator.lastScrollToken = scrollToBottomToken
+            controller.prepareForProgrammaticBottomScroll()
+        }
         controller.model = model
         controller.callbacks = ChatListController.Callbacks(
             conversationId: conversationId, onEdit: onEdit, onReply: onReply,
-            onImageTap: onImageTap, onActions: onActions)
+            onImageTap: onImageTap, onVideoTap: onVideoTap, onLoadOlder: onLoadOlder,
+            onActions: onActions)
         controller.setVisualInsets(
             top: visualTopInset,
             bottom: visualBottomInset,
@@ -93,8 +101,7 @@ struct InvertedMessageList: UIViewControllerRepresentable {
                 messages: messageRevision,
                 avatars: avatarRevision,
                 isGroupchat: isGroupchat))
-        if context.coordinator.lastScrollToken != scrollToBottomToken {
-            context.coordinator.lastScrollToken = scrollToBottomToken
+        if shouldScrollToBottom {
             // Defer past this SwiftUI update: issuing the scroll from inside
             // updateUIViewController gets dropped — it has to run on the next
             // runloop tick.
@@ -140,6 +147,8 @@ final class ChatListController: UITableViewController {
         let onEdit: (ChatMessage) -> Void
         let onReply: (ChatMessage) -> Void
         let onImageTap: (String) -> Void
+        let onVideoTap: (String) -> Void
+        let onLoadOlder: () -> Void
         let onActions: (ChatMessage) -> Void
     }
 
@@ -160,11 +169,13 @@ final class ChatListController: UITableViewController {
     private var visualScrollIndicatorBottomInset: CGFloat = 0
     private var pendingBottomCorrection = false
     private var bottomCorrectionWorkItem: DispatchWorkItem?
+    private var lastOlderLoadContentHeight: CGFloat = -1
 
     /// Deterministic per-row heights, measured once offscreen and cached by
     /// message id. Invalidated when a row's content changes or the table width
-    /// changes. Served from both `heightForRowAt` and `estimatedHeightForRowAt`
-    /// so `contentSize` stays stable as rows recycle.
+    /// changes. Exact measurement is reserved for rows UIKit is laying out; the
+    /// estimation path reuses cached values or a cheap fallback so scroll and
+    /// history insertion don't synchronously lay out large runs of SwiftUI rows.
     private var heightCache: [Int32: CGFloat] = [:]
     private var heightMeasureWidth: CGFloat = 0
     /// Reused offscreen cell for height measurement. A `FlatCell` so its
@@ -176,6 +187,8 @@ final class ChatListController: UITableViewController {
     /// keep it tight enough that the scroll-down affordance stays visible until
     /// the newest message is actually pinned.
     private static let bottomThreshold: CGFloat = 8
+    private static let topLoadThreshold: CGFloat = 240
+    private static let estimatedRowHeight: CGFloat = 84
 
     init() { super.init(style: .plain) }
     required init?(coder: NSCoder) { fatalError("init(coder:) unused") }
@@ -193,13 +206,13 @@ final class ChatListController: UITableViewController {
         // automatic safe-area insets would land on the wrong visual edge.
         tableView.contentInsetAdjustmentBehavior = .never
         tableView.register(FlatCell.self, forCellReuseIdentifier: "cell")
-        // Row heights are computed deterministically (see `measuredHeight`) and
-        // served from `heightForRowAt`, rather than relying on UIKit's
+        // Row heights are computed deterministically (see `measuredHeight`) from
+        // `heightForRowAt`, rather than relying on UIKit's
         // self-sizing of `UIHostingConfiguration` cells — that self-sizing is
         // unstable here (the same row measures at different heights on different
         // passes), which made `contentSize` drift and inter-message gaps grow
         // while scrolling back through history.
-        tableView.estimatedRowHeight = 80
+        tableView.estimatedRowHeight = Self.estimatedRowHeight
 
         dataSource = UITableViewDiffableDataSource(tableView: tableView) { [weak self] table, indexPath, id in
             let cell = table.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
@@ -273,7 +286,7 @@ final class ChatListController: UITableViewController {
                 MessageBubble(msg: row.msg, inGroupchat: isGroupchat, showSender: row.showSender,
                               senderAvatarPath: row.senderAvatarPath,
                               onEdit: cb.onEdit, onReply: cb.onReply,
-                              onImageTap: cb.onImageTap, onActions: cb.onActions,
+                              onImageTap: cb.onImageTap, onVideoTap: cb.onVideoTap, onActions: cb.onActions,
                               onAvatarNeeded: { model.ensureAvatar(for: $0) },
                               onReaction: { emoji, add in
                                   model.setReaction(cb.conversationId, item: row.msg.id, emoji: emoji, add: add)
@@ -282,7 +295,7 @@ final class ChatListController: UITableViewController {
                                   model.downloadFile(cb.conversationId, item: item)
                               })
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, ChatLayout.horizontalPadding)
             .padding(.vertical, 3)
         }
     }
@@ -301,6 +314,10 @@ final class ChatListController: UITableViewController {
             return
         }
 
+        let conversationChanged = appliedRevision?.conversationId != revision.conversationId
+        if conversationChanged {
+            lastOlderLoadContentHeight = -1
+        }
         self.isGroupchat = revision.isGroupchat
         appliedRevision = revision
 
@@ -330,6 +347,7 @@ final class ChatListController: UITableViewController {
         }
         let wasAtBottom = isAtBottom
         let newestChanged = newOrderedIDs.first != orderedIDs.first
+        let oldestChanged = newOrderedIDs.last != orderedIDs.last
 
         // Drop stale heights: changed rows must be re-measured, and rows no
         // longer present should not linger in the cache.
@@ -344,20 +362,41 @@ final class ChatListController: UITableViewController {
         snapshot.appendSections([0])
         snapshot.appendItems(newOrderedIDs, toSection: 0)
         if !changedIDs.isEmpty { snapshot.reconfigureItems(changedIDs) }
-        dataSource.apply(snapshot, animatingDifferences: hasLoaded)
+        let olderPageInserted = hasLoaded && !newestChanged && oldestChanged
+        dataSource.apply(snapshot, animatingDifferences: hasLoaded && !olderPageInserted)
 
         if !hasLoaded {
             hasLoaded = true   // flipped table opens at offset 0 = newest; nothing to do
         } else if newestChanged && wasAtBottom {
             scrollToBottom(animated: false)
+        } else if olderPageInserted && (wasAtBottom || pendingBottomCorrection) {
+            DispatchQueue.main.async { [weak self] in
+                self?.scrollToBottom(animated: false)
+            }
         }
+        DispatchQueue.main.async { [weak self] in
+            self?.requestOlderIfNeeded(onlyWhenUnderfilled: true)
+        }
+    }
+
+    func prepareForProgrammaticBottomScroll() {
+        loadViewIfNeeded()
+        pendingBottomCorrection = true
+        bottomCorrectionWorkItem?.cancel()
+        bottomCorrectionWorkItem = nil
     }
 
     /// Scroll to the newest message. In the flipped table, the visual bottom is
     /// the adjusted top inset's negative offset.
     func scrollToBottom(animated: Bool) {
         loadViewIfNeeded()
-        guard !orderedIDs.isEmpty else { return }
+        guard !orderedIDs.isEmpty else {
+            pendingBottomCorrection = false
+            bottomCorrectionWorkItem?.cancel()
+            bottomCorrectionWorkItem = nil
+            updateBottomState()
+            return
+        }
         // Row 0 = newest. The visual bottom maps to UIKit's minimum offset:
         // negative adjusted top inset. The inset itself is the floating composer
         // clearance, so targeting 0 stops short.
@@ -379,11 +418,10 @@ final class ChatListController: UITableViewController {
     // MARK: - Height estimation
 
     /// Measure a row's height offscreen with a reused `FlatCell`. The result is
-    /// cached and reused; the same value feeds both the real and estimated
-    /// height so the table never has to reconcile a wrong guess.
+    /// cached and reused by the exact height path, and by estimates once known.
     private func measuredHeight(for id: Int32) -> CGFloat {
         let width = tableView.bounds.width
-        guard width > 0, let row = rowsByID[id] else { return 80 }
+        guard width > 0, let row = rowsByID[id] else { return Self.estimatedRowHeight }
         if heightMeasureWidth != width {
             heightMeasureWidth = width
             heightCache.removeAll()
@@ -406,14 +444,14 @@ final class ChatListController: UITableViewController {
 
     override func tableView(_ tableView: UITableView,
                             heightForRowAt indexPath: IndexPath) -> CGFloat {
-        guard indexPath.row < orderedIDs.count else { return 80 }
+        guard indexPath.row < orderedIDs.count else { return Self.estimatedRowHeight }
         return measuredHeight(for: orderedIDs[indexPath.row])
     }
 
     override func tableView(_ tableView: UITableView,
                             estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
-        guard indexPath.row < orderedIDs.count else { return 80 }
-        return measuredHeight(for: orderedIDs[indexPath.row])
+        guard indexPath.row < orderedIDs.count else { return Self.estimatedRowHeight }
+        return heightCache[orderedIDs[indexPath.row]] ?? Self.estimatedRowHeight
     }
 
     override func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -424,6 +462,16 @@ final class ChatListController: UITableViewController {
         pendingBottomCorrection = false
         bottomCorrectionWorkItem?.cancel()
         bottomCorrectionWorkItem = nil
+    }
+
+    override func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate {
+            requestOlderIfNeeded()
+        }
+    }
+
+    override func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        requestOlderIfNeeded()
     }
 
     override func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
@@ -472,6 +520,29 @@ final class ChatListController: UITableViewController {
             isAtBottom = atBottom
             onIsAtBottomChanged?(atBottom)
         }
+    }
+
+    private func requestOlderIfNeeded(onlyWhenUnderfilled: Bool = false) {
+        guard !orderedIDs.isEmpty, let callbacks else { return }
+        guard !pendingBottomCorrection else { return }
+        guard !tableView.isTracking && !tableView.isDragging && !tableView.isDecelerating else { return }
+        if onlyWhenUnderfilled {
+            let viewport = max(
+                0,
+                tableView.bounds.height
+                    - tableView.adjustedContentInset.top
+                    - tableView.adjustedContentInset.bottom)
+            guard tableView.contentSize.height <= viewport + Self.topLoadThreshold else { return }
+        }
+        let maxOffsetY = max(
+            bottomContentOffsetY,
+            tableView.contentSize.height + tableView.adjustedContentInset.bottom - tableView.bounds.height)
+        guard maxOffsetY - tableView.contentOffset.y <= Self.topLoadThreshold else { return }
+
+        let contentHeight = tableView.contentSize.height.rounded(.toNearestOrAwayFromZero)
+        guard abs(contentHeight - lastOlderLoadContentHeight) > 0.5 else { return }
+        lastOlderLoadContentHeight = contentHeight
+        callbacks.onLoadOlder()
     }
 
     private static func dayLabel(_ date: Date) -> String {

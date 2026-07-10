@@ -273,6 +273,7 @@ public class ContentItemStore : StreamInteractionModule, Object {
         select.with(db.content_item.hide, "=", false);
         foreach (Row row in select) {
             MessageItem item = new MessageItem(message, conversation, row[db.content_item.id]);
+            item.time = new DateTime.from_unix_utc(row[db.content_item.time]);
             if (collection_conversations.has_key(conversation)) {
                 collection_conversations.get(conversation).insert_item(item);
             }

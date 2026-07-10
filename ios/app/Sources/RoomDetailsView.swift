@@ -52,7 +52,12 @@ struct RoomDetailsView: View {
             Button("Cancel", role: .cancel) {}
         }
         .sheet(isPresented: $showPhotoPicker) {
-            PhotoPicker { url in model.setRoomAvatar(conversationId, path: url.path) }
+            PhotoPicker(
+                allowsVideos: false,
+                onPicked: { url in model.setRoomAvatar(conversationId, path: url.path) },
+                onTooLarge: {
+                    model.lastError = AttachmentStaging.tooLargeMessage(noun: "image")
+                })
         }
     }
 

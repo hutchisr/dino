@@ -21,6 +21,7 @@ enum ThumbnailLoader {
 #if canImport(UIKit)
 import UIKit
 import ImageIO
+import AVFoundation
 
 /// Why the cache exists: a chat row's SwiftUI body re-evaluates constantly while
 /// scrolling, and decoding a full-resolution photo from disk on each pass
@@ -44,6 +45,10 @@ extension ThumbnailLoader {
 
     private static func key(_ path: String, _ maxPixel: Int) -> NSString {
         "\(path)@\(maxPixel)" as NSString
+    }
+
+    private static func videoKey(_ path: String, _ maxPixel: Int) -> NSString {
+        "video:\(path)@\(maxPixel)" as NSString
     }
 
     /// Pixel dimensions of an image read from its header only — no full decode,
@@ -80,6 +85,10 @@ extension ThumbnailLoader {
         cache.object(forKey: key(path, maxPixel))
     }
 
+    static func cachedVideoThumbnail(path: String, maxPixel: Int) -> UIImage? {
+        cache.object(forKey: videoKey(path, maxPixel))
+    }
+
     /// Return a downsampled thumbnail no larger than `maxPixel` on its longest
     /// side, decoding and caching it on a miss. Call OFF the main thread — the
     /// decode is the expensive part. Returns nil if the file can't be read.
@@ -90,6 +99,29 @@ extension ThumbnailLoader {
         let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
         cache.setObject(image, forKey: k, cost: cost)
         return image
+    }
+
+    static func loadVideoThumbnail(path: String, maxPixel: Int) async -> UIImage? {
+        let k = videoKey(path, maxPixel)
+        if let cached = cache.object(forKey: k) { return cached }
+        let asset = AVURLAsset(url: URL(fileURLWithPath: path))
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: maxPixel, height: maxPixel)
+        let time = CMTime(seconds: 0, preferredTimescale: 600)
+        guard let cg = await generateVideoImage(generator: generator, at: time) else { return nil }
+        let image = UIImage(cgImage: cg)
+        let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+        cache.setObject(image, forKey: k, cost: cost)
+        return image
+    }
+
+    private static func generateVideoImage(generator: AVAssetImageGenerator, at time: CMTime) async -> CGImage? {
+        await withCheckedContinuation { continuation in
+            generator.generateCGImageAsynchronously(for: time) { image, _, error in
+                continuation.resume(returning: error == nil ? image : nil)
+            }
+        }
     }
 
     /// ImageIO downsample: decodes straight to a thumbnail at the target size

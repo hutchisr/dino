@@ -15,6 +15,15 @@ final class AttachmentStagingTests: XCTestCase {
         XCTAssertFalse(AttachmentStaging.canStageFile(byteCount: -1, maxByteCount: 10))
     }
 
+    func testTooLargeMessageUsesRequestedNounAndConfiguredLimit() {
+        let message = AttachmentStaging.tooLargeMessage(noun: "video")
+        let limit = ByteCountFormatter.string(
+            fromByteCount: AttachmentStaging.maxByteCount,
+            countStyle: .file)
+        XCTAssertTrue(message.hasPrefix("This video is too large to send."))
+        XCTAssertTrue(message.hasSuffix("local staging limit is \(limit)."))
+    }
+
     func testTemporaryCopyURLPreservesSourceName() {
         let id = UUID(uuidString: "00000000-0000-0000-0000-000000000123")!
         let temp = URL(fileURLWithPath: "/tmp/gecko")
