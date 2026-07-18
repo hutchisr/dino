@@ -977,23 +977,21 @@ struct ChatView: View {
     @State private var replyingTo: ChatMessage?
     @State private var actionMsg: ChatMessage?
     @State private var showFullTitle = false
-    /// Whether the list is pinned to the newest message. Driven by the inverted
-    /// table (InvertedMessageList); gates the scroll-down button.
+    /// Whether the SwiftUI list is pinned to the newest message; gates the
+    /// scroll-down button.
     @State private var isAtBottom = true
     /// Bumped to ask the message list to glide to the newest message — the
     /// scroll-down button, and after sending.
     @State private var scrollToBottomToken = 0
+    /// A composer send reaches the model asynchronously through the GLib
+    /// bridge. Keep its scroll request pending until that new outgoing item is
+    /// present, instead of scrolling immediately to the previous last row.
+    @State private var outgoingMessageFollowTrigger = OutgoingMessageFollowTrigger()
     @State private var viewerItem: ImageViewerItem?
     @State private var videoViewerItem: VideoViewerItem?
     @State private var composerHeight: CGFloat = 0
     @State private var keyboardOverlap: CGFloat = 0
     @State private var pendingFileSend: PendingFileSend?
-
-    /// Experimental: render the chat with the pure-SwiftUI `SwiftUIMessageList`
-    /// instead of the UIKit-backed `InvertedMessageList`. Toggle in Account
-    /// settings (Developer). Default on while the SwiftUI list is under
-    /// evaluation; the UIKit list is still available via the toggle.
-    @AppStorage("experimentalSwiftUIMessageList") private var useSwiftUIMessageList = true
 
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
@@ -1001,6 +999,17 @@ struct ChatView: View {
 
     private var chatMessages: [ChatMessage] {
         model.messages[conversationId] ?? []
+    }
+
+    private var latestMessageItemID: Int32? {
+        chatMessages.lazy.map(\.id).max()
+    }
+
+    private var latestOutgoingMessageItemID: Int32? {
+        chatMessages.lazy
+            .filter { $0.direction == "out" }
+            .map(\.id)
+            .max()
     }
 
     private var isGroupChat: Bool {
@@ -1341,7 +1350,7 @@ struct ChatView: View {
 
     private func confirmPendingFileSend() {
         guard let pendingFileSend else { return }
-        scrollToBottomToken &+= 1
+        outgoingMessageFollowTrigger.begin(latestItemID: latestMessageItemID)
         model.sendFile(conversationId, path: pendingFileSend.url.path)
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             self.pendingFileSend = nil
@@ -1389,7 +1398,6 @@ struct ChatView: View {
     }
 
     private func sendCurrentDraft() {
-        scrollToBottomToken &+= 1
         if let editing {
             model.correctMessage(conversationId, item: editing.id, body: draft)
             self.editing = nil
@@ -1401,6 +1409,7 @@ struct ChatView: View {
 
         let body = draft
         if !body.isEmpty {
+            outgoingMessageFollowTrigger.begin(latestItemID: latestMessageItemID)
             model.send(conversationId, body, replyTo: replyingTo?.id ?? 0)
         }
         replyingTo = nil
@@ -1435,53 +1444,32 @@ struct ChatView: View {
         scrollIndicatorBottomInset: CGFloat,
         scrollButtonBottomPadding: CGFloat
     ) -> some View {
-        Group {
-            if useSwiftUIMessageList {
-                SwiftUIMessageList(
-                    messages: chatMessages,
-                    messageRevision: model.messageRevision(for: conversationId),
-                    conversationId: conversationId,
-                    isGroupchat: isGroupChat,
-                    avatarPaths: model.avatars,
-                    avatarRevision: model.avatarRevisionToken,
-                    visualTopInset: topChromeInset,
-                    visualBottomInset: bottomChromeInset,
-                    visualScrollIndicatorTopInset: scrollIndicatorTopInset,
-                    visualScrollIndicatorBottomInset: scrollIndicatorBottomInset,
-                    model: model,
-                    isAtBottom: $isAtBottom,
-                    scrollToBottomToken: scrollToBottomToken,
-                    onEdit: editFromList,
-                    onReply: { m in editing = nil; replyingTo = m },
-                    onImageTap: { path in viewerItem = ImageViewerItem(id: path) },
-                    onVideoTap: { path in videoViewerItem = VideoViewerItem(id: path) },
-                    onLoadOlder: { model.requestOlderMessages(conversationId) },
-                    onActions: { m in actionMsg = m }
-                )
-            } else {
-                InvertedMessageList(
-                    messages: chatMessages,
-                    messageRevision: model.messageRevision(for: conversationId),
-                    conversationId: conversationId,
-                    isGroupchat: isGroupChat,
-                    avatarPaths: model.avatars,
-                    avatarRevision: model.avatarRevisionToken,
-                    visualTopInset: topChromeInset,
-                    visualBottomInset: bottomChromeInset,
-                    visualScrollIndicatorTopInset: scrollIndicatorTopInset,
-                    visualScrollIndicatorBottomInset: scrollIndicatorBottomInset,
-                    model: model,
-                    isAtBottom: $isAtBottom,
-                    scrollToBottomToken: scrollToBottomToken,
-                    onEdit: editFromList,
-                    onReply: { m in editing = nil; replyingTo = m },
-                    onImageTap: { path in viewerItem = ImageViewerItem(id: path) },
-                    onVideoTap: { path in videoViewerItem = VideoViewerItem(id: path) },
-                    onLoadOlder: { model.requestOlderMessages(conversationId) },
-                    onActions: { m in actionMsg = m }
-                )
-            }
-        }
+        SwiftUIMessageList(
+            messages: chatMessages,
+            messageRevision: model.messageRevision(for: conversationId),
+            historyPageRevision: model.historyPageRevision(for: conversationId),
+            historyPageRenderedRowsAdded:
+                model.historyPageRenderedRowsAdded(for: conversationId),
+            canLoadOlderHistory: model.canLoadOlderHistory(for: conversationId),
+            conversationId: conversationId,
+            isGroupchat: isGroupChat,
+            avatarPaths: model.avatars,
+            avatarRevision: model.avatarRevisionToken,
+            visualTopInset: topChromeInset,
+            visualBottomInset: bottomChromeInset,
+            visualScrollIndicatorTopInset: scrollIndicatorTopInset,
+            visualScrollIndicatorBottomInset: scrollIndicatorBottomInset,
+            model: model,
+            isAtBottom: $isAtBottom,
+            scrollToBottomToken: scrollToBottomToken,
+            onEdit: editFromList,
+            onReply: { m in editing = nil; replyingTo = m },
+            onImageTap: { path in viewerItem = ImageViewerItem(id: path) },
+            onVideoTap: { path in videoViewerItem = VideoViewerItem(id: path) },
+            onLoadOlder: { model.requestOlderMessages(conversationId) },
+            onActions: { m in actionMsg = m }
+        )
+        .id(conversationId)
         .ignoresSafeArea(.container, edges: .vertical)
         .overlay(alignment: .bottomTrailing) {
             if !isAtBottom {
@@ -1812,6 +1800,13 @@ struct ChatView: View {
             if let path {
                 viewerItem = ImageViewerItem(id: path)
                 model.viewerRequest = nil
+            }
+        }
+        .onChange(of: model.messageRevision(for: conversationId)) { _, _ in
+            if outgoingMessageFollowTrigger.observe(
+                latestOutgoingItemID: latestOutgoingMessageItemID
+            ) {
+                scrollToBottomToken &+= 1
             }
         }
         .onAppear {

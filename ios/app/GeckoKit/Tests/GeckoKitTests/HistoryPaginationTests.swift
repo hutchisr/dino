@@ -2,11 +2,17 @@ import XCTest
 @testable import GeckoKit
 
 final class HistoryPaginationTests: XCTestCase {
+    func testFreshPaginationCannotLoadWithoutCursor() {
+        XCTAssertFalse(HistoryPagination().canLoadOlder)
+    }
+
     func testInitialRequestUsesRawPageCursor() {
         var paging = HistoryPagination()
         paging.replaceWithLatestPage(oldestItemID: 101, complete: false)
 
+        XCTAssertTrue(paging.canLoadOlder)
         XCTAssertEqual(paging.beginOlderRequest(), 101)
+        XCTAssertTrue(paging.canLoadOlder)
     }
 
     func testDecodedEmptyPageStillAdvancesRawCursor() {
@@ -72,6 +78,7 @@ final class HistoryPaginationTests: XCTestCase {
             requestedBeforeItemID: 101,
             oldestItemID: 101,
             complete: false))
+        XCTAssertFalse(paging.canLoadOlder)
         XCTAssertNil(paging.beginOlderRequest())
     }
 }

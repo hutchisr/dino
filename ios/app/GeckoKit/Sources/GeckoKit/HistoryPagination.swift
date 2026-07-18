@@ -6,6 +6,10 @@ struct HistoryPagination {
     private(set) var pendingBeforeItemID: Int32?
     private(set) var reachedBeginning = false
 
+    var canLoadOlder: Bool {
+        nextBeforeItemID != nil && !reachedBeginning
+    }
+
     mutating func replaceWithLatestPage(oldestItemID: Int32?, complete: Bool) {
         nextBeforeItemID = oldestItemID
         pendingBeforeItemID = nil

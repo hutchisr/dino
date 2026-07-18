@@ -172,9 +172,12 @@ final class AppModel: ObservableObject {
     private var pendingChatJid: String?
     private var requestedAvatars = Set<String>()
     private let messagePageSize: Int32 = 50
-    private var historyPagination: [Int32: HistoryPagination] = [:]
+    @Published private var historyPagination: [Int32: HistoryPagination] = [:]
     private var replacingMessageHistory = Set<Int32>()
+    private var pendingOlderMessages: [Int32: [ChatMessage]] = [:]
     private var messageRevisions: [Int32: Int] = [:]
+    @Published private var historyPageRevisions: [Int32: Int] = [:]
+    @Published private var historyPageRenderedRowsAdded: [Int32: Bool] = [:]
     private var avatarRevision = 0
 
     private var booted = false
@@ -185,6 +188,18 @@ final class AppModel: ObservableObject {
 
     func messageRevision(for conversation: Int32) -> Int {
         messageRevisions[conversation] ?? 0
+    }
+
+    func historyPageRevision(for conversation: Int32) -> Int {
+        historyPageRevisions[conversation] ?? 0
+    }
+
+    func historyPageRenderedRowsAdded(for conversation: Int32) -> Bool {
+        historyPageRenderedRowsAdded[conversation] ?? false
+    }
+
+    func canLoadOlderHistory(for conversation: Int32) -> Bool {
+        historyPagination[conversation]?.canLoadOlder == true
     }
 
     func typingIndicatorText(for conversationId: Int32) -> String? {
@@ -417,12 +432,18 @@ final class AppModel: ObservableObject {
     }
 
     func openConversation(_ id: Int32) {
+        pendingOlderMessages.removeValue(forKey: id)
         historyPagination[id] = HistoryPagination()
         replacingMessageHistory.insert(id)
         GeckoCore.shared.requestMessages(conversation: id, count: messagePageSize)
     }
 
     func requestOlderMessages(_ id: Int32) {
+        pendingOlderMessages.removeValue(forKey: id)
+        continueOlderMessages(id)
+    }
+
+    private func continueOlderMessages(_ id: Int32) {
         var paging = historyPagination[id] ?? HistoryPagination()
         guard let before = paging.beginOlderRequest() else { return }
         historyPagination[id] = paging
@@ -484,8 +505,11 @@ final class AppModel: ObservableObject {
             conversations = []
             messages = [:]
             messageRevisions = [:]
+            historyPageRevisions = [:]
+            historyPageRenderedRowsAdded = [:]
             historyPagination = [:]
             replacingMessageHistory = []
+            pendingOlderMessages = [:]
             replaceNavigation(with: [])
             roster = []
             subscriptionRequests = []
@@ -656,20 +680,42 @@ final class AppModel: ObservableObject {
                     oldestItemID: oldestItemID,
                     complete: complete
                 ) {
-                    historyPagination[conversationId] = paging
-                    let previousMessageCount = messages[conversationId]?.count ?? 0
+                    let previousOldestMessageID = messages[conversationId]?.first?.id
                     let decoded = items.compactMap(Self.decodeMessage).sorted { lhs, rhs in
                         if lhs.time == rhs.time { return lhs.id < rhs.id }
                         return lhs.time < rhs.time
                     }
-                    mergeMessages(decoded, for: conversationId)
-                    // If the raw page added no rendered row (unsupported items,
-                    // or an item already merged from an out-of-window update),
-                    // neither list gets a layout/appearance trigger for the next
-                    // page, so advance again here.
-                    if (messages[conversationId]?.count ?? 0) == previousMessageCount,
+                    pendingOlderMessages[conversationId, default: []].append(contentsOf: decoded)
+                    let currentOldestMessageID = (
+                        ((messages[conversationId]?.first).map { [$0] } ?? [])
+                            + (pendingOlderMessages[conversationId] ?? [])
+                    ).min { lhs, rhs in
+                        if lhs.time == rhs.time { return lhs.id < rhs.id }
+                        return lhs.time < rhs.time
+                    }?.id
+                    // Keep walking raw pages until the rendered top boundary
+                    // actually advances. Unsupported items, duplicates, and
+                    // out-of-order timestamps otherwise leave the viewport at
+                    // the same top with no user-visible page to traverse.
+                    if currentOldestMessageID == previousOldestMessageID,
                        !paging.reachedBeginning {
-                        requestOlderMessages(conversationId)
+                        historyPagination[conversationId] = paging
+                        continueOlderMessages(conversationId)
+                    } else {
+                        let previousMessageCount = messages[conversationId]?.count ?? 0
+                        let completedMessages = pendingOlderMessages.removeValue(
+                            forKey: conversationId) ?? []
+                        var transaction = Transaction(animation: nil)
+                        transaction.disablesAnimations = true
+                        transaction.scrollContentOffsetAdjustmentBehavior = .automatic
+                        transaction.scrollPositionUpdatePreservesVelocity = true
+                        withTransaction(transaction) {
+                            historyPagination[conversationId] = paging
+                            mergeMessages(completedMessages, for: conversationId)
+                            historyPageRenderedRowsAdded[conversationId] =
+                                (messages[conversationId]?.count ?? 0) > previousMessageCount
+                            historyPageRevisions[conversationId, default: 0] &+= 1
+                        }
                     }
                 }
             }

@@ -13,8 +13,6 @@ struct AccountSettingsView: View {
     @State private var presenceDirty = false
     @State private var closingForSignOut = false
 
-    @AppStorage("experimentalSwiftUIMessageList") private var useSwiftUIMessageList = true
-
     private let presenceOptions = [("online", "Online"), ("away", "Away"), ("dnd", "Do Not Disturb")]
     private var jid: String { model.accounts.first?.id ?? "" }
     private var presenceShowBinding: Binding<String> {
@@ -147,15 +145,6 @@ struct AccountSettingsView: View {
                         LabeledContent("Blocked contacts",
                                        value: model.blockedContacts.isEmpty ? "" : "\(model.blockedContacts.count)")
                     }
-                }
-
-                Section {
-                    Toggle("SwiftUI message list", isOn: $useSwiftUIMessageList)
-                } header: {
-                    Text("Developer")
-                } footer: {
-                    Text("Experimental: render chats with the pure-SwiftUI list instead of "
-                         + "the UIKit one. Reopen a chat after changing this.")
                 }
 
                 Section {

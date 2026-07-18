@@ -1,23 +1,18 @@
 import SwiftUI
 
-/// A **pure-SwiftUI** alternative to `InvertedMessageList` (the UIKit
-/// `UITableView`-backed list), built on the modern iOS 18+ scroll APIs:
-/// `ScrollViewReader` for programmatic scrolling, `.onScrollGeometryChange` for
-/// "am I at the bottom?", and `.contentMargins` for the floating-chrome insets.
+/// The pure-SwiftUI chat list, built on the modern scroll APIs: stable-ID
+/// viewport restoration for prepends, scroll geometry for boundary detection,
+/// and content margins for the floating-chrome insets.
 ///
-/// This is an experiment, kept side-by-side with `InvertedMessageList` so the
-/// two can be compared on device (toggle in Account settings). Unlike the
-/// inverted table, this list is laid out **upright** — oldest at the top, newest
-/// at the bottom. It opens pinned to the newest message by scrolling the last
-/// row into view (we can't use `.defaultScrollAnchor(.bottom)`: on a ScrollView
-/// that starts empty and is populated asynchronously it leaves the list stuck
-/// blank), and follows new messages only while already pinned to the bottom.
-///
-/// It deliberately exposes the **same initializer as `InvertedMessageList`** so
-/// `ChatView` can swap one for the other with no other changes.
+/// The list is laid out upright — oldest at the top, newest at the bottom. It
+/// opens pinned to the newest message by positioning the final row explicitly
+/// and follows new messages only while already pinned to the bottom.
 struct SwiftUIMessageList: View {
     let messages: [ChatMessage]           // chronological: oldest first
     let messageRevision: Int
+    let historyPageRevision: Int
+    let historyPageRenderedRowsAdded: Bool
+    let canLoadOlderHistory: Bool
     let conversationId: Int32
     let isGroupchat: Bool
     let avatarPaths: [String: String]
@@ -48,11 +43,9 @@ struct SwiftUIMessageList: View {
     /// oldest row's first appearance at the ScrollView's default top position
     /// immediately requests page two.
     @State private var canLoadOlder = false
-    @State private var visibleOldestID: Int32?
+    @State private var historyLoadTrigger = HistoryLoadTrigger()
+    @State private var trackedHistoryViewportID: Int32?
     @State private var visibleNewestID: Int32?
-    /// Prevent repeated visibility/layout callbacks from requesting the same
-    /// page boundary more than once.
-    @State private var requestedOldestID: Int32?
 
     /// The newest row we've already pinned after a layout pass. If content
     /// grows for a different newest message, let that growth animate instead of
@@ -88,9 +81,57 @@ struct SwiftUIMessageList: View {
     /// Mutable scroll metrics kept OUT of `@State`-tracked value storage so
     /// per-frame writes don't re-render the list.
     private final class ScrollMetrics {
+        var distanceFromTop: CGFloat = 0
         var distanceFromBottom: CGFloat = 0
         var isAtBottom = false
+        var isUnderfilled = false
+        var contentHeight: CGFloat = 0
+        var topVisibleMessageID: Int32?
+        var fullyVisibleMessageID: Int32?
+        var trackedMessageID: Int32?
+        var trackedMessageFrame: CGRect?
+        var containerHeight: CGFloat = 0
+        var newestMessageID: Int32?
+        var awaitingHistoryRestoreGeometry = false
+        var expectedHistoryRestoreDistanceFromTop: CGFloat = 0
+        var historyRestoreGeneration = 0
+        var historyRequest: HistoryRequestContext?
     }
+
+    /// Includes the content height and model page revision so completion is
+    /// acknowledged only by geometry measured from the newly prepended rows.
+    /// This prevents a fast local-database response from reusing pre-page
+    /// top/bottom metrics and immediately starting another request.
+    private struct ScrollSample: Equatable {
+        let distanceFromTop: CGFloat
+        let distanceFromBottom: CGFloat
+        let contentHeight: CGFloat
+        let containerHeight: CGFloat
+        let isUnderfilled: Bool
+        let historyPageRevision: Int
+    }
+
+    private enum HistoryViewportAnchorKind: Equatable {
+        case viewport
+        case newestBottom
+    }
+
+    private struct HistoryViewportAnchor {
+        let messageID: Int32
+        let unitPoint: UnitPoint
+        let contentHeight: CGFloat
+        let distanceFromTop: CGFloat
+        let kind: HistoryViewportAnchorKind
+    }
+
+    private struct HistoryRequestContext {
+        let revision: Int
+        var preCompletionContentHeight: CGFloat
+        var viewportAnchor: HistoryViewportAnchor?
+        let refreshViewportAnchor: Bool
+    }
+
+    private static let scrollCoordinateSpace = "SwiftUIMessageList.scroll"
 
     /// Slack (points) for the at-bottom test so the button doesn't flicker at
     /// rest under rubber-banding / sub-pixel offsets. Matches the spirit of the
@@ -104,6 +145,21 @@ struct SwiftUIMessageList: View {
                     ForEach(rows) { row in
                         rowView(row)
                             .id(row.msg.id)
+                            .background {
+                                if row.msg.id == trackedHistoryViewportID {
+                                    Color.clear
+                                        .onGeometryChange(
+                                            for: CGRect.self,
+                                            of: { proxy in
+                                                proxy.frame(in: .named(Self.scrollCoordinateSpace))
+                                            },
+                                            action: { frame in
+                                                metrics.trackedMessageID = row.msg.id
+                                                metrics.trackedMessageFrame = frame
+                                                refreshHistoryRequestIfNeeded()
+                                            })
+                                }
+                            }
                             .onScrollVisibilityChange(threshold: 0.01) { visible in
                                 updateBoundaryVisibility(for: row.msg.id, visible: visible)
                             }
@@ -112,8 +168,12 @@ struct SwiftUIMessageList: View {
                                 removal: .opacity))
                     }
                 }
-                .animation(.spring(response: 0.32, dampingFraction: 0.86), value: newestMessageID)
+                .scrollTargetLayout()
+                .animation(
+                    .spring(response: 0.32, dampingFraction: 0.86),
+                    value: newestMessageID)
             }
+            .coordinateSpace(.named(Self.scrollCoordinateSpace))
             .scrollDismissesKeyboard(.interactively)
             .scrollDisabled(haltScroll)
             // The chat chrome (top bar, composer) floats over the list, so inset
@@ -122,7 +182,7 @@ struct SwiftUIMessageList: View {
             .contentMargins(.bottom, max(0, visualBottomInset), for: .scrollContent)
             .contentMargins(.top, max(0, visualScrollIndicatorTopInset), for: .scrollIndicators)
             .contentMargins(.bottom, max(0, visualScrollIndicatorBottomInset), for: .scrollIndicators)
-            .onScrollGeometryChange(for: CGFloat.self) { geo in
+            .onScrollGeometryChange(for: ScrollSample.self) { geo in
                 // Distance the content can still travel downward; ~0 means
                 // pinned to the newest message. Empirically, at the resting
                 // bottom SwiftUI gives
@@ -131,9 +191,22 @@ struct SwiftUIMessageList: View {
                 // the bottom-most offset is contentSize − containerSize − top.
                 let bottomOffsetY = geo.contentSize.height
                     - geo.containerSize.height - geo.contentInsets.top
-                return max(0, bottomOffsetY - geo.contentOffset.y)
-            } action: { _, distanceFromBottom in
+                let distanceFromTop = max(0, geo.contentOffset.y + geo.contentInsets.top)
+                let distanceFromBottom = max(0, bottomOffsetY - geo.contentOffset.y)
+                return ScrollSample(
+                    distanceFromTop: distanceFromTop,
+                    distanceFromBottom: distanceFromBottom,
+                    contentHeight: geo.contentSize.height,
+                    containerHeight: geo.containerSize.height,
+                    isUnderfilled: geo.contentSize.height <= geo.containerSize.height + 1,
+                    historyPageRevision: historyPageRevision)
+            } action: { _, sample in
+                let distanceFromBottom = sample.distanceFromBottom
+                metrics.distanceFromTop = sample.distanceFromTop
                 metrics.distanceFromBottom = distanceFromBottom
+                metrics.isUnderfilled = sample.isUnderfilled
+                metrics.contentHeight = sample.contentHeight
+                metrics.containerHeight = sample.containerHeight
                 let atBottom = distanceFromBottom <= Self.bottomThreshold
                 metrics.isAtBottom = atBottom
                 // While we intend to stay glued and the user isn't dragging,
@@ -142,9 +215,49 @@ struct SwiftUIMessageList: View {
                 // we're about to snap back to the newest message.
                 let effectiveAtBottom = atBottom || (stickToBottom && !userInteracting)
                 if isAtBottom != effectiveAtBottom { isAtBottom = effectiveAtBottom }
-                // Only the user's own scrolling releases or re-arms the glue.
-                if userInteracting { stickToBottom = atBottom }
+                // Any confirmed bottom sample re-arms following, including the
+                // final geometry that can arrive just after deceleration turns
+                // idle. Only user-driven movement away is allowed to release it.
+                stickToBottom = updatedBottomFollowIntent(
+                    current: stickToBottom,
+                    isAtBottom: atBottom,
+                    userInteracting: userInteracting)
+                refreshHistoryRequestIfNeeded(
+                    measuredRevision: sample.historyPageRevision)
+                let settledViewport = completePendingHistoryViewportRestoreIfNeeded(
+                    sample)
                 enableOlderLoadingIfReady()
+                let completedPage = processCompletedHistoryPageIfNeeded(
+                    sample,
+                    proxy: proxy)
+                if canLoadOlder {
+                    requestOlderIfUnderfilled()
+                }
+                // Do not treat the layout sample produced by the prepend as
+                // another scroll. The restored viewport's first sample also
+                // only rearms the gate; later motion from the same drag or
+                // momentum can naturally cross the next threshold.
+                if !settledViewport, !completedPage, userInteracting,
+                   historyLoadTrigger.state == .armed {
+                    requestOlderIfNeeded(distanceFromTop: sample.distanceFromTop)
+                }
+            }
+            .onScrollTargetVisibilityChange(idType: Int32.self, threshold: 0.01) { ids in
+                metrics.topVisibleMessageID = ids.first
+                if metrics.fullyVisibleMessageID == nil,
+                   trackedHistoryViewportID != ids.first {
+                    trackedHistoryViewportID = ids.first
+                }
+                refreshHistoryRequestIfNeeded()
+            }
+            .onScrollTargetVisibilityChange(idType: Int32.self, threshold: 0.99) { ids in
+                let first = ids.first
+                metrics.fullyVisibleMessageID = first
+                let preferred = first ?? metrics.topVisibleMessageID
+                if trackedHistoryViewportID != preferred {
+                    trackedHistoryViewportID = preferred
+                }
+                refreshHistoryRequestIfNeeded()
             }
             // Stay pinned to the newest message as the content height settles
             // after open — a LazyVStack with image rows keeps growing as those
@@ -165,15 +278,40 @@ struct SwiftUIMessageList: View {
             // `.defaultScrollAnchor(.bottom)`: on a ScrollView that starts empty
             // and is then populated asynchronously it leaves the list stuck
             // blank (FB-worthy SwiftUI bug). Instead we bring the last row into
-            // view imperatively via the reader.
-            .onAppear { scrollToNewest(proxy, animated: false, initial: true) }
+            // view through its stable scroll-target identity.
+            .onAppear {
+                metrics.newestMessageID = newestMessageID
+                scrollToNewest(proxy, animated: false, initial: true)
+            }
             .onChange(of: newestMessageID) { _, newest in
+                metrics.newestMessageID = newest
                 guard let newest else { return }
                 if !didInitialScroll {
                     scrollToNewest(proxy, animated: false, initial: true)
-                } else if stickToBottom {
+                } else if shouldFollowNewestMessage(
+                    intent: stickToBottom,
+                    measuredAtBottom: metrics.isAtBottom
+                ) {
+                    stickToBottom = true
                     animateBottomGrowthForNewestID = newest
                     scrollToNewest(proxy, animated: true, initial: false)
+                }
+            }
+            .onChange(of: historyPageRevision) { _, _ in
+                // Nonterminal pages are completed by the content-size-aware
+                // scroll sample above. A terminal response with no newly rendered
+                // rows produces no geometry and can be completed immediately.
+                if !historyPageRenderedRowsAdded {
+                    processCompletedHistoryPageIfNeeded(
+                        nil,
+                        proxy: proxy)
+                }
+            }
+            .onChange(of: canLoadOlderHistory) { _, allowed in
+                guard canLoadOlder else { return }
+                historyLoadTrigger.setCanLoadOlder(allowed)
+                if allowed {
+                    requestOlderIfUnderfilled()
                 }
             }
             .onChange(of: scrollToBottomToken) { _, _ in
@@ -182,7 +320,8 @@ struct SwiftUIMessageList: View {
                 // `.scrollDisabled` halts a decelerating scroll immediately), then
                 // glide from rest on the next run loop so the two don't fight.
                 haltScroll = true
-                DispatchQueue.main.async {
+                Task { @MainActor in
+                    await Task.yield()
                     haltScroll = false
                     scrollToNewest(proxy, animated: true, initial: false)
                 }
@@ -190,17 +329,32 @@ struct SwiftUIMessageList: View {
             // The user's own dragging/flinging is the only thing that releases
             // the stick-to-bottom intent; track when they're driving the scroll
             // so content-growth re-pins never fight a finger.
-            .onScrollPhaseChange { _, phase, _ in
+            .onScrollPhaseChange { previous, phase, context in
                 userInteracting = phase == .tracking
                     || phase == .interacting
                     || phase == .decelerating
+                if phase == .tracking || (phase == .interacting && previous == .idle) {
+                    historyLoadTrigger.beginUserScroll()
+                }
+                let beganInteraction = previous == .tracking || previous == .idle
+                if phase == .interacting, beganInteraction {
+                    let rawDistanceFromTop = context.geometry.contentOffset.y
+                        + context.geometry.contentInsets.top
+                    if rawDistanceFromTop <= 0 {
+                        requestOlderIfNeeded(distanceFromTop: 0)
+                    }
+                }
             }
         }
     }
 
     /// Bring the newest row into view, if there is one. `initial` marks the
     /// first open-at-bottom jump and flips `didInitialScroll`.
-    private func scrollToNewest(_ proxy: ScrollViewProxy, animated: Bool, initial: Bool) {
+    private func scrollToNewest(
+        _ proxy: ScrollViewProxy,
+        animated: Bool,
+        initial: Bool
+    ) {
         guard let last = rows.last?.id else { return }
         if initial {
             didInitialScroll = true
@@ -209,9 +363,10 @@ struct SwiftUIMessageList: View {
             animateBottomGrowthForNewestID = nil
             enableOlderLoadingIfReady()
         }
-        // Defer a tick so the LazyVStack has materialised the row before we ask
-        // the reader to bring it into view.
-        DispatchQueue.main.async {
+        // Defer a tick so the LazyVStack has materialised the target before the
+        // reader brings it into view.
+        Task { @MainActor in
+            await Task.yield()
             if animated {
                 // Scale the duration with the distance to the bottom so a scroll
                 // from far up doesn't whip past in a fixed-time blur — keep a
@@ -236,44 +391,257 @@ struct SwiftUIMessageList: View {
 
     private func updateBoundaryVisibility(for id: Int32, visible: Bool) {
         if visible {
-            if id == oldestMessageID {
-                visibleOldestID = id
-                requestOlderIfNeeded()
-            }
             if id == newestMessageID {
                 visibleNewestID = id
-                enableOlderLoadingIfReady()
+                if enableOlderLoadingIfReady() {
+                    requestOlderIfUnderfilled()
+                }
             }
         } else {
-            if visibleOldestID == id { visibleOldestID = nil }
             if visibleNewestID == id { visibleNewestID = nil }
         }
     }
 
-    private func enableOlderLoadingIfReady() {
+    @discardableResult
+    private func enableOlderLoadingIfReady() -> Bool {
         guard !canLoadOlder,
               didInitialScroll,
               metrics.isAtBottom,
-              visibleNewestID == newestMessageID else { return }
+              visibleNewestID == newestMessageID else { return false }
         canLoadOlder = true
-        requestOlderIfNeeded()
+        historyLoadTrigger.setCanLoadOlder(canLoadOlderHistory)
+        return true
     }
 
-    private func requestOlderIfNeeded() {
-        guard canLoadOlder,
-              let oldest = oldestMessageID,
-              visibleOldestID == oldest,
-              requestedOldestID != oldest else { return }
-        requestedOldestID = oldest
+    private func requestOlderIfNeeded(distanceFromTop: CGFloat) {
+        guard canLoadOlder else { return }
+        if historyLoadTrigger.observe(distanceFromTop: Double(distanceFromTop)) {
+            requestOlderPage(
+                viewportAnchor: currentHistoryViewportAnchor(),
+                refreshViewportAnchor: true)
+        }
+    }
+
+    @discardableResult
+    private func processCompletedHistoryPageIfNeeded(
+        _ sample: ScrollSample?,
+        proxy: ScrollViewProxy
+    ) -> Bool {
+        let revision = sample?.historyPageRevision ?? historyPageRevision
+        guard let request = metrics.historyRequest,
+              revision > request.revision else { return false }
+        let viewportAnchor = historyPageRenderedRowsAdded
+            ? request.viewportAnchor
+            : nil
+        if historyPageRenderedRowsAdded {
+            guard let sample else { return false }
+            if sample.contentHeight <= request.preCompletionContentHeight + 1 {
+                // The model revision can arrive one layout pass before the
+                // LazyVStack reports the prepended rows. Wait for that actual
+                // content-size change before choosing automatic vs fallback
+                // viewport preservation.
+                return false
+            }
+        }
+
+        metrics.historyRequest = nil
+        historyLoadTrigger.pageCompleted(hasMore: canLoadOlderHistory)
+
+        guard historyPageRenderedRowsAdded, let sample else {
+            settleHistoryViewportIfNeeded(distanceFromTop: metrics.distanceFromTop)
+            return true
+        }
+        guard let viewportAnchor else {
+            historyLoadTrigger.viewportSettleFailed()
+            return true
+        }
+
+        switch viewportAnchor.kind {
+        case .newestBottom:
+            if sample.distanceFromBottom <= Self.bottomThreshold {
+                settleHistoryViewportIfNeeded(distanceFromTop: sample.distanceFromTop)
+            } else {
+                let currentBottomAnchor = HistoryViewportAnchor(
+                    messageID: newestMessageID ?? viewportAnchor.messageID,
+                    unitPoint: .bottom,
+                    contentHeight: viewportAnchor.contentHeight,
+                    distanceFromTop: viewportAnchor.distanceFromTop,
+                    kind: .newestBottom)
+                restoreHistoryViewport(currentBottomAnchor, after: sample, proxy: proxy)
+            }
+        case .viewport:
+            let automaticPreservedViewport =
+                HistoryLoadTrigger.automaticAdjustmentPreservedViewport(
+                previousDistanceFromTop: Double(viewportAnchor.distanceFromTop),
+                previousContentHeight: Double(viewportAnchor.contentHeight),
+                currentDistanceFromTop: Double(sample.distanceFromTop),
+                currentContentHeight: Double(sample.contentHeight))
+            let automaticAdjustmentGrosslyFailed =
+                HistoryLoadTrigger.automaticAdjustmentGrosslyFailed(
+                    previousDistanceFromTop: Double(viewportAnchor.distanceFromTop),
+                    previousContentHeight: Double(viewportAnchor.contentHeight),
+                    currentDistanceFromTop: Double(sample.distanceFromTop),
+                    currentContentHeight: Double(sample.contentHeight))
+            let activeAdjustmentAccepted = userInteracting
+                && !automaticAdjustmentGrosslyFailed
+            // During a live drag/deceleration, the user's travel between the
+            // last pre-merge sample and this layout is legitimate. Trust the
+            // transaction's automatic adjustment rather than rewinding the
+            // active flick to an older captured position.
+            if automaticPreservedViewport || activeAdjustmentAccepted {
+                settleHistoryViewportIfNeeded(distanceFromTop: sample.distanceFromTop)
+            } else {
+                restoreHistoryViewport(viewportAnchor, after: sample, proxy: proxy)
+            }
+        }
+        return true
+    }
+
+    private func completePendingHistoryViewportRestoreIfNeeded(
+        _ sample: ScrollSample
+    ) -> Bool {
+        guard metrics.awaitingHistoryRestoreGeometry else { return false }
+        let closeToExpected = abs(
+            sample.distanceFromTop - metrics.expectedHistoryRestoreDistanceFromTop) <= 24
+        guard closeToExpected || sample.isUnderfilled else { return true }
+        metrics.awaitingHistoryRestoreGeometry = false
+        settleHistoryViewportIfNeeded(distanceFromTop: sample.distanceFromTop)
+        return true
+    }
+
+    private func restoreHistoryViewport(
+        _ viewportAnchor: HistoryViewportAnchor,
+        after sample: ScrollSample,
+        proxy: ScrollViewProxy
+    ) {
+        let expectedDistanceFromTop: CGFloat
+        switch viewportAnchor.kind {
+        case .viewport:
+            expectedDistanceFromTop = viewportAnchor.distanceFromTop
+                + max(0, sample.contentHeight - viewportAnchor.contentHeight)
+        case .newestBottom:
+            expectedDistanceFromTop = max(
+                0,
+                sample.contentHeight - sample.containerHeight)
+        }
+        let shouldAwaitSettle = historyLoadTrigger.state == .awaitingViewportSettle
+        if shouldAwaitSettle {
+            metrics.awaitingHistoryRestoreGeometry = true
+            metrics.expectedHistoryRestoreDistanceFromTop = expectedDistanceFromTop
+            metrics.historyRestoreGeneration &+= 1
+        }
+        let generation = metrics.historyRestoreGeneration
+
+        Task { @MainActor in
+            await Task.yield()
+            if shouldAwaitSettle,
+               !metrics.awaitingHistoryRestoreGeometry
+                || metrics.historyRestoreGeneration != generation {
+                // A later automatic-adjustment sample completed the handoff
+                // before this fallback ran.
+                return
+            }
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            transaction.scrollPositionUpdatePreservesVelocity = true
+            withTransaction(transaction) {
+                proxy.scrollTo(
+                    viewportAnchor.kind == .newestBottom
+                        ? metrics.newestMessageID ?? viewportAnchor.messageID
+                        : viewportAnchor.messageID,
+                    anchor: viewportAnchor.unitPoint)
+            }
+            guard shouldAwaitSettle else { return }
+
+            // `scrollTo` normally emits geometry on the next layout pass. If it
+            // does not, fail closed instead of inventing a settled offset that
+            // could cascade into another page request.
+            try? await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
+            guard metrics.awaitingHistoryRestoreGeometry,
+                  metrics.historyRestoreGeneration == generation else { return }
+            metrics.awaitingHistoryRestoreGeometry = false
+            if viewportAnchor.kind == .newestBottom, metrics.isUnderfilled {
+                settleHistoryViewportIfNeeded(distanceFromTop: metrics.distanceFromTop)
+            } else {
+                historyLoadTrigger.viewportSettleFailed()
+            }
+        }
+    }
+
+    private func settleHistoryViewportIfNeeded(distanceFromTop: CGFloat) {
+        historyLoadTrigger.viewportSettled(distanceFromTop: Double(distanceFromTop))
+        if canLoadOlderHistory {
+            requestOlderIfUnderfilled()
+        }
+    }
+
+    private func requestOlderIfUnderfilled() {
+        guard historyLoadTrigger.loadIfUnderfilled(metrics.isUnderfilled) else { return }
+        metrics.newestMessageID = messages.last?.id
+        let viewportAnchor = messages.last.map { message in
+            HistoryViewportAnchor(
+                messageID: message.id,
+                unitPoint: .bottom,
+                contentHeight: metrics.contentHeight,
+                distanceFromTop: metrics.distanceFromTop,
+                kind: .newestBottom)
+        }
+        requestOlderPage(
+            viewportAnchor: viewportAnchor,
+            refreshViewportAnchor: false)
+    }
+
+    private func requestOlderPage(
+        viewportAnchor: HistoryViewportAnchor?,
+        refreshViewportAnchor: Bool
+    ) {
+        metrics.historyRequest = HistoryRequestContext(
+            revision: historyPageRevision,
+            preCompletionContentHeight: metrics.contentHeight,
+            viewportAnchor: viewportAnchor,
+            refreshViewportAnchor: refreshViewportAnchor)
         onLoadOlder()
+    }
+
+    private func refreshHistoryRequestIfNeeded(
+        measuredRevision: Int? = nil
+    ) {
+        guard var request = metrics.historyRequest,
+              request.revision == (measuredRevision ?? historyPageRevision) else { return }
+        request.preCompletionContentHeight = metrics.contentHeight
+        if request.refreshViewportAnchor {
+            request.viewportAnchor = currentHistoryViewportAnchor()
+        }
+        metrics.historyRequest = request
+    }
+
+    private func currentHistoryViewportAnchor() -> HistoryViewportAnchor? {
+        let messageID = metrics.fullyVisibleMessageID ?? metrics.topVisibleMessageID
+        if let messageID,
+           metrics.trackedMessageID == messageID,
+           let frame = metrics.trackedMessageFrame {
+            let viewportMinY = max(0, visualTopInset)
+            let viewportHeight = max(
+                0,
+                metrics.containerHeight - viewportMinY - max(0, visualBottomInset))
+            if let anchorY = HistoryLoadTrigger.viewportAnchorY(
+                rowMinY: Double(frame.minY),
+                rowHeight: Double(frame.height),
+                viewportMinY: Double(viewportMinY),
+                viewportHeight: Double(viewportHeight)) {
+                return HistoryViewportAnchor(
+                    messageID: messageID,
+                    unitPoint: UnitPoint(x: 0.5, y: CGFloat(anchorY)),
+                    contentHeight: metrics.contentHeight,
+                    distanceFromTop: metrics.distanceFromTop,
+                    kind: .viewport)
+            }
+        }
+        return nil
     }
 
     private var newestMessageID: Int32? {
         messages.last?.id
-    }
-
-    private var oldestMessageID: Int32? {
-        messages.first?.id
     }
 
     private var shouldAnimateBottomGrowth: Bool {
