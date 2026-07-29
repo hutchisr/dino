@@ -12,8 +12,7 @@ by a small C/Vala shim.
 
 The desktop GTK UI has been removed (`main/` is gone; commit _"Remove
 desktop-only code; Gecko is iOS-only now"_). **Treat this tree as iOS-only.**
-The upstream `README.md` still describes desktop Dino and is kept for
-provenance — it does not reflect this fork's focus.
+`README.md` is the user-facing intro to Gecko (what works, how to build).
 
 License: **GPL-3.0** (`LICENSE`). The App-Store distribution plan keeps GPLv3
 (libomemo-c stays via its App Store carve-out); see the licensing memory.
