@@ -16,7 +16,6 @@
 		67D47FF8799E4FC7B8C5DFF1 /* DisplayFormatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = D928D500119B41A89B21FCEA /* DisplayFormatters.swift */; };
 		6C8B8E0B889046EE97952996 /* MessageFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0556F003C354589BE42AF2E /* MessageFormatting.swift */; };
 		8E614823A41A4A26B3F628C0 /* ComposerTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E614822A41A4A26B3F628C0 /* ComposerTextView.swift */; };
-		A0B32992BB1249CA8CF803EE /* InvertedMessageList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6942FA09807F4B429F97DB11 /* InvertedMessageList.swift */; };
 		A1B2C3D4E5F6478899AA0001 /* AttachmentStaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0011 /* AttachmentStaging.swift */; };
 		A1B2C3D4E5F6478899AA0002 /* PrivacyFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0012 /* PrivacyFormatting.swift */; };
 		A1B2C3D4E5F6478899AA0003 /* DebugLogging.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0013 /* DebugLogging.swift */; };
@@ -73,7 +72,6 @@
 		45C570219B83445983AADDE0 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		54E4E5F8F02544428CAE3875 /* Gecko.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Gecko.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		583D2717B8994C76AABDE233 /* ImageEncoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageEncoding.swift; sourceTree = "<group>"; };
-		6942FA09807F4B429F97DB11 /* InvertedMessageList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvertedMessageList.swift; sourceTree = "<group>"; };
 		6C377EE663CA4986A7BD5314 /* BlockedContactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockedContactsView.swift; sourceTree = "<group>"; };
 		78AE92F169944F9D9A10CA6E /* NotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NotificationService.entitlements; sourceTree = "<group>"; };
 		7B7F5BB0DF3E44EC8A5E8710 /* RoomDetailsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomDetailsView.swift; sourceTree = "<group>"; };
@@ -174,7 +172,6 @@
 				DF917E5E610B459F97F0C3BC /* GeckoApp.swift */,
 				D92F01BFA770407E89F9FDCF /* GeckoCore.swift */,
 				87D35A637B324B49AA316922 /* ImageViewer.swift */,
-				6942FA09807F4B429F97DB11 /* InvertedMessageList.swift */,
 				86567832A6D1414586650107 /* MemberDetailView.swift */,
 				BC12B7DE8DF54966B1F7BB2D /* Model.swift */,
 				B8841F1B93DC4153BCB80974 /* PhotoPicker.swift */,
@@ -329,7 +326,6 @@
 				DA4CF9FE6B114B4DAA0E7C47 /* GeckoCore.swift in Sources */,
 				A1B2C3D4E5F6478899AA0003 /* DebugLogging.swift in Sources */,
 				F4F596488EF94917BA9FBF9C /* ImageViewer.swift in Sources */,
-				A0B32992BB1249CA8CF803EE /* InvertedMessageList.swift in Sources */,
 				E59885895E7C47EEAA461FA8 /* MemberDetailView.swift in Sources */,
 				00BECDA74D904337B8849545 /* Model.swift in Sources */,
 				F0411967E7AD452192EB9EA2 /* PhotoPicker.swift in Sources */,

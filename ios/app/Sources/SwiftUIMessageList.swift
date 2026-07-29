@@ -1,8 +1,9 @@
 import SwiftUI
+import UIKit
 
-/// The pure-SwiftUI chat list, built on the modern scroll APIs: stable-ID
-/// viewport restoration for prepends, scroll geometry for boundary detection,
-/// and content margins for the floating-chrome insets.
+/// The SwiftUI chat list, built on the modern scroll APIs: stable-ID viewport
+/// restoration for prepends, scroll geometry for boundary detection, and a
+/// small UIKit hook for reliable mid-deceleration bottom scrolling.
 ///
 /// The list is laid out upright — oldest at the top, newest at the bottom. It
 /// opens pinned to the newest message by positioning the final row explicitly
@@ -65,12 +66,6 @@ struct SwiftUIMessageList: View {
     /// scrolling changes `stickToBottom`.
     @State private var userInteracting = false
 
-    /// Briefly flipped true to cancel any in-flight momentum/slide before a
-    /// programmatic scroll-to-bottom, so the glide starts from rest instead of
-    /// fighting a decelerating scroll. Toggling `.scrollDisabled` halts the
-    /// active scroll immediately; we drop it again on the next run loop.
-    @State private var haltScroll = false
-
     /// Latest measured remaining downward travel (points to the bottom). Parked
     /// in a reference holder so updating it on every scroll frame doesn't
     /// invalidate the view; read when scrolling to the bottom to scale the
@@ -96,6 +91,134 @@ struct SwiftUIMessageList: View {
         var expectedHistoryRestoreDistanceFromTop: CGFloat = 0
         var historyRestoreGeneration = 0
         var historyRequest: HistoryRequestContext?
+        weak var scrollView: UIScrollView?
+        var scrollDiagnosticScheduled = false
+        var scrollDiagnosticStartTime: CFTimeInterval?
+        var scrollDiagnosticStartOffset: Double = 0
+        var scrollDiagnosticTargetOffset: Double = 0
+        var scrollDiagnosticSamples: [(time: Double, offset: Double)] = []
+
+        /// Retarget the native scroll view directly, as UIKit-backed chat lists
+        /// do. Unlike a second SwiftUI animation, this replaces active
+        /// deceleration instead of competing with it.
+        @MainActor
+        func scrollToBottom(animated: Bool) -> Bool {
+            guard let scrollView else { return false }
+            scrollView.layoutIfNeeded()
+            guard scrollView.bounds.height > 0 else { return false }
+
+            let insets = scrollView.adjustedContentInset
+            let maximumY = CGFloat(bottomContentOffset(
+                contentHeight: Double(scrollView.contentSize.height),
+                viewportHeight: Double(scrollView.bounds.height),
+                topInset: Double(insets.top)))
+            scrollView.setContentOffset(
+                CGPoint(x: scrollView.contentOffset.x, y: maximumY),
+                animated: animated)
+            return true
+        }
+
+        /// Device-only automation for proving that the actual UIKit scroller
+        /// visits intermediate offsets and settles on its lower boundary.
+        @MainActor
+        func scheduleScrollDiagnosticIfNeeded() -> Bool {
+            guard !scrollDiagnosticScheduled,
+                  ProcessInfo.processInfo.environment["DINO_AUTOSCROLLTEST"] != nil,
+                  let scrollView else { return false }
+            scrollView.layoutIfNeeded()
+
+            let insets = scrollView.adjustedContentInset
+            let minimumY = -insets.top
+            let targetY = CGFloat(bottomContentOffset(
+                contentHeight: Double(scrollView.contentSize.height),
+                viewportHeight: Double(scrollView.bounds.height),
+                topInset: Double(insets.top)))
+            let startY = max(minimumY, targetY - 1_200)
+            guard targetY - startY >= 300 else { return false }
+            scrollDiagnosticScheduled = true
+            NSLog(
+                "DINO_SCROLL_DIAGNOSTIC scheduled start=%.3f target=%.3f",
+                Double(startY),
+                Double(targetY))
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak scrollView] in
+                guard let self, let scrollView else { return }
+                scrollView.setContentOffset(
+                    CGPoint(x: scrollView.contentOffset.x, y: startY),
+                    animated: false)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak scrollView] in
+                    guard let self, let scrollView else { return }
+                    scrollView.layoutIfNeeded()
+                    let insets = scrollView.adjustedContentInset
+                    let target = bottomContentOffset(
+                        contentHeight: Double(scrollView.contentSize.height),
+                        viewportHeight: Double(scrollView.bounds.height),
+                        topInset: Double(insets.top))
+                    self.scrollDiagnosticStartTime = CACurrentMediaTime()
+                    self.scrollDiagnosticStartOffset = Double(scrollView.contentOffset.y)
+                    self.scrollDiagnosticTargetOffset = target
+                    self.scrollDiagnosticSamples = [(time: 0, offset: self.scrollDiagnosticStartOffset)]
+                    DispatchQueue.main.async { [weak self] in
+                        _ = self?.scrollToBottom(animated: true)
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                        self?.finishScrollDiagnostic()
+                    }
+                }
+            }
+            return true
+        }
+
+        func recordScrollDiagnosticSample(offset: CGFloat) {
+            guard let start = scrollDiagnosticStartTime else { return }
+            let sample = (time: CACurrentMediaTime() - start, offset: Double(offset))
+            if let last = scrollDiagnosticSamples.last,
+               abs(last.offset - sample.offset) < 0.05 { return }
+            scrollDiagnosticSamples.append(sample)
+        }
+
+        @MainActor
+        private func finishScrollDiagnostic() {
+            guard scrollDiagnosticStartTime != nil, let scrollView else { return }
+            recordScrollDiagnosticSample(offset: scrollView.contentOffset.y)
+            scrollDiagnosticStartTime = nil
+
+            let finalOffset = Double(scrollView.contentOffset.y)
+            let duration = scrollDiagnosticSamples.last?.time ?? 0
+            let low = min(scrollDiagnosticStartOffset, scrollDiagnosticTargetOffset)
+            let high = max(scrollDiagnosticStartOffset, scrollDiagnosticTargetOffset)
+            let intermediateSamples = scrollDiagnosticSamples.dropFirst().dropLast().filter {
+                $0.offset > low + 1 && $0.offset < high - 1
+            }.count
+            let endpointError = abs(finalOffset - scrollDiagnosticTargetOffset)
+            let result: [String: Any] = [
+                "startOffset": scrollDiagnosticStartOffset,
+                "targetOffset": scrollDiagnosticTargetOffset,
+                "finalOffset": finalOffset,
+                "endpointError": endpointError,
+                "duration": duration,
+                "sampleCount": scrollDiagnosticSamples.count,
+                "intermediateSampleCount": intermediateSamples,
+                "animatedInsteadOfSnapped": duration >= 0.1 && intermediateSamples >= 2,
+                "landedAtBottom": endpointError <= 0.5,
+                "samples": scrollDiagnosticSamples.map {
+                    ["time": $0.time, "offset": $0.offset]
+                },
+            ]
+            do {
+                let data = try JSONSerialization.data(
+                    withJSONObject: result,
+                    options: [.prettyPrinted, .sortedKeys])
+                let url = FileManager.default.urls(
+                    for: .documentDirectory,
+                    in: .userDomainMask)[0]
+                    .appendingPathComponent("scroll-diagnostic.json")
+                try data.write(to: url, options: .atomic)
+                NSLog("DINO_SCROLL_DIAGNOSTIC %@", String(data: data, encoding: .utf8) ?? "")
+            } catch {
+                NSLog("DINO_SCROLL_DIAGNOSTIC failed: %@", error.localizedDescription)
+            }
+        }
     }
 
     /// Includes the content height and model page revision so completion is
@@ -103,6 +226,7 @@ struct SwiftUIMessageList: View {
     /// This prevents a fast local-database response from reusing pre-page
     /// top/bottom metrics and immediately starting another request.
     private struct ScrollSample: Equatable {
+        let contentOffsetY: CGFloat
         let distanceFromTop: CGFloat
         let distanceFromBottom: CGFloat
         let contentHeight: CGFloat
@@ -169,13 +293,17 @@ struct SwiftUIMessageList: View {
                     }
                 }
                 .scrollTargetLayout()
+                .background(alignment: .topLeading) {
+                    ScrollViewResolver(metrics: metrics)
+                        .frame(width: 0, height: 0)
+                        .allowsHitTesting(false)
+                }
                 .animation(
                     .spring(response: 0.32, dampingFraction: 0.86),
                     value: newestMessageID)
             }
             .coordinateSpace(.named(Self.scrollCoordinateSpace))
             .scrollDismissesKeyboard(.interactively)
-            .scrollDisabled(haltScroll)
             // The chat chrome (top bar, composer) floats over the list, so inset
             // the content (and the scroll indicators independently) to clear it.
             .contentMargins(.top, max(0, visualTopInset), for: .scrollContent)
@@ -194,6 +322,7 @@ struct SwiftUIMessageList: View {
                 let distanceFromTop = max(0, geo.contentOffset.y + geo.contentInsets.top)
                 let distanceFromBottom = max(0, bottomOffsetY - geo.contentOffset.y)
                 return ScrollSample(
+                    contentOffsetY: geo.contentOffset.y,
                     distanceFromTop: distanceFromTop,
                     distanceFromBottom: distanceFromBottom,
                     contentHeight: geo.contentSize.height,
@@ -204,6 +333,7 @@ struct SwiftUIMessageList: View {
                 let distanceFromBottom = sample.distanceFromBottom
                 metrics.distanceFromTop = sample.distanceFromTop
                 metrics.distanceFromBottom = distanceFromBottom
+                metrics.recordScrollDiagnosticSample(offset: sample.contentOffsetY)
                 metrics.isUnderfilled = sample.isUnderfilled
                 metrics.contentHeight = sample.contentHeight
                 metrics.containerHeight = sample.containerHeight
@@ -232,6 +362,16 @@ struct SwiftUIMessageList: View {
                     proxy: proxy)
                 if canLoadOlder {
                     requestOlderIfUnderfilled()
+                }
+                if didInitialScroll, atBottom,
+                   ProcessInfo.processInfo.environment["DINO_AUTOSCROLLTEST"] != nil,
+                   !metrics.scrollDiagnosticScheduled {
+                    // Keep normal pin-follow behavior from undoing the
+                    // diagnostic's artificial 1,200pt jump before it records
+                    // the return animation.
+                    if metrics.scheduleScrollDiagnosticIfNeeded() {
+                        stickToBottom = false
+                    }
                 }
                 // Do not treat the layout sample produced by the prepend as
                 // another scroll. The restored viewport's first sample also
@@ -316,14 +456,18 @@ struct SwiftUIMessageList: View {
             }
             .onChange(of: scrollToBottomToken) { _, _ in
                 stickToBottom = true
-                // Cancel any in-flight momentum/slide first (toggling
-                // `.scrollDisabled` halts a decelerating scroll immediately), then
-                // glide from rest on the next run loop so the two don't fight.
-                haltScroll = true
-                Task { @MainActor in
-                    await Task.yield()
-                    haltScroll = false
-                    scrollToNewest(proxy, animated: true, initial: false)
+                // The button takes ownership from any active deceleration. A
+                // direct UIScrollView target is the same reliable mechanism used
+                // by native UIKit chat lists; keep the reader as an early-layout
+                // fallback until the resolver has joined the view hierarchy.
+                userInteracting = false
+                // UIKit drops the animation when it is started from this SwiftUI
+                // update transaction. Delta Chat likewise defers its native
+                // table scroll one run-loop turn before asking UIKit to animate.
+                DispatchQueue.main.async {
+                    if !metrics.scrollToBottom(animated: true) {
+                        scrollToNewest(proxy, animated: true, initial: false)
+                    }
                 }
             }
             // The user's own dragging/flinging is the only thing that releases
@@ -712,5 +856,58 @@ struct SwiftUIMessageList: View {
         let showSender: Bool
         let senderAvatarPath: String?
         var id: Int32 { msg.id }
+    }
+
+    /// Resolves the UIKit scroll view that SwiftUI installs around the lazy
+    /// stack. The zero-sized probe lives in the scroll content, so its nearest
+    /// UIScrollView ancestor is the chat scroller rather than another view in a
+    /// message bubble.
+    private struct ScrollViewResolver: UIViewRepresentable {
+        let metrics: ScrollMetrics
+
+        func makeUIView(context: Context) -> ScrollViewProbe {
+            ScrollViewProbe(metrics: metrics)
+        }
+
+        func updateUIView(_ view: ScrollViewProbe, context: Context) {
+            view.metrics = metrics
+            view.resolve()
+        }
+    }
+
+    private final class ScrollViewProbe: UIView {
+        var metrics: ScrollMetrics
+
+        init(metrics: ScrollMetrics) {
+            self.metrics = metrics
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) is unavailable")
+        }
+
+        override func didMoveToSuperview() {
+            super.didMoveToSuperview()
+            resolve()
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            resolve()
+        }
+
+        func resolve() {
+            var view = superview
+            while let current = view {
+                if let scrollView = current as? UIScrollView {
+                    metrics.scrollView = scrollView
+                    return
+                }
+                view = current.superview
+            }
+        }
     }
 }

@@ -353,4 +353,18 @@ final class HistoryLoadTriggerTests: XCTestCase {
             measuredAtBottom: false))
     }
 
+    func testBottomContentOffsetMatchesSwiftUIRestingBoundary() {
+        XCTAssertEqual(bottomContentOffset(
+            contentHeight: 2_000,
+            viewportHeight: 800,
+            topInset: 60), 1_140)
+    }
+
+    func testBottomContentOffsetClampsUnderfilledContentToTop() {
+        XCTAssertEqual(bottomContentOffset(
+            contentHeight: 500,
+            viewportHeight: 800,
+            topInset: 60), -60)
+    }
+
 }

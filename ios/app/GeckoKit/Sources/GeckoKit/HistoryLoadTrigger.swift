@@ -183,6 +183,16 @@ func shouldFollowNewestMessage(
     intent || measuredAtBottom
 }
 
+/// SwiftUI's resting lower scroll boundary. The bottom content margin remains
+/// slack outside this range, while the top margin shifts the content offset.
+func bottomContentOffset(
+    contentHeight: Double,
+    viewportHeight: Double,
+    topInset: Double
+) -> Double {
+    max(-topInset, contentHeight - viewportHeight - topInset)
+}
+
 /// Holds a composer-send scroll request until the asynchronously-created local
 /// outgoing item actually appears in the model. A one-shot scroll issued when
 /// Send is tapped can only target the previous last row because the bridge
