@@ -1447,6 +1447,7 @@ struct ChatView: View {
         SwiftUIMessageList(
             messages: chatMessages,
             messageRevision: model.messageRevision(for: conversationId),
+            messageUpdateWasSynced: model.messageUpdateWasSynced(for: conversationId),
             historyPageRevision: model.historyPageRevision(for: conversationId),
             historyPageRenderedRowsAdded:
                 model.historyPageRenderedRowsAdded(for: conversationId),

@@ -67,6 +67,8 @@ public class Message : Object {
         }
     }
     public string? edit_to = null;
+    // Transient origin metadata; archive replay state is not persisted.
+    public bool is_mam_message = false;
     public int quoted_item_id { get; private set; default=0; }
 
     private Gee.List<Xep.FallbackIndication.Fallback> fallbacks = null;

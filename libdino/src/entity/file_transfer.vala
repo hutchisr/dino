@@ -75,6 +75,7 @@ public class FileTransfer : Object {
 
     // This value is not persisted
     public int64 transferred_bytes { get; set; }
+    public bool is_mam_message = false;
 
     public Xep.FileMetadataElement.FileMetadata file_metadata {
         owned get {

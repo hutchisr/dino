@@ -352,6 +352,9 @@ public class FileManager : StreamInteractionModule, Object {
 
     public FileTransfer create_file_transfer_from_provider_incoming(FileProvider file_provider, string info, Jid from, DateTime time, DateTime local_time, Conversation conversation, FileReceiveData receive_data, FileMeta file_meta) {
         FileTransfer file_transfer = new FileTransfer();
+        var http_file_meta = file_meta as HttpFileMeta;
+        file_transfer.is_mam_message =
+            http_file_meta != null && http_file_meta.message.is_mam_message;
         file_transfer.account = conversation.account;
         file_transfer.counterpart = file_transfer.direction == FileTransfer.DIRECTION_RECEIVED ? from : conversation.counterpart;
         if (conversation.type_.is_muc_semantic()) {

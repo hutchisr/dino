@@ -510,9 +510,9 @@ private static string content_item_json(string type, Dino.ContentItem item, Conv
         bool editable = direction == "out" &&
             app.stream_interactor.get_module(Dino.MessageCorrection.IDENTITY).is_own_correction_allowed(conversation, m);
         string from_display = Dino.get_participant_display_name(app.stream_interactor, conversation, m.from);
-        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"text\",\"direction\":\"%s\",\"from\":\"%s\",\"from_display\":\"%s\",\"body\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"editable\":%s,\"marked\":\"%s\",\"quote\":%s,\"reactions\":%s}".printf(
+        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"text\",\"direction\":\"%s\",\"from\":\"%s\",\"from_display\":\"%s\",\"body\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"editable\":%s,\"marked\":\"%s\",\"synced\":%s,\"quote\":%s,\"reactions\":%s}".printf(
             type, conversation.id, item.id, direction, esc(m.from.to_string()), esc(from_display), esc(display_body(m)), item.time.to_unix(), enc_name(m.encryption),
-            editable ? "true" : "false", marked_name(m.marked), quote_json(m, conversation), reactions_json(item, conversation));
+            editable ? "true" : "false", marked_name(m.marked), m.is_mam_message ? "true" : "false", quote_json(m, conversation), reactions_json(item, conversation));
     }
     var fi = item as Dino.FileItem;
     if (fi != null) {
@@ -525,9 +525,9 @@ private static string content_item_json(string type, Dino.ContentItem item, Conv
         }
         string ft_from = ft.from != null ? ft.from.to_string() : "";
         string ft_from_display = ft.from != null ? Dino.get_participant_display_name(app.stream_interactor, conversation, ft.from) : "";
-        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"file\",\"direction\":\"%s\",\"from\":\"%s\",\"from_display\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"file_name\":\"%s\",\"mime\":\"%s\",\"size\":%lld,\"file_state\":\"%s\",\"path\":\"%s\",\"reactions\":%s}".printf(
+        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"file\",\"direction\":\"%s\",\"from\":\"%s\",\"from_display\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"file_name\":\"%s\",\"mime\":\"%s\",\"size\":%lld,\"file_state\":\"%s\",\"path\":\"%s\",\"synced\":%s,\"reactions\":%s}".printf(
             type, conversation.id, item.id, direction, esc(ft_from), esc(ft_from_display), item.time.to_unix(), enc_name(ft.encryption),
-            esc(ft.file_name), esc(ft.mime_type ?? ""), ft.size, file_state_name(ft.state), esc(path), reactions_json(item, conversation));
+            esc(ft.file_name), esc(ft.mime_type ?? ""), ft.size, file_state_name(ft.state), esc(path), ft.is_mam_message ? "true" : "false", reactions_json(item, conversation));
     }
     return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"%s\",\"time\":%lld}".printf(
         type, conversation.id, item.id, esc(item.type_), item.time.to_unix());

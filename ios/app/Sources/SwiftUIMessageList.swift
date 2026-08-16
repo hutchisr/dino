@@ -11,6 +11,7 @@ import UIKit
 struct SwiftUIMessageList: View {
     let messages: [ChatMessage]           // chronological: oldest first
     let messageRevision: Int
+    let messageUpdateWasSynced: Bool
     let historyPageRevision: Int
     let historyPageRenderedRowsAdded: Bool
     let canLoadOlderHistory: Bool
@@ -36,7 +37,7 @@ struct SwiftUIMessageList: View {
 
     /// Tracks whether the initial "open pinned to the newest message" scroll has
     /// happened. The first populated layout jumps to the bottom instantly; later
-    /// arrivals animate (and only while already pinned).
+    /// live arrivals animate only while already pinned, while sync updates snap.
     @State private var didInitialScroll = false
 
     /// Older-history paging stays disabled until scroll visibility confirms the
@@ -92,132 +93,21 @@ struct SwiftUIMessageList: View {
         var historyRestoreGeneration = 0
         var historyRequest: HistoryRequestContext?
         weak var scrollView: UIScrollView?
-        var scrollDiagnosticScheduled = false
-        var scrollDiagnosticStartTime: CFTimeInterval?
-        var scrollDiagnosticStartOffset: Double = 0
-        var scrollDiagnosticTargetOffset: Double = 0
-        var scrollDiagnosticSamples: [(time: Double, offset: Double)] = []
+        private let bottomScrollAnimator = ScrollToBottomAnimator()
 
-        /// Retarget the native scroll view directly, as UIKit-backed chat lists
-        /// do. Unlike a second SwiftUI animation, this replaces active
-        /// deceleration instead of competing with it.
+        /// Takes ownership from active deceleration and drives the native
+        /// scroll view to its live lower boundary with deterministic timing.
         @MainActor
         func scrollToBottom(animated: Bool) -> Bool {
             guard let scrollView else { return false }
-            scrollView.layoutIfNeeded()
-            guard scrollView.bounds.height > 0 else { return false }
-
-            let insets = scrollView.adjustedContentInset
-            let maximumY = CGFloat(bottomContentOffset(
-                contentHeight: Double(scrollView.contentSize.height),
-                viewportHeight: Double(scrollView.bounds.height),
-                topInset: Double(insets.top)))
-            scrollView.setContentOffset(
-                CGPoint(x: scrollView.contentOffset.x, y: maximumY),
+            return bottomScrollAnimator.scrollToBottom(
+                scrollView,
                 animated: animated)
-            return true
-        }
-
-        /// Device-only automation for proving that the actual UIKit scroller
-        /// visits intermediate offsets and settles on its lower boundary.
-        @MainActor
-        func scheduleScrollDiagnosticIfNeeded() -> Bool {
-            guard !scrollDiagnosticScheduled,
-                  ProcessInfo.processInfo.environment["DINO_AUTOSCROLLTEST"] != nil,
-                  let scrollView else { return false }
-            scrollView.layoutIfNeeded()
-
-            let insets = scrollView.adjustedContentInset
-            let minimumY = -insets.top
-            let targetY = CGFloat(bottomContentOffset(
-                contentHeight: Double(scrollView.contentSize.height),
-                viewportHeight: Double(scrollView.bounds.height),
-                topInset: Double(insets.top)))
-            let startY = max(minimumY, targetY - 1_200)
-            guard targetY - startY >= 300 else { return false }
-            scrollDiagnosticScheduled = true
-            NSLog(
-                "DINO_SCROLL_DIAGNOSTIC scheduled start=%.3f target=%.3f",
-                Double(startY),
-                Double(targetY))
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak scrollView] in
-                guard let self, let scrollView else { return }
-                scrollView.setContentOffset(
-                    CGPoint(x: scrollView.contentOffset.x, y: startY),
-                    animated: false)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak scrollView] in
-                    guard let self, let scrollView else { return }
-                    scrollView.layoutIfNeeded()
-                    let insets = scrollView.adjustedContentInset
-                    let target = bottomContentOffset(
-                        contentHeight: Double(scrollView.contentSize.height),
-                        viewportHeight: Double(scrollView.bounds.height),
-                        topInset: Double(insets.top))
-                    self.scrollDiagnosticStartTime = CACurrentMediaTime()
-                    self.scrollDiagnosticStartOffset = Double(scrollView.contentOffset.y)
-                    self.scrollDiagnosticTargetOffset = target
-                    self.scrollDiagnosticSamples = [(time: 0, offset: self.scrollDiagnosticStartOffset)]
-                    DispatchQueue.main.async { [weak self] in
-                        _ = self?.scrollToBottom(animated: true)
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                        self?.finishScrollDiagnostic()
-                    }
-                }
-            }
-            return true
-        }
-
-        func recordScrollDiagnosticSample(offset: CGFloat) {
-            guard let start = scrollDiagnosticStartTime else { return }
-            let sample = (time: CACurrentMediaTime() - start, offset: Double(offset))
-            if let last = scrollDiagnosticSamples.last,
-               abs(last.offset - sample.offset) < 0.05 { return }
-            scrollDiagnosticSamples.append(sample)
         }
 
         @MainActor
-        private func finishScrollDiagnostic() {
-            guard scrollDiagnosticStartTime != nil, let scrollView else { return }
-            recordScrollDiagnosticSample(offset: scrollView.contentOffset.y)
-            scrollDiagnosticStartTime = nil
-
-            let finalOffset = Double(scrollView.contentOffset.y)
-            let duration = scrollDiagnosticSamples.last?.time ?? 0
-            let low = min(scrollDiagnosticStartOffset, scrollDiagnosticTargetOffset)
-            let high = max(scrollDiagnosticStartOffset, scrollDiagnosticTargetOffset)
-            let intermediateSamples = scrollDiagnosticSamples.dropFirst().dropLast().filter {
-                $0.offset > low + 1 && $0.offset < high - 1
-            }.count
-            let endpointError = abs(finalOffset - scrollDiagnosticTargetOffset)
-            let result: [String: Any] = [
-                "startOffset": scrollDiagnosticStartOffset,
-                "targetOffset": scrollDiagnosticTargetOffset,
-                "finalOffset": finalOffset,
-                "endpointError": endpointError,
-                "duration": duration,
-                "sampleCount": scrollDiagnosticSamples.count,
-                "intermediateSampleCount": intermediateSamples,
-                "animatedInsteadOfSnapped": duration >= 0.1 && intermediateSamples >= 2,
-                "landedAtBottom": endpointError <= 0.5,
-                "samples": scrollDiagnosticSamples.map {
-                    ["time": $0.time, "offset": $0.offset]
-                },
-            ]
-            do {
-                let data = try JSONSerialization.data(
-                    withJSONObject: result,
-                    options: [.prettyPrinted, .sortedKeys])
-                let url = FileManager.default.urls(
-                    for: .documentDirectory,
-                    in: .userDomainMask)[0]
-                    .appendingPathComponent("scroll-diagnostic.json")
-                try data.write(to: url, options: .atomic)
-                NSLog("DINO_SCROLL_DIAGNOSTIC %@", String(data: data, encoding: .utf8) ?? "")
-            } catch {
-                NSLog("DINO_SCROLL_DIAGNOSTIC failed: %@", error.localizedDescription)
-            }
+        func cancelBottomScrollAnimation() {
+            bottomScrollAnimator.cancel()
         }
     }
 
@@ -299,7 +189,9 @@ struct SwiftUIMessageList: View {
                         .allowsHitTesting(false)
                 }
                 .animation(
-                    .spring(response: 0.32, dampingFraction: 0.86),
+                    messageUpdateWasSynced
+                        ? nil
+                        : .spring(response: 0.32, dampingFraction: 0.86),
                     value: newestMessageID)
             }
             .coordinateSpace(.named(Self.scrollCoordinateSpace))
@@ -333,7 +225,6 @@ struct SwiftUIMessageList: View {
                 let distanceFromBottom = sample.distanceFromBottom
                 metrics.distanceFromTop = sample.distanceFromTop
                 metrics.distanceFromBottom = distanceFromBottom
-                metrics.recordScrollDiagnosticSample(offset: sample.contentOffsetY)
                 metrics.isUnderfilled = sample.isUnderfilled
                 metrics.contentHeight = sample.contentHeight
                 metrics.containerHeight = sample.containerHeight
@@ -362,16 +253,6 @@ struct SwiftUIMessageList: View {
                     proxy: proxy)
                 if canLoadOlder {
                     requestOlderIfUnderfilled()
-                }
-                if didInitialScroll, atBottom,
-                   ProcessInfo.processInfo.environment["DINO_AUTOSCROLLTEST"] != nil,
-                   !metrics.scrollDiagnosticScheduled {
-                    // Keep normal pin-follow behavior from undoing the
-                    // diagnostic's artificial 1,200pt jump before it records
-                    // the return animation.
-                    if metrics.scheduleScrollDiagnosticIfNeeded() {
-                        stickToBottom = false
-                    }
                 }
                 // Do not treat the layout sample produced by the prepend as
                 // another scroll. The restored viewport's first sample also
@@ -423,19 +304,25 @@ struct SwiftUIMessageList: View {
                 metrics.newestMessageID = newestMessageID
                 scrollToNewest(proxy, animated: false, initial: true)
             }
+            .onDisappear {
+                metrics.cancelBottomScrollAnimation()
+            }
             .onChange(of: newestMessageID) { _, newest in
                 metrics.newestMessageID = newest
                 guard let newest else { return }
-                if !didInitialScroll {
-                    scrollToNewest(proxy, animated: false, initial: true)
-                } else if shouldFollowNewestMessage(
-                    intent: stickToBottom,
-                    measuredAtBottom: metrics.isAtBottom
-                ) {
-                    stickToBottom = true
-                    animateBottomGrowthForNewestID = newest
-                    scrollToNewest(proxy, animated: true, initial: false)
-                }
+                let policy = newestMessageUpdatePolicy(
+                    initialScrollCompleted: didInitialScroll,
+                    updateWasSynced: messageUpdateWasSynced,
+                    isFollowingBottom: shouldFollowNewestMessage(
+                        intent: stickToBottom,
+                        measuredAtBottom: metrics.isAtBottom))
+                guard policy.followsNewest else { return }
+                stickToBottom = true
+                animateBottomGrowthForNewestID = policy.animates ? newest : nil
+                scrollToNewest(
+                    proxy,
+                    animated: policy.animates,
+                    initial: !didInitialScroll)
             }
             .onChange(of: historyPageRevision) { _, _ in
                 // Nonterminal pages are completed by the content-size-aware
@@ -456,14 +343,10 @@ struct SwiftUIMessageList: View {
             }
             .onChange(of: scrollToBottomToken) { _, _ in
                 stickToBottom = true
-                // The button takes ownership from any active deceleration. A
-                // direct UIScrollView target is the same reliable mechanism used
-                // by native UIKit chat lists; keep the reader as an early-layout
-                // fallback until the resolver has joined the view hierarchy.
+                // Defer one run-loop turn so the UIKit resolver and latest
+                // layout target are ready. The display-link animator takes over
+                // any active deceleration from its current offset.
                 userInteracting = false
-                // UIKit drops the animation when it is started from this SwiftUI
-                // update transaction. Delta Chat likewise defers its native
-                // table scroll one run-loop turn before asking UIKit to animate.
                 DispatchQueue.main.async {
                     if !metrics.scrollToBottom(animated: true) {
                         scrollToNewest(proxy, animated: true, initial: false)
@@ -477,6 +360,9 @@ struct SwiftUIMessageList: View {
                 userInteracting = phase == .tracking
                     || phase == .interacting
                     || phase == .decelerating
+                if phase == .tracking || phase == .interacting {
+                    metrics.cancelBottomScrollAnimation()
+                }
                 if phase == .tracking || (phase == .interacting && previous == .idle) {
                     historyLoadTrigger.beginUserScroll()
                 }
@@ -789,7 +675,7 @@ struct SwiftUIMessageList: View {
     }
 
     private var shouldAnimateBottomGrowth: Bool {
-        guard let newest = newestMessageID else { return false }
+        guard !messageUpdateWasSynced, let newest = newestMessageID else { return false }
         return animateBottomGrowthForNewestID == newest || lastSettledNewestID != newest
     }
 

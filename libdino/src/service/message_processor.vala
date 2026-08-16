@@ -157,6 +157,7 @@ public class MessageProcessor : StreamInteractionModule, Object {
         new_message.ourpart = new_message.direction == Entities.Message.DIRECTION_SENT ? message.from : message.to;
 
         Xmpp.MessageArchiveManagement.MessageFlag? mam_message_flag = Xmpp.MessageArchiveManagement.MessageFlag.get_flag(message);
+        new_message.is_mam_message = mam_message_flag != null;
         EntityInfo entity_info = stream_interactor.get_module(EntityInfo.IDENTITY);
         if (mam_message_flag != null && mam_message_flag.mam_id != null) {
             bool sender_supports_mam = entity_info.has_feature_cached(account, mam_message_flag.sender_jid, Xmpp.MessageArchiveManagement.NS_URI);

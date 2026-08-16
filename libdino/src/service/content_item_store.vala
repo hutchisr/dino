@@ -378,6 +378,9 @@ public class FileItem : ContentItem {
         base(id, TYPE, file_transfer.from, file_transfer.time, file_transfer.encryption, mark);
 
         this.file_transfer = file_transfer;
+        if (message != null && message.is_mam_message) {
+            file_transfer.is_mam_message = true;
+        }
         this.conversation = conversation;
 
         // TODO those don't work

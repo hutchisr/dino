@@ -176,6 +176,7 @@ final class AppModel: ObservableObject {
     private var replacingMessageHistory = Set<Int32>()
     private var pendingOlderMessages: [Int32: [ChatMessage]] = [:]
     private var messageRevisions: [Int32: Int] = [:]
+    private var messageUpdateWasSynced: [Int32: Bool] = [:]
     @Published private var historyPageRevisions: [Int32: Int] = [:]
     @Published private var historyPageRenderedRowsAdded: [Int32: Bool] = [:]
     private var avatarRevision = 0
@@ -188,6 +189,10 @@ final class AppModel: ObservableObject {
 
     func messageRevision(for conversation: Int32) -> Int {
         messageRevisions[conversation] ?? 0
+    }
+
+    func messageUpdateWasSynced(for conversation: Int32) -> Bool {
+        messageUpdateWasSynced[conversation] ?? false
     }
 
     func historyPageRevision(for conversation: Int32) -> Int {
@@ -505,6 +510,7 @@ final class AppModel: ObservableObject {
             conversations = []
             messages = [:]
             messageRevisions = [:]
+            messageUpdateWasSynced = [:]
             historyPageRevisions = [:]
             historyPageRenderedRowsAdded = [:]
             historyPagination = [:]
@@ -655,7 +661,7 @@ final class AppModel: ObservableObject {
                 var paging = historyPagination[conversationId] ?? HistoryPagination()
                 if replacingMessageHistory.remove(conversationId) != nil {
                     paging.replaceWithLatestPage(oldestItemID: oldestItemID, complete: complete)
-                    replaceMessages(decoded, for: conversationId)
+                    replaceMessages(decoded, for: conversationId, synced: true)
                 } else {
                     paging.refreshLatestPage(oldestItemID: oldestItemID, complete: complete)
                     reconcileLatestMessages(items, complete: complete, for: conversationId)
@@ -711,7 +717,7 @@ final class AppModel: ObservableObject {
                         transaction.scrollPositionUpdatePreservesVelocity = true
                         withTransaction(transaction) {
                             historyPagination[conversationId] = paging
-                            mergeMessages(completedMessages, for: conversationId)
+                            mergeMessages(completedMessages, for: conversationId, synced: true)
                             historyPageRenderedRowsAdded[conversationId] =
                                 (messages[conversationId]?.count ?? 0) > previousMessageCount
                             historyPageRevisions[conversationId, default: 0] &+= 1
@@ -721,7 +727,10 @@ final class AppModel: ObservableObject {
             }
         case "message", "item":
             if let m = Self.decodeMessage(e), let cid = e["conversation"] as? Int {
-                mergeMessages([m], for: Int32(cid))
+                mergeMessages(
+                    [m],
+                    for: Int32(cid),
+                    synced: e["synced"] as? Bool ?? false)
             }
         case "error", "fatal":
             lastError = e["message"] as? String
@@ -730,7 +739,11 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func replaceMessages(_ list: [ChatMessage], for cid: Int32) {
+    private func replaceMessages(
+        _ list: [ChatMessage],
+        for cid: Int32,
+        synced: Bool
+    ) {
         let previousMarks = Dictionary(
             uniqueKeysWithValues: (messages[cid] ?? []).map { ($0.id, $0.marked) })
         let reconciled = list.map { incoming in
@@ -741,11 +754,16 @@ final class AppModel: ObservableObject {
             return message
         }
         guard messages[cid] != reconciled else { return }
+        messageUpdateWasSynced[cid] = synced
         messageRevisions[cid, default: 0] &+= 1
         messages[cid] = reconciled
     }
 
-    private func mergeMessages(_ incoming: [ChatMessage], for cid: Int32) {
+    private func mergeMessages(
+        _ incoming: [ChatMessage],
+        for cid: Int32,
+        synced: Bool
+    ) {
         guard !incoming.isEmpty else { return }
         var byID = Dictionary(uniqueKeysWithValues: (messages[cid] ?? []).map { ($0.id, $0) })
         for message in incoming {
@@ -754,7 +772,7 @@ final class AppModel: ObservableObject {
         replaceMessages(byID.values.sorted { lhs, rhs in
             if lhs.time == rhs.time { return lhs.id < rhs.id }
             return lhs.time < rhs.time
-        }, for: cid)
+        }, for: cid, synced: synced)
     }
 
     /// Treat the newest history page as authoritative while retaining any older
@@ -781,7 +799,7 @@ final class AppModel: ObservableObject {
         replaceMessages(byID.values.sorted { lhs, rhs in
             if lhs.time == rhs.time { return lhs.id < rhs.id }
             return lhs.time < rhs.time
-        }, for: cid)
+        }, for: cid, synced: true)
     }
 
     private static func messageCursor(_ item: [String: Any]) -> (time: Date, id: Int32)? {
