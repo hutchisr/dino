@@ -11,3 +11,14 @@ func bottomScrollAnimationDuration(distance rawDistance: Double) -> Double {
         maximumBottomScrollDuration,
         max(minimumBottomScrollDuration, distance / 1_800))
 }
+
+/// UIKit's lower resting content offset. Unlike SwiftUI scroll geometry,
+/// UIScrollView adds its adjusted bottom inset to the scrollable range.
+func uiScrollViewBottomContentOffset(
+    contentHeight: Double,
+    viewportHeight: Double,
+    topInset: Double,
+    bottomInset: Double
+) -> Double {
+    max(-topInset, contentHeight - viewportHeight + bottomInset)
+}

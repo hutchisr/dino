@@ -31,4 +31,24 @@ final class BottomScrollAnimationTests: XCTestCase {
             bottomScrollAnimationDuration(distance: 10_000),
             maximumBottomScrollDuration)
     }
+
+    func testUIKitBottomOffsetIncludesBottomInset() {
+        XCTAssertEqual(
+            uiScrollViewBottomContentOffset(
+                contentHeight: 6_402,
+                viewportHeight: 874,
+                topInset: 124,
+                bottomInset: 89),
+            5_617)
+    }
+
+    func testUIKitBottomOffsetClampsUnderfilledContentToTop() {
+        XCTAssertEqual(
+            uiScrollViewBottomContentOffset(
+                contentHeight: 300,
+                viewportHeight: 800,
+                topInset: 124,
+                bottomInset: 89),
+            -124)
+    }
 }

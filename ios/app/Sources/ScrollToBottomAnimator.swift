@@ -83,9 +83,10 @@ final class ScrollToBottomAnimator: NSObject {
     @MainActor
     private func bottomOffset(for scrollView: UIScrollView) -> CGFloat {
         let insets = scrollView.adjustedContentInset
-        return CGFloat(bottomContentOffset(
+        return CGFloat(uiScrollViewBottomContentOffset(
             contentHeight: Double(scrollView.contentSize.height),
             viewportHeight: Double(scrollView.bounds.height),
-            topInset: Double(insets.top)))
+            topInset: Double(insets.top),
+            bottomInset: Double(insets.bottom)))
     }
 }
