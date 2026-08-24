@@ -1,6 +1,6 @@
-// iOS bridge for Dino: boots the full libdino service stack (database,
-// stream interactor, all managers) without any GTK dependency and exposes a
-// small C API for the SwiftUI shell.
+// Apple-platform bridge for Gecko: boots the full libdino service stack
+// (database, stream interactor, all managers) without any GTK dependency and
+// exposes a small C API for the SwiftUI shell.
 //
 // Threading model: a dedicated thread runs the GLib main loop. Every API
 // call marshals onto that loop via Idle.add; results and spontaneous events
@@ -34,6 +34,7 @@ private static Application? app = null;
 private static EventCb? event_cb = null;
 private static string? push_proxy_jid = null;
 private static string? push_token = null;
+private static bool nse_mode = false;
 #if WITH_OMEMO
 private static Dino.Plugins.Omemo.Plugin? omemo_plugin = null;
 #endif
@@ -94,32 +95,39 @@ private static string esc(string? s) {
 // once the stack is built.
 private static void boot_core() throws Error {
     app = new Application();
+    string resource_prefix = "gecko";
+#if MAC_CATALYST
+    resource_prefix = "gecko-mac";
+    // Catalyst is a persistent desktop process: use normal connectivity
+    // monitoring and allow XEP-0198 to resume transient network interruptions.
+    // The notification extension remains short-lived and must never leave a
+    // resumable session behind.
+    app.stream_interactor.connection_manager.use_network_monitor = !nse_mode;
+    Dino.ModuleManager.client_identity_name = "Gecko";
+    Dino.ModuleManager.client_identity_type = "pc";
+    Xmpp.Xep.StreamManagement.Module.request_resumption = !nse_mode;
+#else
     // GLib's NetworkMonitor misreads iOS connectivity (reads offline/flapping),
     // which otherwise drives the ConnectionManager to force every account
     // DISCONNECTED right after it connects — breaking sends and MUC joins.
     // iOS connectivity is handled by the app lifecycle + reconnect timers.
     app.stream_interactor.connection_manager.use_network_monitor = false;
-    // identify as Gecko (mobile client) to servers and other clients
     Dino.ModuleManager.client_identity_name = "Gecko";
     Dino.ModuleManager.client_identity_type = "phone";
-    Account.resource_prefix = "gecko";
     // Never request XEP-0198 resumption on iOS. The app process is killed when
     // backgrounded, losing the in-memory SM session id, so resumption can never
     // actually resume — instead each launch leaves a hibernated "ghost" session
-    // on the server (resume=true) that holds the account's presence/queue and
-    // fires phantom `c2s_session_pending` push notifications forever. Worse, the
-    // next launch's fresh bind of the same resource conflicts with the ghost,
-    // gets rejected, and rotates to a new random resource (more ghosts). With
-    // resumption off, sessions terminate cleanly on kill: no ghosts, no
-    // rejection, stable resource. Offline messages still arrive via MAM + push.
+    // on the server that holds presence and repeatedly fires push notifications.
     Xmpp.Xep.StreamManagement.Module.request_resumption = false;
+#endif
+    Account.resource_prefix = resource_prefix;
     // migrate pre-rename resources before restore() loads the accounts
     foreach (Qlite.Row row in app.db.account.select()) {
         string? res = row[app.db.account.resourcepart];
         if (res != null && res.has_prefix("dino.")) {
             app.db.account.update()
                 .with(app.db.account.id, "=", row[app.db.account.id])
-                .set(app.db.account.resourcepart, "gecko." + res.substring(5))
+                .set(app.db.account.resourcepart, resource_prefix + "." + res.substring(5))
                 .perform();
         }
     }
@@ -229,6 +237,7 @@ public void nse_fetch(int timeout_ms, owned EventCb cb) {
         nse_first = true;
         nse_settle = 0;
         nse_seen = new Gee.HashSet<string>();
+        nse_mode = true;
         // Don't request XEP-0198 resumption: the extension's session is
         // short-lived, and a resumable (hibernated) session left on the server
         // re-pushes its held message forever. Without resumption the session
@@ -510,8 +519,15 @@ private static string content_item_json(string type, Dino.ContentItem item, Conv
         bool editable = direction == "out" &&
             app.stream_interactor.get_module(Dino.MessageCorrection.IDENTITY).is_own_correction_allowed(conversation, m);
         string from_display = Dino.get_participant_display_name(app.stream_interactor, conversation, m.from);
-        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"text\",\"direction\":\"%s\",\"from\":\"%s\",\"from_display\":\"%s\",\"body\":\"%s\",\"time\":%lld,\"encryption\":\"%s\",\"editable\":%s,\"marked\":\"%s\",\"synced\":%s,\"quote\":%s,\"reactions\":%s}".printf(
-            type, conversation.id, item.id, direction, esc(m.from.to_string()), esc(from_display), esc(display_body(m)), item.time.to_unix(), enc_name(m.encryption),
+        string body = display_body(m);
+        bool mentioned = false;
+        if (conversation.type_ == Conversation.Type.GROUPCHAT) {
+            string? nick = conversation.nickname ?? conversation.account.localpart;
+            if (nick != null && nick != "") mentioned = body.down().contains(nick.down());
+        }
+        string mentioned_json = mentioned ? "true" : "false";
+        return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"text\",\"direction\":\"%s\",\"from\":\"%s\",\"from_display\":\"%s\",\"body\":\"%s\",\"mentioned\":%s,\"time\":%lld,\"encryption\":\"%s\",\"editable\":%s,\"marked\":\"%s\",\"synced\":%s,\"quote\":%s,\"reactions\":%s}".printf(
+            type, conversation.id, item.id, direction, esc(m.from.to_string()), esc(from_display), esc(body), mentioned_json, item.time.to_unix(), enc_name(m.encryption),
             editable ? "true" : "false", marked_name(m.marked), m.is_mam_message ? "true" : "false", quote_json(m, conversation), reactions_json(item, conversation));
     }
     var fi = item as Dino.FileItem;

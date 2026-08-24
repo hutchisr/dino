@@ -1,14 +1,16 @@
-# Dino on iOS
+# Dino on Apple platforms
 
-This directory contains a working port of Dino's core to iOS. GTK4 does not
-run on iOS, so the approach is:
+This directory contains a working port of Dino's core to iOS and Apple Silicon
+Macs through Mac Catalyst. GTK4 does not run on either platform, so the approach
+is:
 
 * Cross-compile the non-UI core — `qlite`, `xmpp-vala`, `libdino`,
-  `crypto-vala`, and the omemo + http-files plugins — and their GLib stack
-  as **static libraries** for iOS.
+  `crypto-vala`, and the omemo + http-files plugins — and their GLib stack as
+  **static libraries** for each Apple ABI.
 * Boot the full libdino service stack through a small bridge library
   (`ios/bridge`) that exposes a JSON-over-callback C API.
-* Put a native **SwiftUI** front end on top (`ios/app`).
+* Put a native **SwiftUI** front end on top (`ios/app`), using Mac Catalyst for
+  the desktop build.
 
 ## Status: what works today
 
@@ -28,6 +30,11 @@ Verified end-to-end in the iOS Simulator (arm64) against real servers
   omemo plugin built without its GTK UI.
 * HTTP file upload plugin compiles and registers (libsoup3); no file-picker
   UI is wired up in the Swift shell yet.
+
+The Apple Silicon Mac Catalyst dependency/core build, Xcode build, application
+launch, window creation, and hide/restore lifecycle were verified on 2026-08-24.
+It uses the same libdino, OMEMO, HTTP-file, and SwiftUI implementations as iOS;
+live-account interoperability was not independently re-run during that build.
 
 Known gaps / not done:
 
@@ -53,20 +60,41 @@ Known gaps / not done:
 | `build-deps.sh` | Cross-compiles the dependency stack into `prefix/<target>`: GLib (+libffi, pcre2, proxy-libintl), libgee, gdk-pixbuf (+libpng), OpenSSL, glib-networking, libgpg-error, libgcrypt, protobuf-c, libomemo-c, libsrtp2, libpsl, libsoup3 (+nghttp2). Generates the Meson cross file. |
 | `build-core.sh` | Builds Dino (core + crypto-vala + omemo + http-files plugins + the bridge) against that prefix: `-Dui=disabled -Dicu=disabled -Dios-bridge=enabled -Dplugin-omemo=enabled -Dplugin-http-files=enabled`. |
 | `bridge/` | `dino_ios.vala`: boots a non-GTK `Dino.Application`, registers the statically linked plugins, and exposes a C API (`dinoios.h`) — events flow to Swift as JSON lines on a single callback. `tls_glue.c` statically registers the OpenSSL GIO TLS backend. |
-| `app/` | SwiftUI app (account setup, conversation list, chat view with OMEMO toggle). `../Gecko.xcodeproj` lets Xcode manage/build the app + notification service extension against the existing `ios/prefix/<target>` static core; `build-app.sh` remains the scriptable `swiftc` build/deploy path. |
+| `app/` | Shared SwiftUI app for iOS and Mac Catalyst. `../Gecko.xcodeproj` manages the app + notification service extension against `ios/prefix/<target>`; `build-app.sh` uses direct `swiftc` builds on iOS and the Xcode Catalyst driver on macOS. |
 | `compat/ios-compat.h` | Declares symbols (`pipe2`, `dup3`, `getentropy`) that recent iOS SDKs export from libSystem but hide in headers, which otherwise breaks autoconf/Meson feature detection. |
 
 ## Reproduce
 
+For the iOS Simulator:
+
 ```sh
-ios/build-deps.sh sim-arm64        # ~15 min, downloads sources
+ios/build-deps.sh sim-arm64
 ios/build-core.sh sim-arm64
-ios/app/build-app.sh run           # boots an iPhone simulator
+ios/app/build-app.sh run sim-arm64
+```
+
+For an Apple Silicon Mac:
+
+```sh
+ios/build-deps.sh catalyst-arm64
+ios/build-core.sh catalyst-arm64
+ios/app/build-app.sh run catalyst-arm64
 ```
 
 Or open `Gecko.xcodeproj` in Xcode and build the shared `Gecko` scheme. The
-scheme expects the matching static core prefix to exist first
-(`ios/prefix/sim-arm64` for Simulator, `ios/prefix/device-arm64` for device).
+scheme selects `ios/prefix/sim-arm64`, `ios/prefix/device-arm64`, or
+`ios/prefix/catalyst-arm64` from the destination SDK.
+
+Mac Catalyst uses a persistent desktop lifecycle: it keeps XMPP connected when
+the window is hidden, enables GLib network monitoring and XEP-0198 resumption,
+and identifies as a desktop client. iOS retains its delayed clean disconnect
+before suspension, disabled network monitor, and non-resumable stream policy.
+The Mac close button orders the underlying window out instead of destroying its
+`UIWindowScene`, so the process and XMPP connection remain alive; Dock
+activation orders that same window back in front. Catalyst exposes no public
+UIKit close-veto callback, so this local build forwards the underlying AppKit
+window/application delegates through runtime proxies. Revisit that unsupported
+interop before a Mac App Store submission.
 
 The app supports headless automation for testing via environment variables
 (set through `SIMCTL_CHILD_*`): `DINO_AUTOLOGIN=jid:password`,
@@ -120,9 +148,11 @@ count; Prosody defaults sender off too), so the proxy never learns which
 conversation a push belongs to. The fix is on-device filtering in an NSE —
 works on any server and also unlocks decrypted previews.
 
-* **Phase 0 (done):** GLib storage (dino.db / omemo.db) lives in the
-  `group.me.anemoneya.gecko` App Group container, migrated from the old
-  per-app location on first run, so the NSE can read it.
+* **Phase 0 (done):** on iOS, GLib storage (dino.db / omemo.db) lives in
+  the `group.me.anemoneya.gecko` App Group container so the NSE can read it.
+  The local Catalyst build instead uses its per-user Library/Caches roots:
+  local notifications need no NSE sharing, and avoiding an unentitled App Group
+  lookup prevents macOS from asking for cross-app data access on every launch.
 * **Phase 1 (done):** `ios/nse` builds `PlugIns/NotificationService.appex`
   (own `_NSExtensionMain` executable, App Group entitlement, sealed in the
   host bundle by build-app.sh). Verified the NSE spawns for a
@@ -141,6 +171,14 @@ works on any server and also unlocks decrypted previews.
 * **Phase 3 (todo, gated):** suppress muted-conversation banners. Requires
   the `com.apple.developer.usernotifications.filtering` entitlement (Apple
   request on the dev account); enrichment in Phase 2 works without it.
+* **Mac Catalyst local filtering (done):** the persistent Mac process posts
+  local notifications for new live incoming items only while Gecko is not
+  active. It suppresses muted conversations and non-mention MUC messages before
+  scheduling, so this path needs notification permission but no APNs or
+  filtering entitlement. It intentionally does not notify after Gecko quits.
+  Remote NSE suppression on macOS still requires Apple's same
+  [`com.apple.developer.usernotifications.filtering`](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.usernotifications.filtering)
+  managed entitlement plus an APS-signed Catalyst profile.
 
 ## Next steps
 

@@ -13,6 +13,9 @@ sources = files(
     'tls_glue.c',
 )
 vala_args = []
+if host_machine.subsystem() == 'macabi'
+    vala_args += ['-D', 'MAC_CATALYST']
+endif
 if get_option('plugin-omemo').enabled()
     dependencies += [dep_omemo, dep_libomemo_c]
     vala_args += ['-D', 'WITH_OMEMO', '--vapidir', meson.project_source_root() / 'plugins/omemo/vapi']

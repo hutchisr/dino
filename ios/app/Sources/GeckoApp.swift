@@ -6,6 +6,166 @@ enum ChatLayout {
     static let horizontalPadding: CGFloat = 16
 }
 
+#if targetEnvironment(macCatalyst)
+@MainActor
+private enum CatalystWindowSize {
+    private static let widthKey = "macWindowContentWidth"
+    private static let heightKey = "macWindowContentHeight"
+    private static let fallback = CGSize(width: 1_100, height: 760)
+    private static let minimum = CGSize(width: 820, height: 600)
+    private static let maximum = CGSize(width: 4_096, height: 4_096)
+
+    static var current = restored
+
+    static var restored: CGSize {
+        let defaults = UserDefaults.standard
+        let size = CGSize(
+            width: defaults.double(forKey: widthKey),
+            height: defaults.double(forKey: heightKey)
+        )
+        guard size.width.isFinite,
+              size.height.isFinite,
+              size.width >= minimum.width,
+              size.height >= minimum.height,
+              size.width <= maximum.width,
+              size.height <= maximum.height
+        else {
+            return fallback
+        }
+        return size
+    }
+
+    static func update(_ size: CGSize) {
+        guard size.width.isFinite,
+              size.height.isFinite,
+              size.width >= minimum.width,
+              size.height >= minimum.height
+        else {
+            return
+        }
+        current = size
+    }
+
+    static func save() {
+        let defaults = UserDefaults.standard
+        defaults.set(current.width, forKey: widthKey)
+        defaults.set(current.height, forKey: heightKey)
+    }
+}
+
+@objc
+@MainActor
+private final class CatalystWindowDelegateProxy: NSObject {
+    private let originalDelegate: NSObject?
+
+    init(originalDelegate: NSObject?) {
+        self.originalDelegate = originalDelegate
+    }
+
+    @objc(windowShouldClose:)
+    private func windowShouldClose(_ sender: NSObject) -> Bool {
+        CatalystWindowLifecycle.hideInsteadOfClosing(sender)
+        return false
+    }
+
+    override func responds(to aSelector: Selector!) -> Bool {
+        aSelector == #selector(windowShouldClose(_:))
+            || super.responds(to: aSelector)
+            || originalDelegate?.responds(to: aSelector) == true
+    }
+
+    override func forwardingTarget(for aSelector: Selector!) -> Any? {
+        if originalDelegate?.responds(to: aSelector) == true {
+            return originalDelegate
+        }
+        return super.forwardingTarget(for: aSelector)
+    }
+}
+
+@objc
+@MainActor
+private final class CatalystApplicationDelegateProxy: NSObject {
+    private let originalDelegate: NSObject?
+
+    init(originalDelegate: NSObject?) {
+        self.originalDelegate = originalDelegate
+    }
+
+    @objc(applicationShouldHandleReopen:hasVisibleWindows:)
+    private func applicationShouldHandleReopen(
+        _ sender: NSObject,
+        hasVisibleWindows: Bool
+    ) -> Bool {
+        CatalystWindowLifecycle.reopenIfNeeded()
+        return true
+    }
+
+    override func responds(to aSelector: Selector!) -> Bool {
+        aSelector == #selector(applicationShouldHandleReopen(_:hasVisibleWindows:))
+            || super.responds(to: aSelector)
+            || originalDelegate?.responds(to: aSelector) == true
+    }
+
+    override func forwardingTarget(for aSelector: Selector!) -> Any? {
+        if originalDelegate?.responds(to: aSelector) == true {
+            return originalDelegate
+        }
+        return super.forwardingTarget(for: aSelector)
+    }
+}
+
+@MainActor
+enum CatalystWindowLifecycle {
+    private static var proxies: [ObjectIdentifier: CatalystWindowDelegateProxy] = [:]
+    private static var applicationProxy: CatalystApplicationDelegateProxy?
+    private static var hiddenWindow: NSObject?
+
+    static func install() {
+        guard let applicationClass = NSClassFromString("NSApplication") as? NSObject.Type,
+              let application = applicationClass
+                .perform(NSSelectorFromString("sharedApplication"))?
+                .takeUnretainedValue() as? NSObject
+        else {
+            return
+        }
+
+        if applicationProxy == nil {
+            let proxy = CatalystApplicationDelegateProxy(
+                originalDelegate: application.value(forKey: "delegate") as? NSObject
+            )
+            applicationProxy = proxy
+            application.setValue(proxy, forKey: "delegate")
+        }
+
+        let windows = application.value(forKey: "windows") as? [NSObject] ?? []
+        for window in windows {
+            let id = ObjectIdentifier(window)
+            guard proxies[id] == nil else { continue }
+            let proxy = CatalystWindowDelegateProxy(
+                originalDelegate: window.value(forKey: "delegate") as? NSObject
+            )
+            proxies[id] = proxy
+            window.setValue(proxy, forKey: "delegate")
+        }
+    }
+
+    static func hideInsteadOfClosing(_ window: NSObject) {
+        CatalystWindowSize.save()
+        MacLocalNotifications.setAppIsActive(false)
+        hiddenWindow = window
+        window.perform(NSSelectorFromString("orderOut:"), with: nil)
+    }
+
+    static func reopenIfNeeded() {
+        guard let window = hiddenWindow else { return }
+        hiddenWindow = nil
+        MacLocalNotifications.setAppIsActive(true)
+        PushRegistration.clearDelivered()
+        window.perform(NSSelectorFromString("makeKeyAndOrderFront:"), with: nil)
+    }
+}
+#endif
+
 @main
 struct GeckoApp: App {
     @StateObject private var model = AppModel()
@@ -13,13 +173,99 @@ struct GeckoApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup {
-            RootView()
-                .environmentObject(model)
-                .onAppear {
-                    model.boot()
-                    AppDelegate.setOpenHandler { jid in model.openChat(with: jid) }
+#if targetEnvironment(macCatalyst)
+        desktopScene
+#else
+        mobileScene
+#endif
+    }
+
+    private var appContent: some View {
+        RootView()
+            .environmentObject(model)
+            .onAppear {
+                model.boot()
+                AppDelegate.setOpenHandler { jid in model.openChat(with: jid) }
+#if targetEnvironment(macCatalyst)
+                configureDesktopWindow()
+#endif
+            }
+    }
+
+#if targetEnvironment(macCatalyst)
+    private func configureDesktopWindow() {
+        // SwiftUI's contentMinSize currently gives Catalyst identical minimum
+        // and maximum sizes. Override only the maximum after scene creation so
+        // the native Mac window keeps the content minimum but can grow freely.
+        DispatchQueue.main.async {
+            for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                guard let restrictions = scene.sizeRestrictions else { continue }
+                restrictions.minimumSize = CGSize(width: 820, height: 600)
+                restrictions.maximumSize = CGSize(width: 4_096, height: 4_096)
+                restrictions.allowsFullScreen = true
+            }
+            CatalystWindowLifecycle.install()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                CatalystWindowLifecycle.install()
+            }
+        }
+    }
+
+    private var desktopScene: some Scene {
+        let restoredSize = CatalystWindowSize.restored
+        return WindowGroup {
+            appContent
+                .frame(minWidth: 820, minHeight: 600)
+                .onGeometryChange(for: CGSize.self) { proxy in
+                    proxy.size
+                } action: { size in
+                    CatalystWindowSize.update(size)
                 }
+                .onDisappear {
+                    CatalystWindowSize.save()
+                }
+        }
+        .defaultSize(width: restoredSize.width, height: restoredSize.height)
+        .windowResizability(.contentMinSize)
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("New Message") {
+                    model.presentNewMessage()
+                }
+                .keyboardShortcut("n")
+                .disabled(!model.ready || !model.hasAccount)
+
+                Button("Refresh") {
+                    model.requestState()
+                }
+                .keyboardShortcut("r")
+                .disabled(!model.ready || !model.hasAccount)
+
+                Button("Close Conversation") {
+                    if let id = model.navigation.last {
+                        model.closeConversation(id)
+                    }
+                }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+                .disabled(model.navigation.isEmpty)
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            MacLocalNotifications.setAppIsActive(phase == .active)
+            if phase != .active {
+                CatalystWindowSize.save()
+            }
+            guard phase == .active else { return }
+            PushRegistration.clearDelivered()
+            if model.ready && model.hasAccount {
+                model.refreshAfterForeground()
+            }
+        }
+    }
+#else
+    private var mobileScene: some Scene {
+        WindowGroup {
+            appContent
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
@@ -32,14 +278,11 @@ struct GeckoApp: App {
                     GeckoCore.shared.appForegrounded()
                     // The notification-service extension may have stored new
                     // messages in the shared DB while we were suspended; reload
-                    // so the open chat doesn't miss them (no in-process signal
-                    // fires for another process's writes).
+                    // so the open chat doesn't miss them.
                     model.refreshAfterForeground()
                 }
             case .background:
-                // Cleanly disconnect (after a short grace delay) so iOS doesn't
-                // suspend us with an unacked message that the server would
-                // re-push on a loop.
+                // Cleanly disconnect before iOS suspends the process.
                 if model.ready && model.hasAccount {
                     appDelegate.scheduleBackgroundDisconnect()
                 }
@@ -48,6 +291,7 @@ struct GeckoApp: App {
             }
         }
     }
+#endif
 }
 
 #if DEBUG
@@ -410,16 +654,45 @@ struct RootView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        NavigationStack(path: $model.navigation) {
-            Group {
-                if !model.ready {
-                    ProgressView("Starting Dino core…")
-                } else if !model.hasAccount {
+        Group {
+#if targetEnvironment(macCatalyst)
+            if !model.ready {
+                ProgressView("Starting Dino core…")
+            } else if !model.hasAccount {
+                NavigationStack {
                     AccountSetupView()
-                } else {
+                }
+            } else {
+                NavigationSplitView {
                     ConversationListView()
+                        .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 420)
+                } detail: {
+                    if let id = model.navigation.last,
+                       model.conversations.contains(where: { $0.id == id }) {
+                        ChatView(conversationId: id)
+                    } else {
+                        ContentUnavailableView(
+                            "Select a Conversation",
+                            systemImage: "message",
+                            description: Text("Choose a conversation from the sidebar.")
+                        )
+                    }
+                }
+                .navigationSplitViewStyle(.balanced)
+            }
+#else
+            NavigationStack(path: $model.navigation) {
+                Group {
+                    if !model.ready {
+                        ProgressView("Starting Dino core…")
+                    } else if !model.hasAccount {
+                        AccountSetupView()
+                    } else {
+                        ConversationListView()
+                    }
                 }
             }
+#endif
         }
         .alert("Error", isPresented: Binding(
             get: { model.lastError != nil },
@@ -472,7 +745,6 @@ struct AccountSetupView: View {
 
 struct ConversationListView: View {
     @EnvironmentObject var model: AppModel
-    @State private var showContacts = false
     @State private var showAccountSettings = false
     @State private var showJoinMuc = false
     @State private var mucJid = ""
@@ -490,12 +762,36 @@ struct ConversationListView: View {
             Section("Conversations") {
                 ForEach(model.conversations) { conv in
                     let presence = conv.isGroupchat ? nil : model.presence(for: conv.jid)
+                    let row = ConversationRow(
+                        conv: conv,
+                        presence: presence,
+                        avatarPath: model.avatars[conv.jid],
+                        requestAvatar: { model.ensureAvatar(for: conv.jid) })
+#if targetEnvironment(macCatalyst)
+                    Button {
+                        model.selectConversation(conv.id)
+                    } label: {
+                        row
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(
+                        model.navigation.last == conv.id
+                            ? Color.accentColor.opacity(0.16)
+                            : Color.clear
+                    )
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            model.closeConversation(conv.id)
+                        } label: {
+                            Label(conv.isGroupchat ? "Leave Channel" : "Close Conversation",
+                                  systemImage: conv.isGroupchat
+                                      ? "rectangle.portrait.and.arrow.right"
+                                      : "xmark")
+                        }
+                    }
+#else
                     NavigationLink(value: conv.id) {
-                        ConversationRow(
-                            conv: conv,
-                            presence: presence,
-                            avatarPath: model.avatars[conv.jid],
-                            requestAvatar: { model.ensureAvatar(for: conv.jid) })
+                        row
                     }
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
@@ -505,6 +801,7 @@ struct ConversationListView: View {
                                   systemImage: conv.isGroupchat ? "rectangle.portrait.and.arrow.right" : "xmark")
                         }
                     }
+#endif
                 }
             }
         }
@@ -537,8 +834,7 @@ struct ConversationListView: View {
             .sharedBackgroundVisibility(.hidden)
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    model.requestState()
-                    showContacts = true
+                    model.presentNewMessage()
                 } label: {
                     Image(systemName: "square.and.pencil")
                 }
@@ -560,8 +856,8 @@ struct ConversationListView: View {
                 }
             }
         }
-        .sheet(isPresented: $showContacts) {
-            ContactsView(isPresented: $showContacts)
+        .sheet(isPresented: $model.newMessagePresented) {
+            ContactsView(isPresented: $model.newMessagePresented)
                 .environmentObject(model)
         }
         .sheet(isPresented: $showAccountSettings) {
@@ -1149,22 +1445,34 @@ struct ChatView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Cancel \(file.name)")
 
-            Button {
-                confirmPendingFileSend()
-            } label: {
-                Image(systemName: "paperplane.fill")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .glassEffect(.regular.tint(.blue).interactive(), in: Circle())
-                    .contentShape(.circle)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Send \(file.name)")
+            pendingFileSendButton(file)
         }
         .padding(.horizontal, composerHorizontalPadding)
         .padding(.top, 8)
         .padding(.bottom, 4)
+    }
+    @ViewBuilder
+    private func pendingFileSendButton(_ file: PendingFileSend) -> some View {
+#if targetEnvironment(macCatalyst)
+        let action: () -> Void = submitComposer
+#else
+        let action: () -> Void = confirmPendingFileSend
+#endif
+        let button = Button(action: action) {
+            Image(systemName: "paperplane.fill")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .glassEffect(.regular.tint(.blue).interactive(), in: Circle())
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Send \(file.name)")
+#if targetEnvironment(macCatalyst)
+        button.keyboardShortcut(.return, modifiers: [])
+#else
+        button
+#endif
     }
 
     /// A dismissable banner (typing reply/edit context) shown above the input.
@@ -1195,6 +1503,26 @@ struct ChatView: View {
         .padding(.horizontal, composerHorizontalPadding)
         .padding(.top, 6)
         .padding(.bottom, 2)
+    }
+
+    @ViewBuilder
+    private var composerTextView: some View {
+#if targetEnvironment(macCatalyst)
+        PasteAwareComposerTextView(
+            text: $draft,
+            maxLines: 6,
+            canPasteImages: editing == nil,
+            onImagePaste: stagePastedImage,
+            onSubmit: submitComposer
+        )
+#else
+        PasteAwareComposerTextView(
+            text: $draft,
+            maxLines: 6,
+            canPasteImages: editing == nil,
+            onImagePaste: stagePastedImage
+        )
+#endif
     }
 
     private var inputBar: some View {
@@ -1240,12 +1568,7 @@ struct ChatView: View {
                             .foregroundStyle(.secondary)
                             .allowsHitTesting(false)
                     }
-                    PasteAwareComposerTextView(
-                        text: $draft,
-                        maxLines: 6,
-                        canPasteImages: editing == nil,
-                        onImagePaste: stagePastedImage
-                    )
+                    composerTextView
                 }
                 // Vertical inset too (not just horizontal) so multi-line text
                 // stays inside the capsule instead of spilling past its
@@ -1397,6 +1720,16 @@ struct ChatView: View {
         try? FileManager.default.removeItem(at: url)
     }
 
+    private func submitComposer() {
+        let sendsFile = pendingFileSend != nil
+        if !draft.isEmpty {
+            sendCurrentDraft()
+        }
+        if sendsFile {
+            confirmPendingFileSend()
+        }
+    }
+
     private func sendCurrentDraft() {
         if let editing {
             model.correctMessage(conversationId, item: editing.id, body: draft)
@@ -1513,7 +1846,13 @@ struct ChatView: View {
             let toolbarHeight = max(composerHeight, composerControlHeight + composerInputVerticalPadding * 2)
             return toolbarHeight + composerInputVerticalPadding
         }
+#if targetEnvironment(macCatalyst)
+        // Catalyst has no iPhone home-indicator inset to lift the button. Keep
+        // its bottom edge above the composer instead of inside the text field.
+        return max(0, bottomChromeInset + floatingOverlaySpacing)
+#else
         return max(0, bottomChromeInset - composerInputVerticalPadding)
+#endif
     }
 
     private var typingIndicatorBottomPadding: CGFloat {
@@ -1940,8 +2279,31 @@ struct MessageBubble: View {
         // bubble's leading edge (a leading-aligned background on the bubble) and
         // counter-offset by the drag so it holds still, getting revealed from
         // beneath the bubble as it slides off it.
+#if targetEnvironment(macCatalyst)
         bubbleRow
             .offset(x: dragOffset)
+            .contextMenu {
+                Button("Reply", systemImage: "arrowshape.turn.up.left") {
+                    onReply?(msg)
+                }
+                if msg.editable {
+                    Button("Edit", systemImage: "pencil") {
+                        onEdit?(msg)
+                    }
+                }
+                if !msg.body.isEmpty {
+                    Button("Copy", systemImage: "doc.on.doc") {
+                        UIPasteboard.general.string = msg.body
+                    }
+                }
+                Button("Reactions and More…", systemImage: "face.smiling") {
+                    onActions?(msg)
+                }
+            }
+#else
+        bubbleRow
+            .offset(x: dragOffset)
+#endif
     }
 
     private var replyIndicator: some View {

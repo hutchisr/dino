@@ -48,6 +48,9 @@ struct SwiftUIMessageList: View {
     @State private var historyLoadTrigger = HistoryLoadTrigger()
     @State private var trackedHistoryViewportID: Int32?
     @State private var visibleNewestID: Int32?
+#if targetEnvironment(macCatalyst)
+    @State private var catalystInitialRowsMaterialized = false
+#endif
 
     /// The newest row we've already pinned after a layout pass. If content
     /// grows for a different newest message, let that growth animate instead of
@@ -146,6 +149,7 @@ struct SwiftUIMessageList: View {
     }
 
     private static let scrollCoordinateSpace = "SwiftUIMessageList.scroll"
+    private static let bottomAnchorID = "SwiftUIMessageList.bottom"
 
     /// Slack (points) for the at-bottom test so the button doesn't flicker at
     /// rest under rubber-banding / sub-pixel offsets. Matches the spirit of the
@@ -155,44 +159,22 @@ struct SwiftUIMessageList: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(rows) { row in
-                        rowView(row)
-                            .id(row.msg.id)
-                            .background {
-                                if row.msg.id == trackedHistoryViewportID {
-                                    Color.clear
-                                        .onGeometryChange(
-                                            for: CGRect.self,
-                                            of: { proxy in
-                                                proxy.frame(in: .named(Self.scrollCoordinateSpace))
-                                            },
-                                            action: { frame in
-                                                metrics.trackedMessageID = row.msg.id
-                                                metrics.trackedMessageFrame = frame
-                                                refreshHistoryRequestIfNeeded()
-                                            })
-                                }
-                            }
-                            .onScrollVisibilityChange(threshold: 0.01) { visible in
-                                updateBoundaryVisibility(for: row.msg.id, visible: visible)
-                            }
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .bottom).combined(with: .opacity),
-                                removal: .opacity))
-                    }
+                VStack(spacing: 0) {
+                    messageStack
+                        .background(alignment: .topLeading) {
+                            ScrollViewResolver(metrics: metrics)
+                                .frame(width: 0, height: 0)
+                                .allowsHitTesting(false)
+                        }
+                        .animation(
+                            messageUpdateWasSynced
+                                ? nil
+                                : .spring(response: 0.32, dampingFraction: 0.86),
+                            value: newestMessageID)
+                    Color.clear
+                        .frame(height: 0)
+                        .id(Self.bottomAnchorID)
                 }
-                .scrollTargetLayout()
-                .background(alignment: .topLeading) {
-                    ScrollViewResolver(metrics: metrics)
-                        .frame(width: 0, height: 0)
-                        .allowsHitTesting(false)
-                }
-                .animation(
-                    messageUpdateWasSynced
-                        ? nil
-                        : .spring(response: 0.32, dampingFraction: 0.86),
-                    value: newestMessageID)
             }
             .coordinateSpace(.named(Self.scrollCoordinateSpace))
             .scrollDismissesKeyboard(.interactively)
@@ -298,8 +280,8 @@ struct SwiftUIMessageList: View {
             // Open pinned to the newest message. We deliberately do NOT use
             // `.defaultScrollAnchor(.bottom)`: on a ScrollView that starts empty
             // and is then populated asynchronously it leaves the list stuck
-            // blank (FB-worthy SwiftUI bug). Instead we bring the last row into
-            // view through its stable scroll-target identity.
+            // blank (FB-worthy SwiftUI bug). Instead we scroll to a non-lazy
+            // bottom anchor that exists before the final row is materialised.
             .onAppear {
                 metrics.newestMessageID = newestMessageID
                 scrollToNewest(proxy, animated: false, initial: true)
@@ -378,6 +360,56 @@ struct SwiftUIMessageList: View {
         }
     }
 
+    @ViewBuilder
+    private var messageStack: some View {
+#if targetEnvironment(macCatalyst)
+        if catalystInitialRowsMaterialized {
+            LazyVStack(spacing: 0) {
+                messageRows
+            }
+            .scrollTargetLayout()
+        } else {
+            VStack(spacing: 0) {
+                messageRows
+            }
+            .scrollTargetLayout()
+        }
+#else
+        LazyVStack(spacing: 0) {
+            messageRows
+        }
+        .scrollTargetLayout()
+#endif
+    }
+
+    private var messageRows: some View {
+        ForEach(rows) { row in
+            rowView(row)
+                .id(row.msg.id)
+                .background {
+                    if row.msg.id == trackedHistoryViewportID {
+                        Color.clear
+                            .onGeometryChange(
+                                for: CGRect.self,
+                                of: { proxy in
+                                    proxy.frame(in: .named(Self.scrollCoordinateSpace))
+                                },
+                                action: { frame in
+                                    metrics.trackedMessageID = row.msg.id
+                                    metrics.trackedMessageFrame = frame
+                                    refreshHistoryRequestIfNeeded()
+                                })
+                    }
+                }
+                .onScrollVisibilityChange(threshold: 0.01) { visible in
+                    updateBoundaryVisibility(for: row.msg.id, visible: visible)
+                }
+                .transition(.asymmetric(
+                    insertion: .move(edge: .bottom).combined(with: .opacity),
+                    removal: .opacity))
+        }
+    }
+
     /// Bring the newest row into view, if there is one. `initial` marks the
     /// first open-at-bottom jump and flips `didInitialScroll`.
     private func scrollToNewest(
@@ -393,8 +425,8 @@ struct SwiftUIMessageList: View {
             animateBottomGrowthForNewestID = nil
             enableOlderLoadingIfReady()
         }
-        // Defer a tick so the LazyVStack has materialised the target before the
-        // reader brings it into view.
+        // Defer a tick so the non-lazy bottom anchor has joined the hierarchy
+        // before the reader brings it into view.
         Task { @MainActor in
             await Task.yield()
             if animated {
@@ -405,10 +437,10 @@ struct SwiftUIMessageList: View {
                 let distance = metrics.distanceFromBottom
                 let duration = min(0.7, max(0.25, distance / 5000))
                 withAnimation(.easeInOut(duration: duration)) {
-                    proxy.scrollTo(last, anchor: .bottom)
+                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
             } else {
-                proxy.scrollTo(last, anchor: .bottom)
+                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
             }
             if newestMessageID == last {
                 lastSettledNewestID = last
@@ -423,6 +455,14 @@ struct SwiftUIMessageList: View {
         if visible {
             if id == newestMessageID {
                 visibleNewestID = id
+#if targetEnvironment(macCatalyst)
+                if !catalystInitialRowsMaterialized {
+                    DispatchQueue.main.async {
+                        catalystInitialRowsMaterialized = true
+                        stickToBottom = true
+                    }
+                }
+#endif
                 if enableOlderLoadingIfReady() {
                     requestOlderIfUnderfilled()
                 }

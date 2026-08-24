@@ -2,16 +2,16 @@
 
 # Gecko
 
-Gecko is an XMPP messaging app for iOS, built with SwiftUI on top of
-[Dino](https://dino.im)'s messaging core.
-It supports OMEMO encryption, group chats, file transfers, push notifications and more.
+Gecko is an XMPP messaging app for iOS and Apple Silicon macOS, built with
+SwiftUI on top of [Dino](https://dino.im)'s messaging core. It supports OMEMO
+encryption, group chats, file transfers, push notifications and more.
 
-Gecko is a fork of Dino — the Vala/GTK XMPP client for Linux. GTK doesn't run on
-iOS, so this tree keeps Dino's non-UI core (the Vala/GLib service stack:
-`libdino`, `xmpp-vala`, `qlite`, `crypto-vala`, and the OMEMO + HTTP-upload
-plugins), cross-compiles it as static libraries, and puts a native SwiftUI front
-end on top through a small C/Vala bridge. The desktop GTK UI has been removed;
-**this tree is iOS-only.**
+Gecko is a fork of Dino — the Vala/GTK XMPP client for Linux. GTK doesn't run
+on iOS or Mac Catalyst, so this tree keeps Dino's non-UI core (the Vala/GLib
+service stack: `libdino`, `xmpp-vala`, `qlite`, `crypto-vala`, and the OMEMO +
+HTTP-upload plugins), cross-compiles it as static libraries, and puts a native
+SwiftUI front end on top through a small C/Vala bridge. The desktop GTK UI has
+been removed; iPhone and Mac Catalyst use the same SwiftUI application.
 
 Status
 ------
@@ -23,27 +23,38 @@ Working end to end against real servers:
 - File transfers over HTTP upload, OMEMO-encrypted, with inline image previews
 - Reactions (XEP-0444), corrections (XEP-0308), replies (XEP-0461),
   read markers (XEP-0333), typing notifications (XEP-0085)
-- **Push notifications** — XEP-0357 through the bundled push proxy to APNs,
-  with a Notification Service Extension that decrypts and filters on-device
+- **Notifications** — iOS uses XEP-0357 through the bundled push proxy and an
+  on-device Notification Service Extension. While the Mac Catalyst app is
+  running, it posts local notifications from its live XMPP stream and applies
+  each conversation's off / mentions-only setting before delivery.
 
 Not implemented: voice/video calls (`plugin-rtp`/`plugin-ice` need GStreamer's
 iOS binaries), OpenPGP, and ICU-based JID stringprep (a casefold fallback is
 used instead).
 
-There is no public release yet; builds are distributed via TestFlight and
-sideloading.
+There is no public release yet; iOS builds are distributed via TestFlight and
+sideloading. macOS uses an Apple Silicon Mac Catalyst build.
 
 Build
 -----
-Requires macOS with Xcode, and iOS 26 or later on the target device.
+Requires macOS with Xcode 26. iOS and Mac Catalyst currently target version 26
+or later.
 
-    ios/build-deps.sh sim-arm64        # dependency stack, ~15 min, downloads sources
-    ios/build-core.sh sim-arm64        # Dino core + plugins + the bridge
-    ios/app/build-app.sh run           # build and launch in the Simulator
+For an iOS Simulator:
 
-Use `device-arm64` in place of `sim-arm64` to build for a physical device. Once
-the static core prefix exists under `ios/prefix/<target>`, you can also open
-`Gecko.xcodeproj` in Xcode and build the shared `Gecko` scheme.
+    ios/build-deps.sh sim-arm64
+    ios/build-core.sh sim-arm64
+    ios/app/build-app.sh run sim-arm64
+
+For an Apple Silicon Mac:
+
+    ios/build-deps.sh catalyst-arm64
+    ios/build-core.sh catalyst-arm64
+    ios/app/build-app.sh run catalyst-arm64
+
+Use `device-arm64` to build for a physical iPhone. Once the matching static
+prefix exists under `ios/prefix/<target>`, you can also open `Gecko.xcodeproj`
+and build the shared `Gecko` scheme for iPhone, Simulator, or Mac Catalyst.
 
 Unit tests for the pure Swift helpers run on the host, without a Simulator:
 
@@ -60,7 +71,7 @@ Resources
 
 License
 -------
-    Gecko - XMPP messaging app for iOS
+    Gecko - XMPP messaging app for Apple platforms
     Copyright (C) 2026 Gecko contributors
 
     Based on Dino - XMPP messaging app using GTK/Vala

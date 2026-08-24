@@ -111,6 +111,7 @@ struct ChatMessage: Identifiable, Equatable {
     let from: String
     var fromDisplay: String = ""
     let body: String
+    var mentioned: Bool = false
     let time: Date
     let encryption: String
     var fileName: String = ""
@@ -168,6 +169,7 @@ final class AppModel: ObservableObject {
     /// Set when a join targeted a room that doesn't exist yet; the UI asks the
     /// user to confirm creating it.
     @Published var pendingMucCreate: PendingMucCreate?
+    @Published var newMessagePresented = false
 
     private var pendingChatJid: String?
     private var requestedAvatars = Set<String>()
@@ -175,6 +177,9 @@ final class AppModel: ObservableObject {
     @Published private var historyPagination: [Int32: HistoryPagination] = [:]
     private var replacingMessageHistory = Set<Int32>()
     private var pendingOlderMessages: [Int32: [ChatMessage]] = [:]
+#if targetEnvironment(macCatalyst)
+    private var groupHistoryRetryGeneration = 0
+#endif
     private var messageRevisions: [Int32: Int] = [:]
     private var messageUpdateWasSynced: [Int32: Bool] = [:]
     @Published private var historyPageRevisions: [Int32: Int] = [:]
@@ -226,6 +231,14 @@ final class AppModel: ObservableObject {
             guard let self, self.navigation.last != id else { return }
             self.navigation.append(id)
         }
+    }
+    func selectConversation(_ id: Int32) {
+        replaceNavigation(with: [id])
+    }
+
+    func presentNewMessage() {
+        requestState()
+        newMessagePresented = true
     }
 
     func boot() {
@@ -441,7 +454,37 @@ final class AppModel: ObservableObject {
         historyPagination[id] = HistoryPagination()
         replacingMessageHistory.insert(id)
         GeckoCore.shared.requestMessages(conversation: id, count: messagePageSize)
+#if targetEnvironment(macCatalyst)
+        groupHistoryRetryGeneration &+= 1
+        let generation = groupHistoryRetryGeneration
+        if conversations.first(where: { $0.id == id })?.isGroupchat == true {
+            scheduleGroupHistoryRetries(id, generation: generation)
+        }
+#endif
     }
+
+#if targetEnvironment(macCatalyst)
+    private func scheduleGroupHistoryRetries(_ id: Int32, generation: Int) {
+        for delay in [0.75, 1.5, 3.5, 6.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self,
+                      self.groupHistoryRetryGeneration == generation,
+                      self.navigation.last == id,
+                      self.conversations.first(where: { $0.id == id })?.isGroupchat == true,
+                      (self.messages[id] ?? []).isEmpty
+                else {
+                    return
+                }
+                self.historyPagination[id] = HistoryPagination()
+                self.replacingMessageHistory.insert(id)
+                GeckoCore.shared.requestMessages(
+                    conversation: id,
+                    count: self.messagePageSize
+                )
+            }
+        }
+    }
+#endif
 
     func requestOlderMessages(_ id: Int32) {
         pendingOlderMessages.removeValue(forKey: id)
@@ -727,10 +770,20 @@ final class AppModel: ObservableObject {
             }
         case "message", "item":
             if let m = Self.decodeMessage(e), let cid = e["conversation"] as? Int {
-                mergeMessages(
-                    [m],
-                    for: Int32(cid),
-                    synced: e["synced"] as? Bool ?? false)
+                let conversationId = Int32(cid)
+                let isNew = !(messages[conversationId]?.contains { $0.id == m.id } ?? false)
+                let isSynced = e["synced"] as? Bool ?? false
+                mergeMessages([m], for: conversationId, synced: isSynced)
+#if targetEnvironment(macCatalyst)
+                if let conversation = conversations.first(where: { $0.id == conversationId }) {
+                    MacLocalNotifications.post(
+                        message: m,
+                        conversation: conversation,
+                        isNew: isNew,
+                        isSynced: isSynced
+                    )
+                }
+#endif
             }
         case "error", "fatal":
             lastError = e["message"] as? String
@@ -842,6 +895,7 @@ final class AppModel: ObservableObject {
             from: d["from"] as? String ?? "",
             fromDisplay: d["from_display"] as? String ?? "",
             body: d["body"] as? String ?? "",
+            mentioned: d["mentioned"] as? Bool ?? false,
             time: Date(timeIntervalSince1970: TimeInterval(d["time"] as? Int ?? 0)),
             encryption: d["encryption"] as? String ?? "NONE",
             fileName: d["file_name"] as? String ?? "",

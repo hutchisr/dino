@@ -8,6 +8,9 @@ import UserNotifications
 /// round-trip is needed).
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     static var onToken: ((String) -> Void)?
+#if targetEnvironment(macCatalyst)
+    private var persistenceActivity: NSObjectProtocol?
+#endif
 
     /// Set by the UI once the model is available; routes a tapped
     /// notification's conversation to `openChat`. A tap that arrives before
@@ -27,8 +30,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // Must be set before launch finishes to receive notification responses.
         UNUserNotificationCenter.current().delegate = self
+#if targetEnvironment(macCatalyst)
+        persistenceActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.automaticTerminationDisabled, .suddenTerminationDisabled],
+            reason: "Keep the XMPP connection available for notifications"
+        )
+#endif
         return true
     }
+
+#if targetEnvironment(macCatalyst)
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        CatalystWindowLifecycle.reopenIfNeeded()
+    }
+#endif
 
     // --- Background clean-disconnect coordination ---
     // On entering the background we cleanly disconnect (flush XEP-0198 acks +
@@ -102,6 +117,67 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         completionHandler()
     }
 }
+
+#if targetEnvironment(macCatalyst)
+@MainActor
+enum MacLocalNotifications {
+    private static var appIsActive = true
+
+    static func setAppIsActive(_ active: Bool) {
+        appIsActive = active
+    }
+
+    static func post(
+        message: ChatMessage,
+        conversation: XmppConversation,
+        isNew: Bool,
+        isSynced: Bool
+    ) {
+        let input = LocalNotificationPolicyInput(
+            appIsActive: appIsActive,
+            isNew: isNew,
+            isSynced: isSynced,
+            direction: message.direction,
+            notifyEffective: conversation.notifyEffective,
+            isGroupchat: conversation.isGroupchat,
+            mentioned: message.mentioned
+        )
+        guard shouldPostLocalNotification(input) else { return }
+
+        let body: String
+        if message.isFile {
+            body = message.fileName.isEmpty ? "Sent an attachment" : "Sent \(message.fileName)"
+        } else {
+            body = message.body
+        }
+        guard !body.isEmpty else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = conversation.name
+        if conversation.isGroupchat {
+            content.subtitle = message.fromDisplay.isEmpty ? message.from : message.fromDisplay
+        }
+        content.body = body
+        content.sound = .default
+        content.threadIdentifier = conversation.jid
+        content.userInfo = ["conversationJid": conversation.jid]
+
+        let request = UNNotificationRequest(
+            identifier: "mac-local-\(conversation.id)-\(message.id)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                geckoDebugLog(
+                    "gecko-notify: local notification failed: %@",
+                    error.localizedDescription
+                )
+            }
+        }
+    }
+}
+#endif
 
 enum PushRegistration {
     /// The XMPP account acting as the push proxy (see ios/push-proxy).

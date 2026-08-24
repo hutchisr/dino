@@ -3,5 +3,9 @@
 PRODUCT_NAME = Gecko
 PRODUCT_BUNDLE_IDENTIFIER = me.anemoneya.gecko
 INFOPLIST_FILE = ios/app/Info.plist
+INFOPLIST_FILE[sdk=macosx*] = ios/app/Info-Catalyst.plist
 CODE_SIGN_ENTITLEMENTS = ios/app/Gecko.entitlements
+CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = ios/app/GeckoCatalyst.entitlements
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+INFOPLIST_KEY_LSMinimumSystemVersion[sdk=macosx*] = 26.0
+INFOPLIST_KEY_NSHighResolutionCapable[sdk=macosx*] = YES

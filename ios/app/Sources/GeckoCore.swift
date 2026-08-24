@@ -26,10 +26,9 @@ final class GeckoCore {
         dino_ios_start(eventTrampoline, Unmanaged.passRetained(self).toOpaque(), releaseContext)
     }
 
-    /// Resolve the three XDG roots. Prefer the App Group container so the NSE
-    /// sees the same databases; fall back to the app's own Library/Caches if
-    /// the App Group entitlement isn't present. Data left in the old per-app
-    /// location is migrated into the container on first run.
+    /// Resolve the three XDG roots. Catalyst uses per-app Library/Caches;
+    /// iOS prefers the App Group container shared with the NSE and falls back
+    /// to its own Library/Caches when the entitlement is unavailable.
     static func storageDirs() -> (data: String, config: String, cache: String) {
         let fm = FileManager.default
         let library = fm.urls(for: .libraryDirectory, in: .userDomainMask)[0]
@@ -37,6 +36,14 @@ final class GeckoCore {
         let legacy = (data: library.appendingPathComponent("xdg-data"),
                       config: library.appendingPathComponent("xdg-config"),
                       cache: caches.appendingPathComponent("xdg-cache"))
+
+#if targetEnvironment(macCatalyst)
+        // The local Mac build has no App Group entitlement, and asking
+        // containermanager for another app's group triggers macOS's repeated
+        // "access data from other apps" consent prompt. The persistent Mac
+        // process does not need NSE-shared storage for local notifications.
+        return (legacy.data.path, legacy.config.path, legacy.cache.path)
+#else
 
         guard let container = fm.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) else {
             geckoDebugLog("GeckoCore: App Group unavailable, using per-app storage")
@@ -49,6 +56,7 @@ final class GeckoCore {
         migrateStorage(legacy.config, to: shared.config, fm: fm)
         migrateStorage(legacy.cache, to: shared.cache, fm: fm)
         return (shared.data.path, shared.config.path, shared.cache.path)
+#endif
     }
 
     /// Move an old XDG root into the shared container, but only when the new

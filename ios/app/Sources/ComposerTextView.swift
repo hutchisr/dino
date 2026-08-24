@@ -11,6 +11,9 @@ struct PasteAwareComposerTextView: UIViewRepresentable {
     let maxLines: Int
     let canPasteImages: Bool
     let onImagePaste: (ComposerPastedImage) -> Void
+#if targetEnvironment(macCatalyst)
+    let onSubmit: () -> Void
+#endif
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -35,6 +38,12 @@ struct PasteAwareComposerTextView: UIViewRepresentable {
         view.onImagePaste = { [weak coordinator = context.coordinator] image in
             coordinator?.handleImagePaste(image)
         }
+#if targetEnvironment(macCatalyst)
+        view.onSubmit = { [weak coordinator = context.coordinator] in
+            coordinator?.handleSubmit()
+        }
+        view.autofocusWhenAttached = true
+#endif
         return view
     }
 
@@ -95,12 +104,65 @@ struct PasteAwareComposerTextView: UIViewRepresentable {
         func handleImagePaste(_ image: ComposerPastedImage) {
             parent.onImagePaste(image)
         }
+#if targetEnvironment(macCatalyst)
+        func handleSubmit() {
+            parent.onSubmit()
+        }
+#endif
     }
 }
 
 final class PasteAwareTextView: UITextView {
     var canPasteImages = true
     var onImagePaste: ((ComposerPastedImage) -> Void)?
+#if targetEnvironment(macCatalyst)
+    var onSubmit: (() -> Void)?
+    var autofocusWhenAttached = false
+    private var didAutofocus = false
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil, autofocusWhenAttached, !didAutofocus else { return }
+        didAutofocus = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.window != nil else { return }
+            let focused = self.becomeFirstResponder()
+            geckoDebugLog("gecko-composer: Catalyst autofocus=%d", focused ? 1 : 0)
+        }
+    }
+
+    private lazy var submitKeyCommand: UIKeyCommand = {
+        let command = UIKeyCommand(
+            input: "\r",
+            modifierFlags: [],
+            action: #selector(submitFromKeyboard(_:))
+        )
+        command.wantsPriorityOverSystemBehavior = true
+        return command
+    }()
+
+    private lazy var newlineKeyCommand: UIKeyCommand = {
+        let command = UIKeyCommand(
+            input: "\r",
+            modifierFlags: .shift,
+            action: #selector(insertNewlineFromKeyboard(_:))
+        )
+        command.wantsPriorityOverSystemBehavior = true
+        return command
+    }()
+
+    override var keyCommands: [UIKeyCommand]? {
+        (super.keyCommands ?? []) + [newlineKeyCommand, submitKeyCommand]
+    }
+
+    @objc private func submitFromKeyboard(_: UIKeyCommand) {
+        onSubmit?()
+    }
+
+    @objc private func insertNewlineFromKeyboard(_: UIKeyCommand) {
+        insertText("\n")
+    }
+#endif
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)), canPasteImages, PasteboardImageReader.hasImage() {

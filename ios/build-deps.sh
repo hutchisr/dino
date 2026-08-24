@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Cross-compile Dino's non-UI dependency stack for iOS.
+# Cross-compile Dino's non-UI dependency stack for iOS and Mac Catalyst.
 #
-# Usage: ./build-deps.sh [sim-arm64|device-arm64] [dep ...]
+# Usage: ./build-deps.sh [sim-arm64|device-arm64|catalyst-arm64] [dep ...]
 #        With no dep arguments, builds everything in order.
 #
 # Everything is built as static libraries into ios/prefix/<target>.
@@ -50,6 +50,13 @@ case "$TARGET" in
     OPENSSL_TARGET=ios64-xcrun
     OPENSSL_MIN_FLAG="-mios-version-min=$MIN_IOS"
     ;;
+  catalyst-arm64)
+    SDK=macosx
+    TRIPLE="arm64-apple-ios${MIN_IOS}-macabi"
+    SUBSYSTEM=macabi
+    OPENSSL_TARGET=darwin64-arm64-cc
+    OPENSSL_MIN_FLAG=""
+    ;;
   *) echo "unknown target $TARGET" >&2; exit 1 ;;
 esac
 
@@ -58,6 +65,7 @@ CLANG="$(xcrun --sdk "$SDK" -f clang)"
 CLANGXX="$(xcrun --sdk "$SDK" -f clang++)"
 AR="$(xcrun --sdk "$SDK" -f ar)"
 STRIP="$(xcrun --sdk "$SDK" -f strip)"
+RANLIB="$(xcrun --sdk "$SDK" -f ranlib)"
 VALAC="$(command -v valac)"
 MESON="$(command -v meson)"
 
@@ -97,8 +105,8 @@ pkg_config_libdir = ['$PREFIX/lib/pkgconfig', '$PREFIX/share/pkgconfig']
 EOF
 echo "wrote $CROSS"
 
-# sqlite comes from the iOS SDK (libsqlite3.tbd); give pkg-config something
-# to find.
+# sqlite comes from the selected Apple SDK (libsqlite3.tbd); give pkg-config
+# something to find.
 mkdir -p "$PREFIX/lib/pkgconfig"
 SQLITE_VER_DETECTED="$(grep -m1 '#define SQLITE_VERSION ' "$SDKPATH/usr/include/sqlite3.h" | sed 's/.*"\(.*\)".*/\1/')"
 cat > "$PREFIX/lib/pkgconfig/sqlite3.pc" <<EOF2
@@ -166,8 +174,14 @@ build_openssl() {
   fetch "https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VER/openssl-$OPENSSL_VER.tar.gz" "openssl"
   cd "$DEPS/openssl"
   make distclean >/dev/null 2>&1 || true
-  ./Configure "$OPENSSL_TARGET" no-shared no-tests no-apps no-docs \
-    "$OPENSSL_MIN_FLAG" --prefix="$PREFIX" --libdir=lib
+  if [ "$TARGET" = "catalyst-arm64" ]; then
+    CC="$CLANG -target $TRIPLE -isysroot $SDKPATH" AR="$AR" RANLIB="$RANLIB" \
+      ./Configure "$OPENSSL_TARGET" no-shared no-tests no-apps no-docs \
+        --prefix="$PREFIX" --libdir=lib
+  else
+    ./Configure "$OPENSSL_TARGET" no-shared no-tests no-apps no-docs \
+      "$OPENSSL_MIN_FLAG" --prefix="$PREFIX" --libdir=lib
+  fi
   make -j "$NCPU" build_libs
   make install_dev
   cd -
@@ -213,12 +227,28 @@ build_protobuf_c() {
 
 build_omemo_c() {
   fetch "https://github.com/dino/libomemo-c/archive/refs/tags/v$OMEMO_C_VER.tar.gz" "libomemo-c"
+  local platform_args cmake_cflags="-I$PREFIX/include"
+  if [ "$TARGET" = "catalyst-arm64" ]; then
+    platform_args=(
+      -DCMAKE_SYSTEM_NAME=Darwin
+      -DCMAKE_OSX_SYSROOT="$SDKPATH"
+      -DCMAKE_C_COMPILER="$CLANG"
+      -DCMAKE_C_COMPILER_TARGET="$TRIPLE"
+    )
+    cmake_cflags="-target $TRIPLE -isysroot $SDKPATH -I$PREFIX/include"
+  else
+    platform_args=(
+      -DCMAKE_SYSTEM_NAME=iOS
+      -DCMAKE_OSX_SYSROOT="$SDKPATH"
+      -DCMAKE_OSX_ARCHITECTURES=arm64
+      -DCMAKE_OSX_DEPLOYMENT_TARGET="$MIN_IOS"
+    )
+  fi
   cmake -S "$DEPS/libomemo-c" -B "$DEPS/libomemo-c/_build-$TARGET" \
-    -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$SDKPATH" \
-    -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=$MIN_IOS \
+    "${platform_args[@]}" \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_SHARED_LIBS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    -DCMAKE_C_FLAGS="-I$PREFIX/include" \
+    -DCMAKE_C_FLAGS="$cmake_cflags" \
     -DCMAKE_EXE_LINKER_FLAGS="-L$PREFIX/lib" \
     -DCMAKE_FIND_ROOT_PATH="$PREFIX"
   cmake --build "$DEPS/libomemo-c/_build-$TARGET" -j "$NCPU"

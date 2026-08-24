@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Build Dino.app (SwiftUI shell + full libdino core) for the iOS Simulator
-# or a device, and optionally install + launch it in the Simulator.
-# Usage: ./build-app.sh [run] [sim-arm64|device-arm64]
+# Build Gecko.app (SwiftUI shell + full libdino core) for iOS or Mac Catalyst,
+# and optionally install and launch it on the selected platform.
+# Usage: ./build-app.sh [run] [sim-arm64|device-arm64|catalyst-arm64]
 set -euo pipefail
 
 ACTION="${1:-build}"
@@ -13,11 +13,35 @@ BUILD="$HERE/build-$TARGET"
 APP="$BUILD/Gecko.app"
 MIN_IOS=26.0
 case "$TARGET" in
-  sim-arm64)    SDK=iphonesimulator; TRIPLE="arm64-apple-ios${MIN_IOS}-simulator" ;;
-  device-arm64) SDK=iphoneos;        TRIPLE="arm64-apple-ios${MIN_IOS}" ;;
+  sim-arm64)      SDK=iphonesimulator; TRIPLE="arm64-apple-ios${MIN_IOS}-simulator" ;;
+  device-arm64)   SDK=iphoneos;        TRIPLE="arm64-apple-ios${MIN_IOS}" ;;
+  catalyst-arm64) SDK=macosx;          TRIPLE="arm64-apple-ios${MIN_IOS}-macabi" ;;
   *) echo "unknown target $TARGET" >&2; exit 1 ;;
 esac
 SDKPATH="$(xcrun --sdk "$SDK" --show-sdk-path)"
+if [ "$TARGET" = "catalyst-arm64" ]; then
+  # Mac Catalyst linking depends on Xcode's iOSSupport framework orchestration;
+  # use the canonical project rather than duplicating those private driver flags.
+  REPO="$(dirname "$ROOT")"
+  DERIVED="$BUILD/DerivedData"
+  mkdir -p "$BUILD"
+  xcodebuild -project "$REPO/Gecko.xcodeproj" -scheme Gecko \
+    -configuration Release \
+    -destination 'platform=macOS,variant=Mac Catalyst' \
+    -derivedDataPath "$DERIVED" CODE_SIGNING_ALLOWED=NO build
+  BUILT_APP="$DERIVED/Build/Products/Release-maccatalyst/Gecko.app"
+  rm -rf "$APP"
+  cp -R "$BUILT_APP" "$APP"
+  if [ -d "$APP/Contents/PlugIns/NotificationService.appex" ]; then
+    codesign --force --sign - "$APP/Contents/PlugIns/NotificationService.appex"
+  fi
+  codesign --force --sign - "$APP"
+  echo "built $APP"
+  if [ "$ACTION" = "run" ]; then
+    open "$APP"
+  fi
+  exit 0
+fi
 
 # Build-metadata Info.plist keys that Xcode injects automatically but raw
 # swiftc does not. The App Store rejects bundles without them (DTPlatformName,
@@ -32,7 +56,7 @@ APP_SHORT_VER="$(plutil -extract CFBundleShortVersionString raw "$HERE/Info.plis
 case "$SDK" in
   iphoneos)        PLATFORM_NAME="iPhoneOS" ;;
   iphonesimulator) PLATFORM_NAME="iPhoneSimulator" ;;
-  *)               PLATFORM_NAME="iPhoneOS" ;;
+  macosx)          PLATFORM_NAME="MacOSX" ;;
 esac
 
 add_build_metadata() {  # $1 = path to an Info.plist inside a built bundle
@@ -84,6 +108,7 @@ fi
 
 xcrun -sdk "$SDK" swiftc \
   -target "$TRIPLE" \
+  -sdk "$SDKPATH" \
   -import-objc-header "$HERE/bridge.h" \
   $(printf -- '-Xcc %s ' $CFLAGS) -Xcc -I"$PREFIX/include" \
   $SIM_ENTS \
@@ -99,9 +124,9 @@ xcrun -sdk "$SDK" swiftc \
 cp "$HERE/Info.plist" "$APP/Info.plist"
 add_build_metadata "$APP/Info.plist"
 plutil -replace UIDeviceFamily -json '[1]' "$APP/Info.plist"
-# App icon: compile an asset catalog (actool) so the bundle ships Assets.car +
-# CFBundleIconName, which the App Store requires (loose PNGs aren't accepted). A
-# single 1024px universal icon lets actool rasterize every size it needs.
+
+# App icon: compile an asset catalog so the bundle ships Assets.car and
+# CFBundleIconName. A single 1024px source lets actool rasterize each iOS size.
 if [ -f "$HERE/AppIcon.png" ]; then
   ICONSET="$BUILD/AppIcon.xcassets/AppIcon.appiconset"
   rm -rf "$BUILD/AppIcon.xcassets"; mkdir -p "$ICONSET"
@@ -123,8 +148,6 @@ EOF_ICON
     --output-partial-info-plist "$BUILD/icon-partial.plist" \
     --output-format human-readable-text >/dev/null
   /usr/libexec/PlistBuddy -c "Merge $BUILD/icon-partial.plist" "$APP/Info.plist"
-  # actool only nests CFBundleIconName under CFBundleIcons; the App Store also
-  # wants it as a top-level key.
   plutil -replace CFBundleIconName -string AppIcon "$APP/Info.plist"
 fi
 
@@ -166,6 +189,7 @@ fi
 
 xcrun -sdk "$SDK" swiftc \
   -target "$TRIPLE" \
+  -sdk "$SDKPATH" \
   -parse-as-library \
   -module-name NotificationService \
   -import-objc-header "$HERE/bridge.h" \

@@ -4,5 +4,6 @@ PRODUCT_NAME = NotificationService
 PRODUCT_BUNDLE_IDENTIFIER = me.anemoneya.gecko.NotificationService
 INFOPLIST_FILE = ios/nse/Info.plist
 CODE_SIGN_ENTITLEMENTS = ios/nse/NotificationService.entitlements
+CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = ios/nse/NotificationServiceCatalyst.entitlements
 APPLICATION_EXTENSION_API_ONLY = YES
 SKIP_INSTALL = YES
