@@ -140,7 +140,12 @@ public class FileProvider : Dino.FileProvider, Object {
         Conversation? conversation = stream_interactor.get_module(ConversationManager.IDENTITY).get_conversation(file_transfer.counterpart.bare_jid, file_transfer.account);
         if (conversation == null) throw new FileReceiveError.GET_METADATA_FAILED("No conversation");
 
-        Message? message = stream_interactor.get_module(MessageStorage.IDENTITY).get_message_by_id(int.parse(file_transfer.info), conversation);
+        string? info = file_transfer.info;
+        int message_id = -1;
+        if (info == null || !int.try_parse((!)info, out message_id, null, 10)) {
+            throw new FileReceiveError.GET_METADATA_FAILED("Missing HTTP message id");
+        }
+        Message? message = stream_interactor.get_module(MessageStorage.IDENTITY).get_message_by_id(message_id, conversation);
         if (message == null) throw new FileReceiveError.GET_METADATA_FAILED("No message");
 
         var file_meta = new HttpFileMeta();
@@ -170,7 +175,13 @@ public class FileProvider : Dino.FileProvider, Object {
         Conversation? conversation = stream_interactor.get_module(ConversationManager.IDENTITY).get_conversation(file_transfer.counterpart.bare_jid, file_transfer.account);
         if (conversation == null) return null;
 
-        Message? message = stream_interactor.get_module(MessageStorage.IDENTITY).get_message_by_id(int.parse(file_transfer.info), conversation);
+        string? info = file_transfer.info;
+        int message_id = -1;
+        if (info == null || !int.try_parse((!)info, out message_id, null, 10)) {
+            warning("Missing or invalid HTTP message id for file transfer %d", file_transfer.id);
+            return null;
+        }
+        Message? message = stream_interactor.get_module(MessageStorage.IDENTITY).get_message_by_id(message_id, conversation);
         if (message == null) return null;
 
         var receive_data = new HttpFileReceiveData();

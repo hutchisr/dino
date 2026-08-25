@@ -2646,7 +2646,8 @@ struct FileContent: View {
         } else {
             fileRow
                 .onTapGesture {
-                    if msg.fileState == "not_started" || msg.fileState == "failed" {
+                    if msg.direction == "in",
+                       msg.fileState == "not_started" || msg.fileState == "failed" {
                         onDownloadFile?(msg.id)
                     }
                 }

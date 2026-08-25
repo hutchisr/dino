@@ -1902,7 +1902,10 @@ public void send_file(int conversation_id, string path) {
                 return;
             }
             fm.send_file.begin(File.new_for_path(p), c, (_, send_res) => {
-                fm.send_file.end(send_res);
+                string? send_error = fm.send_file.end(send_res);
+                if (send_error != null) {
+                    emit("{\"type\":\"error\",\"message\":\"%s\"}".printf(esc((!)send_error)));
+                }
                 remove_temp_staging_path(p);
             });
         });

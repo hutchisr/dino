@@ -71,7 +71,7 @@ public class FileManager : StreamInteractionModule, Object {
         return ret;
     }
 
-    public async void send_file(File file, Conversation conversation) {
+    public async string? send_file(File file, Conversation conversation) {
         FileTransfer file_transfer = new FileTransfer();
         file_transfer.account = conversation.account;
         file_transfer.counterpart = conversation.counterpart;
@@ -104,7 +104,7 @@ public class FileManager : StreamInteractionModule, Object {
         } catch (Error e) {
             file_transfer.state = FileTransfer.State.FAILED;
             warning("Error saving outgoing file: %s", e.message);
-            return;
+            return e.message;
         }
 
         try {
@@ -135,7 +135,8 @@ public class FileManager : StreamInteractionModule, Object {
             }
 
             if (file_sender == null) {
-                throw new FileSendError.UPLOAD_FAILED("No sender/encryptor combination available");
+                throw new FileSendError.UPLOAD_FAILED(
+                    "File exceeds the server upload limit or no compatible upload method is available");
             }
 
             if (file_encryptor != null) {
@@ -166,13 +167,24 @@ public class FileManager : StreamInteractionModule, Object {
         } catch (Error e) {
             warning("Send file error: %s", e.message);
             file_transfer.state = FileTransfer.State.FAILED;
+            return e.message;
         }
+        return null;
     }
 
     public async void download_file(FileTransfer file_transfer) {
-        Conversation conversation = stream_interactor.get_module(ConversationManager.IDENTITY).get_conversation(file_transfer.counterpart.bare_jid, file_transfer.account);
+        Conversation? conversation = stream_interactor.get_module(ConversationManager.IDENTITY)
+            .get_conversation(file_transfer.counterpart.bare_jid, file_transfer.account);
+        if (conversation == null) {
+            warning("Can't download file without a conversation");
+            return;
+        }
 
         FileProvider? file_provider = this.select_file_provider(file_transfer);
+        if (file_provider == null) {
+            warning("Can't download file without a provider");
+            return;
+        }
 
         yield download_file_internal(file_provider, file_transfer, conversation);
     }
