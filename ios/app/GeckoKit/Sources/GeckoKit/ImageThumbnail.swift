@@ -43,6 +43,14 @@ extension ThumbnailLoader {
         return c
     }()
 
+    private static let imageDecodeQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "me.anemoneya.gecko.thumbnail-decode"
+        queue.qualityOfService = .userInitiated
+        queue.maxConcurrentOperationCount = 2
+        return queue
+    }()
+
     private static func key(_ path: String, _ maxPixel: Int) -> NSString {
         "\(path)@\(maxPixel)" as NSString
     }
@@ -101,6 +109,22 @@ extension ThumbnailLoader {
         return image
     }
 
+    /// Cancellation-aware and concurrency-bounded entry point for scrolling
+    /// views. Queued work is removed when SwiftUI cancels the view task; an
+    /// already-running ImageIO decode finishes in one of only two worker slots.
+    static func loadThumbnailAsync(path: String, maxPixel: Int) async -> UIImage? {
+        if Task.isCancelled { return nil }
+        if let cached = cachedThumbnail(path: path, maxPixel: maxPixel) {
+            return cached
+        }
+        let operation = ThumbnailDecodeOperation(path: path, maxPixel: maxPixel)
+        return await withTaskCancellationHandler {
+            await operation.value(on: imageDecodeQueue)
+        } onCancel: {
+            operation.cancel()
+        }
+    }
+
     static func loadVideoThumbnail(path: String, maxPixel: Int) async -> UIImage? {
         let k = videoKey(path, maxPixel)
         if let cached = cache.object(forKey: k) { return cached }
@@ -109,7 +133,12 @@ extension ThumbnailLoader {
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: maxPixel, height: maxPixel)
         let time = CMTime(seconds: 0, preferredTimescale: 600)
-        guard let cg = await generateVideoImage(generator: generator, at: time) else { return nil }
+        let cg = await withTaskCancellationHandler {
+            await generateVideoImage(generator: generator, at: time)
+        } onCancel: {
+            generator.cancelAllCGImageGeneration()
+        }
+        guard let cg else { return nil }
         let image = UIImage(cgImage: cg)
         let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
         cache.setObject(image, forKey: k, cost: cost)
@@ -139,6 +168,66 @@ extension ThumbnailLoader {
         ] as CFDictionary
         guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, options) else { return nil }
         return UIImage(cgImage: cg)
+    }
+}
+
+private final class ThumbnailDecodeOperation: Operation, @unchecked Sendable {
+    private let path: String
+    private let maxPixel: Int
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<UIImage?, Never>?
+    private var completed = false
+
+    init(path: String, maxPixel: Int) {
+        self.path = path
+        self.maxPixel = maxPixel
+    }
+
+    func value(on queue: OperationQueue) async -> UIImage? {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if completed {
+                lock.unlock()
+                continuation.resume(returning: nil)
+                return
+            }
+            self.continuation = continuation
+            let shouldEnqueue = !isCancelled
+            lock.unlock()
+
+            if shouldEnqueue {
+                queue.addOperation(self)
+            } else {
+                finish(nil)
+            }
+        }
+    }
+
+    override func main() {
+        guard !isCancelled else {
+            finish(nil)
+            return
+        }
+        let image = ThumbnailLoader.loadThumbnail(path: path, maxPixel: maxPixel)
+        finish(isCancelled ? nil : image)
+    }
+
+    override func cancel() {
+        super.cancel()
+        finish(nil)
+    }
+
+    private func finish(_ image: UIImage?) {
+        lock.lock()
+        guard !completed else {
+            lock.unlock()
+            return
+        }
+        completed = true
+        let continuation = continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(returning: image)
     }
 }
 #endif

@@ -670,6 +670,7 @@ struct RootView: View {
                     if let id = model.navigation.last,
                        model.conversations.contains(where: { $0.id == id }) {
                         ChatView(conversationId: id)
+                            .id(id)
                     } else {
                         ContentUnavailableView(
                             "Select a Conversation",
@@ -968,9 +969,7 @@ struct CachedDiskImage<Placeholder: View>: View {
                 return
             }
             let p = path, mp = maxPixel
-            let decoded = await Task.detached(priority: .userInitiated) {
-                ThumbnailLoader.loadThumbnail(path: p, maxPixel: mp)
-            }.value
+            let decoded = await ThumbnailLoader.loadThumbnailAsync(path: p, maxPixel: mp)
             if !Task.isCancelled {
                 image = decoded
                 loadedKey = currentKey
@@ -2511,9 +2510,7 @@ struct CachedThumbnail: View {
         .task(id: path) {
             guard image == nil else { return }   // seeded from cache
             let p = path, mp = maxPixel
-            let decoded = await Task.detached(priority: .userInitiated) {
-                ThumbnailLoader.loadThumbnail(path: p, maxPixel: mp)
-            }.value
+            let decoded = await ThumbnailLoader.loadThumbnailAsync(path: p, maxPixel: mp)
             if !Task.isCancelled, let decoded { image = decoded }
         }
     }

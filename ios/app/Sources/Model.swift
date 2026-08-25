@@ -935,7 +935,8 @@ final class AppModel: ObservableObject {
             }
         }
         if let jid = env["DINO_AUTOOPEN"] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            let delay = env["DINO_AUTOOPEN_DELAY"].flatMap { Double($0) } ?? 5
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0, delay)) { [weak self] in
                 guard let self, let conv = self.conversations.first(where: { $0.jid == jid }) else { return }
                 self.replaceNavigation(with: [conv.id])
             }

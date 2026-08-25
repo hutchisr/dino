@@ -75,9 +75,7 @@ struct ImageViewer: View {
         image = nil
         failed = false
         let p = path
-        let decoded = await Task.detached(priority: .userInitiated) {
-            ThumbnailLoader.loadThumbnail(path: p, maxPixel: maxPixel)
-        }.value
+        let decoded = await ThumbnailLoader.loadThumbnailAsync(path: p, maxPixel: maxPixel)
         if !Task.isCancelled {
             image = decoded
             failed = decoded == nil

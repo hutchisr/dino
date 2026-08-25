@@ -39,6 +39,9 @@ struct SwiftUIMessageList: View {
     /// happened. The first populated layout jumps to the bottom instantly; later
     /// live arrivals animate only while already pinned, while sync updates snap.
     @State private var didInitialScroll = false
+    /// Keep the initial default scroll position invisible until both geometry
+    /// and row visibility confirm that the newest message is at the bottom.
+    @State private var initialViewportReady = false
 
     /// Older-history paging stays disabled until scroll visibility confirms the
     /// initial jump has put the newest row at the measured bottom. Otherwise the
@@ -48,9 +51,6 @@ struct SwiftUIMessageList: View {
     @State private var historyLoadTrigger = HistoryLoadTrigger()
     @State private var trackedHistoryViewportID: Int32?
     @State private var visibleNewestID: Int32?
-#if targetEnvironment(macCatalyst)
-    @State private var catalystInitialRowsMaterialized = false
-#endif
 
     /// The newest row we've already pinned after a layout pass. If content
     /// grows for a different newest message, let that growth animate instead of
@@ -161,6 +161,10 @@ struct SwiftUIMessageList: View {
             ScrollView {
                 VStack(spacing: 0) {
                     messageStack
+                        .opacity(initialViewportReady ? 1 : 0)
+                        .animation(.easeOut(duration: 0.14), value: initialViewportReady)
+                        .allowsHitTesting(initialViewportReady)
+                        .accessibilityHidden(!initialViewportReady)
                         .background(alignment: .topLeading) {
                             ScrollViewResolver(metrics: metrics)
                                 .frame(width: 0, height: 0)
@@ -184,6 +188,12 @@ struct SwiftUIMessageList: View {
             .contentMargins(.bottom, max(0, visualBottomInset), for: .scrollContent)
             .contentMargins(.top, max(0, visualScrollIndicatorTopInset), for: .scrollIndicators)
             .contentMargins(.bottom, max(0, visualScrollIndicatorBottomInset), for: .scrollIndicators)
+            .overlay {
+                if !initialViewportReady, newestMessageID != nil {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
             .onScrollGeometryChange(for: ScrollSample.self) { geo in
                 // Distance the content can still travel downward; ~0 means
                 // pinned to the newest message. Empirically, at the resting
@@ -335,13 +345,19 @@ struct SwiftUIMessageList: View {
                     }
                 }
             }
-            // The user's own dragging/flinging is the only thing that releases
-            // the stick-to-bottom intent; track when they're driving the scroll
-            // so content-growth re-pins never fight a finger.
+            // Track in-flight scrolling so content-growth re-pins never fight
+            // the current motion. Catalyst reports fast wheel and programmatic
+            // momentum as `.animating`; treating every non-idle phase as active
+            // prevents recursive scrollTo calls there. Keep iOS's narrower
+            // user-driven phase semantics unchanged.
             .onScrollPhaseChange { previous, phase, context in
+#if targetEnvironment(macCatalyst)
+                userInteracting = phase != .idle
+#else
                 userInteracting = phase == .tracking
                     || phase == .interacting
                     || phase == .decelerating
+#endif
                 if phase == .tracking || phase == .interacting {
                     metrics.cancelBottomScrollAnimation()
                 }
@@ -360,26 +376,11 @@ struct SwiftUIMessageList: View {
         }
     }
 
-    @ViewBuilder
     private var messageStack: some View {
-#if targetEnvironment(macCatalyst)
-        if catalystInitialRowsMaterialized {
-            LazyVStack(spacing: 0) {
-                messageRows
-            }
-            .scrollTargetLayout()
-        } else {
-            VStack(spacing: 0) {
-                messageRows
-            }
-            .scrollTargetLayout()
-        }
-#else
         LazyVStack(spacing: 0) {
             messageRows
         }
         .scrollTargetLayout()
-#endif
     }
 
     private var messageRows: some View {
@@ -455,14 +456,6 @@ struct SwiftUIMessageList: View {
         if visible {
             if id == newestMessageID {
                 visibleNewestID = id
-#if targetEnvironment(macCatalyst)
-                if !catalystInitialRowsMaterialized {
-                    DispatchQueue.main.async {
-                        catalystInitialRowsMaterialized = true
-                        stickToBottom = true
-                    }
-                }
-#endif
                 if enableOlderLoadingIfReady() {
                     requestOlderIfUnderfilled()
                 }
@@ -478,6 +471,9 @@ struct SwiftUIMessageList: View {
               didInitialScroll,
               metrics.isAtBottom,
               visibleNewestID == newestMessageID else { return false }
+        if !initialViewportReady {
+            initialViewportReady = true
+        }
         canLoadOlder = true
         historyLoadTrigger.setCanLoadOlder(canLoadOlderHistory)
         return true
