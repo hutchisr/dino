@@ -73,15 +73,21 @@ add_build_metadata() {  # $1 = path to an Info.plist inside a built bundle
 }
 
 export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig:$PREFIX/lib/gio/modules/pkgconfig"
-CFLAGS="$(pkg-config --cflags gio-2.0 gee-0.8 gdk-pixbuf-2.0)"
-LIBS="$(pkg-config --libs --static libsoup-3.0 gee-0.8 gdk-pixbuf-2.0 gioopenssl libgcrypt libomemo-c libsrtp2)"
+CFLAGS=()
+read -r -a CFLAGS <<< "$(pkg-config --cflags gio-2.0 gee-0.8 gdk-pixbuf-2.0)"
+SWIFT_CFLAGS=()
+for flag in "${CFLAGS[@]}"; do
+  SWIFT_CFLAGS+=(-Xcc "$flag")
+done
+LIBS=()
+read -r -a LIBS <<< "$(pkg-config --libs --static libsoup-3.0 gee-0.8 gdk-pixbuf-2.0 gioopenssl libgcrypt libomemo-c libsrtp2)"
 
 rm -rf "$APP" && mkdir -p "$APP"
 
 # On the simulator, entitlements (aps-environment for APNs) live in a
 # __TEXT,__entitlements section embedded at link time; putting them in the
 # ad-hoc code signature makes AMFI refuse to spawn the binary.
-SIM_ENTS=""
+SIM_ENTS=()
 if [ "$TARGET" = "sim-arm64" ]; then
   cat > "$BUILD/sim-entitlements.plist" <<'EOF2'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -103,22 +109,22 @@ if [ "$TARGET" = "sim-arm64" ]; then
 </dict>
 </plist>
 EOF2
-  SIM_ENTS="-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker $BUILD/sim-entitlements.plist"
+  SIM_ENTS=(-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker "$BUILD/sim-entitlements.plist")
 fi
 
 xcrun -sdk "$SDK" swiftc \
   -target "$TRIPLE" \
   -sdk "$SDKPATH" \
   -import-objc-header "$HERE/bridge.h" \
-  $(printf -- '-Xcc %s ' $CFLAGS) -Xcc -I"$PREFIX/include" \
-  $SIM_ENTS \
+  "${SWIFT_CFLAGS[@]}" -Xcc -I"$PREFIX/include" \
+  "${SIM_ENTS[@]}" \
   "$HERE"/Sources/*.swift \
   "$HERE"/GeckoKit/Sources/GeckoKit/*.swift \
   -L "$PREFIX/lib" -L "$PREFIX/lib/gio/modules" -L "$PREFIX/lib/dino/plugins" \
   -ldinoios -ldino -lxmpp-vala -lqlite -lcrypto-vala \
   -Xlinker -force_load -Xlinker "$PREFIX/lib/dino/plugins/omemo.a" \
   -Xlinker -force_load -Xlinker "$PREFIX/lib/dino/plugins/http-files.a" \
-  $LIBS \
+  "${LIBS[@]}" \
   -o "$APP/Gecko"
 
 cp "$HERE/Info.plist" "$APP/Info.plist"
@@ -158,7 +164,7 @@ fi
 # (App Group) ride in a __TEXT,__entitlements section just like the host app.
 APPEX="$APP/PlugIns/NotificationService.appex"
 mkdir -p "$APPEX"
-NSE_ENTS=""
+NSE_ENTS=()
 if [ "$TARGET" = "sim-arm64" ]; then
   cat > "$BUILD/nse-entitlements.plist" <<'EOF3'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -184,7 +190,7 @@ if [ "$TARGET" = "sim-arm64" ]; then
 </dict>
 </plist>
 EOF3
-  NSE_ENTS="-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker $BUILD/nse-entitlements.plist"
+  NSE_ENTS=(-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker "$BUILD/nse-entitlements.plist")
 fi
 
 xcrun -sdk "$SDK" swiftc \
@@ -193,15 +199,15 @@ xcrun -sdk "$SDK" swiftc \
   -parse-as-library \
   -module-name NotificationService \
   -import-objc-header "$HERE/bridge.h" \
-  $(printf -- '-Xcc %s ' $CFLAGS) -Xcc -I"$PREFIX/include" \
+  "${SWIFT_CFLAGS[@]}" -Xcc -I"$PREFIX/include" \
   -Xlinker -e -Xlinker _NSExtensionMain \
-  $NSE_ENTS \
+  "${NSE_ENTS[@]}" \
   "$ROOT"/nse/*.swift \
   -L "$PREFIX/lib" -L "$PREFIX/lib/gio/modules" -L "$PREFIX/lib/dino/plugins" \
   -ldinoios -ldino -lxmpp-vala -lqlite -lcrypto-vala \
   -Xlinker -force_load -Xlinker "$PREFIX/lib/dino/plugins/omemo.a" \
   -Xlinker -force_load -Xlinker "$PREFIX/lib/dino/plugins/http-files.a" \
-  $LIBS \
+  "${LIBS[@]}" \
   -o "$APPEX/NotificationService"
 cp "$ROOT/nse/Info.plist" "$APPEX/Info.plist"
 add_build_metadata "$APPEX/Info.plist"

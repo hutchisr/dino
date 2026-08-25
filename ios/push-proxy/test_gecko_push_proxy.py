@@ -13,11 +13,12 @@ duck-typed `self`, so nothing here connects to anything.
 Run (uses the proxy's venv, which already has the deps):
     ./venv/bin/python -m unittest test_gecko_push_proxy -v
 """
+import asyncio
 import json
 import logging
-import asyncio
 import unittest
 from types import SimpleNamespace
+from typing import ClassVar
 from xml.etree import ElementTree as ET
 
 import gecko_push_proxy as proxy
@@ -41,7 +42,7 @@ def make_apns(valid_env, *, bad_reason="BadDeviceToken", fail_status=400):
     async def fake_post(env, device_token, payload):
         apns._calls.append(env)
         if env == valid_env:
-            return SimpleNamespace(status_code=200, json=lambda: {}, text="ok")
+            return SimpleNamespace(status_code=200, json=dict, text="ok")
         return SimpleNamespace(status_code=fail_status,
                                json=lambda: {"reason": bad_reason}, text=bad_reason)
 
@@ -104,7 +105,7 @@ class FakeMsg:
 class FakeReconnectBot:
     """Tiny stand-in for PushBot used by reconnect supervisor tests."""
 
-    instances = []
+    instances: ClassVar[list["FakeReconnectBot"]] = []
 
     def __init__(self, jid, password, apns, *, filters, ping_interval, ping_timeout):
         self.jid = jid

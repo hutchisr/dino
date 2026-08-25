@@ -59,7 +59,8 @@ class Apns:
     """Minimal APNs HTTP/2 client with JWT (token-based) auth."""
 
     def __init__(self, key_path: str, key_id: str, team_id: str):
-        self.key = open(key_path).read()
+        with open(key_path, encoding="utf-8") as key_file:
+            self.key = key_file.read()
         self.key_id = key_id
         self.team_id = team_id
         self._jwt = None
@@ -102,11 +103,12 @@ class Apns:
             if status == 200:
                 self.token_env[device_token] = env
                 return 200
-            reason = ""
             try:
-                reason = resp.json().get("reason", "")
-            except Exception:
-                pass
+                response_payload = resp.json()
+            except json.JSONDecodeError:
+                log.debug("APNs returned a non-JSON error response", exc_info=True)
+                response_payload = {}
+            reason = response_payload.get("reason", "") if isinstance(response_payload, dict) else ""
             if reason != "BadDeviceToken":
                 log.warning("APNs %s (%s) for %s…: %s", status, env, device_token[:8], resp.text)
                 return status
@@ -229,19 +231,19 @@ class PushBot(slixmpp.ClientXMPP):
         count = None
         sender = None
         last_body = None
-        try:
-            for field in iq.xml.iter("{jabber:x:data}field"):
-                var = field.get("var")
-                value = field.find("{jabber:x:data}value")
-                text = value.text if value is not None else None
-                if var == "message-count" and text:
+        for field in iq.xml.iter("{jabber:x:data}field"):
+            var = field.get("var")
+            value = field.find("{jabber:x:data}value")
+            text = value.text if value is not None else None
+            if var == "message-count" and text:
+                try:
                     count = int(text)
-                elif var == "last-message-sender" and text:
-                    sender = text
-                elif var == "last-message-body" and text:
-                    last_body = text
-        except Exception:
-            pass
+                except ValueError:
+                    log.warning("invalid message-count in push summary: %r", text)
+            elif var == "last-message-sender" and text:
+                sender = text
+            elif var == "last-message-body" and text:
+                last_body = text
         log.info("summary: count=%s sender=%s body=%s",
                  count, sender, "yes" if last_body else "no")
 
@@ -375,7 +377,7 @@ async def run_xmpp_forever(jid: str, password: str, apns: Apns, stop_event: asyn
         session_started = asyncio.Event()
         bot.add_event_handler(
             "session_start",
-            lambda _event: session_started.set(),
+            lambda _event, started=session_started: started.set(),
             disposable=True)
         disconnected = bot.disconnected
 

@@ -18,14 +18,15 @@ never depends on the device's handling of the response.)
 import plistlib
 import re
 
-from flask import Flask, request, Response
-from waitress import serve
-
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.serialization import (
-    Encoding, load_pem_private_key, pkcs7,
+    Encoding,
+    load_pem_private_key,
+    pkcs7,
 )
+from flask import Flask, Response, request
+from waitress import serve
 
 app = Flask(__name__)
 
@@ -39,8 +40,10 @@ TLS_KEY = "/tls/tls.key"
 
 def sign_profile(xml_bytes: bytes) -> bytes:
     """CMS/PKCS#7-sign the profile with the domain cert, content attached."""
-    certs = x509.load_pem_x509_certificates(open(TLS_CERT, "rb").read())
-    key = load_pem_private_key(open(TLS_KEY, "rb").read(), password=None)
+    with open(TLS_CERT, "rb") as cert_file:
+        certs = x509.load_pem_x509_certificates(cert_file.read())
+    with open(TLS_KEY, "rb") as key_file:
+        key = load_pem_private_key(key_file.read(), password=None)
     builder = (
         pkcs7.PKCS7SignatureBuilder()
         .set_data(xml_bytes)

@@ -1,6 +1,6 @@
 import argparse
-import subprocess
 import re
+import subprocess
 
 
 def compute_version_from_file(file):
@@ -34,7 +34,7 @@ def compute_version_from_git(git_repo, git):
         git_commit_hash = matches.groups()[1]
         git_commit_time = subprocess.check_output([git, "show", "--format=%cd", "--date=format:%Y%m%d", "-s"],
                                                   cwd=git_repo, text=True).strip()
-        return "%s~git%s.%s.%s" % (git_release_tag[1:], git_tag_offset, git_commit_time, git_commit_hash)
+        return f"{git_release_tag[1:]}~git{git_tag_offset}.{git_commit_time}.{git_commit_hash}"
     except subprocess.CalledProcessError:
         pass
     return None
@@ -56,7 +56,7 @@ def main():
     p.add_argument("--git", help="Path to git executable", default="git")
     p.add_argument("version_file", metavar="VERSION_FILE",
                    help="Use this file's contents as version if the file exists")
-    args, unknown = p.parse_known_args()
+    args, _unknown = p.parse_known_args()
     version = compute_version(args.version_file, args.git_repo, args.git)
     print(version)
 
