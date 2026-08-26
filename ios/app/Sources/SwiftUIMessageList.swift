@@ -49,7 +49,6 @@ struct SwiftUIMessageList: View {
     /// immediately requests page two.
     @State private var canLoadOlder = false
     @State private var historyLoadTrigger = HistoryLoadTrigger()
-    @State private var trackedHistoryViewportID: Int32?
     @State private var visibleNewestID: Int32?
 
     /// The newest row we've already pinned after a layout pass. If content
@@ -87,8 +86,7 @@ struct SwiftUIMessageList: View {
         var contentHeight: CGFloat = 0
         var topVisibleMessageID: Int32?
         var fullyVisibleMessageID: Int32?
-        var trackedMessageID: Int32?
-        var trackedMessageFrame: CGRect?
+        var messageFrames: [Int32: CGRect] = [:]
         var containerHeight: CGFloat = 0
         var newestMessageID: Int32?
         var awaitingHistoryRestoreGeometry = false
@@ -257,19 +255,10 @@ struct SwiftUIMessageList: View {
             }
             .onScrollTargetVisibilityChange(idType: Int32.self, threshold: 0.01) { ids in
                 metrics.topVisibleMessageID = ids.first
-                if metrics.fullyVisibleMessageID == nil,
-                   trackedHistoryViewportID != ids.first {
-                    trackedHistoryViewportID = ids.first
-                }
                 refreshHistoryRequestIfNeeded()
             }
             .onScrollTargetVisibilityChange(idType: Int32.self, threshold: 0.99) { ids in
-                let first = ids.first
-                metrics.fullyVisibleMessageID = first
-                let preferred = first ?? metrics.topVisibleMessageID
-                if trackedHistoryViewportID != preferred {
-                    trackedHistoryViewportID = preferred
-                }
+                metrics.fullyVisibleMessageID = ids.first
                 refreshHistoryRequestIfNeeded()
             }
             // Stay pinned to the newest message as the content height settles
@@ -388,19 +377,21 @@ struct SwiftUIMessageList: View {
             rowView(row)
                 .id(row.msg.id)
                 .background {
-                    if row.msg.id == trackedHistoryViewportID {
-                        Color.clear
-                            .onGeometryChange(
-                                for: CGRect.self,
-                                of: { proxy in
-                                    proxy.frame(in: .named(Self.scrollCoordinateSpace))
-                                },
-                                action: { frame in
-                                    metrics.trackedMessageID = row.msg.id
-                                    metrics.trackedMessageFrame = frame
+                    Color.clear
+                        .onGeometryChange(
+                            for: CGRect.self,
+                            of: { proxy in
+                                proxy.frame(in: .named(Self.scrollCoordinateSpace))
+                            },
+                            action: { frame in
+                                guard metrics.messageFrames[row.msg.id] != frame else { return }
+                                metrics.messageFrames[row.msg.id] = frame
+                                let viewportMessageID = metrics.fullyVisibleMessageID
+                                    ?? metrics.topVisibleMessageID
+                                if row.msg.id == viewportMessageID {
                                     refreshHistoryRequestIfNeeded()
-                                })
-                    }
+                                }
+                            })
                 }
                 .onScrollVisibilityChange(threshold: 0.01) { visible in
                     updateBoundaryVisibility(for: row.msg.id, visible: visible)
@@ -684,8 +675,7 @@ struct SwiftUIMessageList: View {
     private func currentHistoryViewportAnchor() -> HistoryViewportAnchor? {
         let messageID = metrics.fullyVisibleMessageID ?? metrics.topVisibleMessageID
         if let messageID,
-           metrics.trackedMessageID == messageID,
-           let frame = metrics.trackedMessageFrame {
+           let frame = metrics.messageFrames[messageID] {
             let viewportMinY = max(0, visualTopInset)
             let viewportHeight = max(
                 0,

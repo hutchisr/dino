@@ -137,16 +137,21 @@ enum CatalystWindowLifecycle {
             application.setValue(proxy, forKey: "delegate")
         }
 
-        let windows = application.value(forKey: "windows") as? [NSObject] ?? []
-        for window in windows {
-            let id = ObjectIdentifier(window)
-            guard proxies[id] == nil else { continue }
-            let proxy = CatalystWindowDelegateProxy(
-                originalDelegate: window.value(forKey: "delegate") as? NSObject
-            )
-            proxies[id] = proxy
-            window.setValue(proxy, forKey: "delegate")
+        // Only the primary chat window should hide instead of closing. Media
+        // windows are real secondary scenes and must be allowed to close and
+        // deallocate normally; proxying every AppKit window leaks hidden media
+        // scenes and eventually destabilizes repeated viewer opens.
+        guard proxies.isEmpty,
+              let window = application.value(forKey: "keyWindow") as? NSObject
+        else {
+            return
         }
+        let id = ObjectIdentifier(window)
+        let proxy = CatalystWindowDelegateProxy(
+            originalDelegate: window.value(forKey: "delegate") as? NSObject
+        )
+        proxies[id] = proxy
+        window.setValue(proxy, forKey: "delegate")
     }
 
     static func hideInsteadOfClosing(_ window: NSObject) {
@@ -164,6 +169,32 @@ enum CatalystWindowLifecycle {
         window.perform(NSSelectorFromString("makeKeyAndOrderFront:"), with: nil)
     }
 }
+
+private struct CatalystMediaWindowConfigurator: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        DispatchQueue.main.async {
+            configure(view)
+        }
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        DispatchQueue.main.async {
+            configure(view)
+        }
+    }
+
+    private func configure(_ view: UIView) {
+        guard let scene = view.window?.windowScene else { return }
+        scene.titlebar?.titleVisibility = .hidden
+        guard let restrictions = scene.sizeRestrictions else { return }
+        restrictions.minimumSize = CGSize(width: 480, height: 320)
+        restrictions.maximumSize = CGSize(width: 4_096, height: 4_096)
+        restrictions.allowsFullScreen = true
+    }
+}
+
 #endif
 
 @main
@@ -175,6 +206,7 @@ struct GeckoApp: App {
     var body: some Scene {
 #if targetEnvironment(macCatalyst)
         desktopScene
+        mediaViewerScene
 #else
         mobileScene
 #endif
@@ -211,6 +243,29 @@ struct GeckoApp: App {
         }
     }
 
+    private var mediaViewerScene: some Scene {
+        WindowGroup(id: MediaViewerItem.windowGroupID, for: MediaViewerItem.self) { $item in
+            Group {
+                if let item {
+                    switch item {
+                    case .image(let path):
+                        ImageViewer(path: path)
+                    case .video(let path):
+                        VideoViewer(path: path)
+                    }
+                } else {
+                    Color.black
+                }
+            }
+            .background {
+                CatalystMediaWindowConfigurator()
+                    .frame(width: 0, height: 0)
+            }
+        }
+        .defaultSize(width: 960, height: 720)
+        .windowResizability(.contentMinSize)
+    }
+
     private var desktopScene: some Scene {
         let restoredSize = CatalystWindowSize.restored
         return WindowGroup {
@@ -228,7 +283,7 @@ struct GeckoApp: App {
         .defaultSize(width: restoredSize.width, height: restoredSize.height)
         .windowResizability(.contentMinSize)
         .commands {
-            CommandGroup(after: .newItem) {
+            CommandGroup(replacing: .newItem) {
                 Button("New Message") {
                     model.presentNewMessage()
                 }
@@ -654,42 +709,59 @@ struct RootView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        Group {
+        ZStack {
+            Group {
 #if targetEnvironment(macCatalyst)
-            if !model.ready {
-                ProgressView("Starting Dino core…")
-            } else if !model.hasAccount {
-                NavigationStack {
-                    AccountSetupView()
+                if !model.ready {
+                    ProgressView("Starting Dino core…")
+                } else if !model.hasAccount {
+                    NavigationStack {
+                        AccountSetupView()
+                    }
+                } else {
+                    NavigationSplitView {
+                        ConversationListView()
+                            .navigationSplitViewColumnWidth(min: 320, ideal: 340, max: 420)
+                    } detail: {
+                        if let id = model.navigation.last,
+                           model.conversations.contains(where: { $0.id == id }) {
+                            ChatView(conversationId: id)
+                                .id(id)
+                        } else {
+                            ContentUnavailableView(
+                                "Select a Conversation",
+                                systemImage: "message",
+                                description: Text("Choose a conversation from the sidebar.")
+                            )
+                        }
+                    }
+                    .navigationSplitViewStyle(.balanced)
                 }
-            } else {
-                NavigationSplitView {
-                    ConversationListView()
-                        .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 420)
-                } detail: {
-                    if let id = model.navigation.last,
-                       model.conversations.contains(where: { $0.id == id }) {
-                        ChatView(conversationId: id)
-                            .id(id)
-                    } else {
-                        ContentUnavailableView(
-                            "Select a Conversation",
-                            systemImage: "message",
-                            description: Text("Choose a conversation from the sidebar.")
-                        )
+#else
+                NavigationStack(path: $model.navigation) {
+                    Group {
+                        if !model.ready {
+                            ProgressView("Starting Dino core…")
+                        } else if !model.hasAccount {
+                            AccountSetupView()
+                        } else {
+                            ConversationListView()
+                        }
                     }
                 }
-                .navigationSplitViewStyle(.balanced)
+#endif
             }
-#else
-            NavigationStack(path: $model.navigation) {
-                Group {
-                    if !model.ready {
-                        ProgressView("Starting Dino core…")
-                    } else if !model.hasAccount {
-                        AccountSetupView()
-                    } else {
-                        ConversationListView()
+
+#if !targetEnvironment(macCatalyst)
+            if let item = model.mediaViewerItem {
+                switch item {
+                case .image(let path):
+                    ImageViewer(path: path) {
+                        model.mediaViewerItem = nil
+                    }
+                case .video(let path):
+                    VideoViewer(path: path) {
+                        model.mediaViewerItem = nil
                     }
                 }
             }
@@ -751,8 +823,10 @@ struct ConversationListView: View {
     @State private var mucJid = ""
     @State private var mucNick = ""
 
-    var body: some View {
-        List {
+    private struct ListContents: View {
+        @EnvironmentObject var model: AppModel
+
+        var body: some View {
             if !model.subscriptionRequests.isEmpty {
                 Section("Contact requests") {
                     ForEach(model.subscriptionRequests, id: \.self) { jid in
@@ -773,12 +847,17 @@ struct ConversationListView: View {
                         model.selectConversation(conv.id)
                     } label: {
                         row
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .listRowBackground(
-                        model.navigation.last == conv.id
-                            ? Color.accentColor.opacity(0.16)
-                            : Color.clear
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(
+                                model.navigation.last == conv.id
+                                    ? Color.accentColor.opacity(0.16)
+                                    : Color.clear
+                            )
                     )
                     .contextMenu {
                         Button(role: .destructive) {
@@ -806,6 +885,49 @@ struct ConversationListView: View {
                 }
             }
         }
+    }
+
+    private func accountButton(for account: XmppAccount) -> some View {
+        Button {
+            showAccountSettings = true
+        } label: {
+#if targetEnvironment(macCatalyst)
+            AvatarView(
+                jid: account.id, name: model.accountAlias, isGroup: false, size: 24,
+                avatarPath: model.avatars[account.id],
+                requestAvatar: { model.ensureAvatar(for: account.id) })
+                .overlay(alignment: .bottomTrailing) {
+                    Circle()
+                        .fill(accountStatusColor(account.state))
+                        .frame(width: 7, height: 7)
+                }
+                .frame(width: 28, height: 28)
+                .contentShape(Circle())
+#else
+            AvatarView(
+                jid: account.id, name: model.accountAlias, isGroup: false, size: 34,
+                avatarPath: model.avatars[account.id],
+                requestAvatar: { model.ensureAvatar(for: account.id) })
+                .padding(3)
+                .glassEffect(.regular.tint(accountStatusColor(account.state)).interactive(), in: Circle())
+                .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                // Include the glass ring around the avatar in the
+                // tap target, not just the opaque avatar image.
+                .contentShape(Circle())
+#endif
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Account")
+    }
+
+    private var platformList: some View {
+        List {
+            ListContents()
+        }
+    }
+
+    private var list: some View {
+        platformList
         .contentMargins(.horizontal, ChatLayout.horizontalPadding, for: .scrollContent)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Int32.self) { id in
@@ -815,32 +937,12 @@ struct ConversationListView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 if let account = model.accounts.first {
-                    Button {
-                        showAccountSettings = true
-                    } label: {
-                        AvatarView(
-                            jid: account.id, name: model.accountAlias, isGroup: false, size: 34,
-                            avatarPath: model.avatars[account.id],
-                            requestAvatar: { model.ensureAvatar(for: account.id) })
-                            .padding(3)
-                            .glassEffect(.regular.tint(accountStatusColor(account.state)).interactive(), in: Circle())
-                            .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
-                            // Include the glass ring around the avatar in the
-                            // tap target, not just the opaque avatar image.
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
+                    accountButton(for: account)
                 }
             }
-            .sharedBackgroundVisibility(.hidden)
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    model.presentNewMessage()
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button("New Message", systemImage: "square.and.pencil", action: model.presentNewMessage)
+                    .labelStyle(.iconOnly)
                 Menu {
                     Button {
                         showJoinMuc = true
@@ -853,10 +955,15 @@ struct ConversationListView: View {
                         Label("Account", systemImage: "person.crop.circle")
                     }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Label("More", systemImage: "ellipsis.circle")
+                        .labelStyle(.iconOnly)
                 }
             }
         }
+    }
+
+    var body: some View {
+        list
         .sheet(isPresented: $model.newMessagePresented) {
             ContactsView(isPresented: $model.newMessagePresented)
                 .environmentObject(model)
@@ -1240,6 +1347,9 @@ private struct PendingFileSend {
 
 struct ChatView: View {
     @EnvironmentObject var model: AppModel
+#if targetEnvironment(macCatalyst)
+    @Environment(\.openWindow) private var openWindow
+#endif
     let conversationId: Int32
     var talksToCore: Bool = true
     @Namespace private var composerGlass
@@ -1251,7 +1361,11 @@ struct ChatView: View {
     @State private var showAttach = false
     /// Shared height for the composer's buttons and text field so they align.
     private let composerControlHeight: CGFloat = 44
+#if targetEnvironment(macCatalyst)
+    private let floatingButtonSize: CGFloat = 36
+#else
     private let floatingButtonSize: CGFloat = 44
+#endif
     private let floatingOverlaySpacing: CGFloat = 8
     /// Match the standard iOS navigation bar side inset so the custom bottom
     /// chrome lines up with the system toolbar above it.
@@ -1270,6 +1384,7 @@ struct ChatView: View {
     @State private var showEncryptionHelp = false
     @State private var editing: ChatMessage?
     @State private var replyingTo: ChatMessage?
+
     @State private var actionMsg: ChatMessage?
     @State private var showFullTitle = false
     /// Whether the SwiftUI list is pinned to the newest message; gates the
@@ -1282,11 +1397,17 @@ struct ChatView: View {
     /// bridge. Keep its scroll request pending until that new outgoing item is
     /// present, instead of scrolling immediately to the previous last row.
     @State private var outgoingMessageFollowTrigger = OutgoingMessageFollowTrigger()
-    @State private var viewerItem: ImageViewerItem?
-    @State private var videoViewerItem: VideoViewerItem?
     @State private var composerHeight: CGFloat = 0
     @State private var keyboardOverlap: CGFloat = 0
     @State private var pendingFileSend: PendingFileSend?
+
+    private func openMediaViewer(_ item: MediaViewerItem) {
+#if targetEnvironment(macCatalyst)
+        openWindow(id: MediaViewerItem.windowGroupID, value: item)
+#else
+        model.mediaViewerItem = item
+#endif
+    }
 
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
@@ -1776,37 +1897,39 @@ struct ChatView: View {
         scrollIndicatorBottomInset: CGFloat,
         scrollButtonBottomPadding: CGFloat
     ) -> some View {
-        SwiftUIMessageList(
-            messages: chatMessages,
-            messageRevision: model.messageRevision(for: conversationId),
-            messageUpdateWasSynced: model.messageUpdateWasSynced(for: conversationId),
-            historyPageRevision: model.historyPageRevision(for: conversationId),
-            historyPageRenderedRowsAdded:
-                model.historyPageRenderedRowsAdded(for: conversationId),
-            canLoadOlderHistory: model.canLoadOlderHistory(for: conversationId),
-            conversationId: conversationId,
-            isGroupchat: isGroupChat,
-            avatarPaths: model.avatars,
-            avatarRevision: model.avatarRevisionToken,
-            visualTopInset: topChromeInset,
-            visualBottomInset: bottomChromeInset,
-            visualScrollIndicatorTopInset: scrollIndicatorTopInset,
-            visualScrollIndicatorBottomInset: scrollIndicatorBottomInset,
-            model: model,
-            isAtBottom: $isAtBottom,
-            scrollToBottomToken: scrollToBottomToken,
-            onEdit: editFromList,
-            onReply: { m in editing = nil; replyingTo = m },
-            onImageTap: { path in viewerItem = ImageViewerItem(id: path) },
-            onVideoTap: { path in videoViewerItem = VideoViewerItem(id: path) },
-            onLoadOlder: { model.requestOlderMessages(conversationId) },
-            onActions: { m in actionMsg = m }
-        )
-        .id(conversationId)
-        .ignoresSafeArea(.container, edges: .vertical)
-        .overlay(alignment: .bottomTrailing) {
+        ZStack(alignment: .bottomTrailing) {
+            SwiftUIMessageList(
+                messages: chatMessages,
+                messageRevision: model.messageRevision(for: conversationId),
+                messageUpdateWasSynced: model.messageUpdateWasSynced(for: conversationId),
+                historyPageRevision: model.historyPageRevision(for: conversationId),
+                historyPageRenderedRowsAdded:
+                    model.historyPageRenderedRowsAdded(for: conversationId),
+                canLoadOlderHistory: model.canLoadOlderHistory(for: conversationId),
+                conversationId: conversationId,
+                isGroupchat: isGroupChat,
+                avatarPaths: model.avatars,
+                avatarRevision: model.avatarRevisionToken,
+                visualTopInset: topChromeInset,
+                visualBottomInset: bottomChromeInset,
+                visualScrollIndicatorTopInset: scrollIndicatorTopInset,
+                visualScrollIndicatorBottomInset: scrollIndicatorBottomInset,
+                model: model,
+                isAtBottom: $isAtBottom,
+                scrollToBottomToken: scrollToBottomToken,
+                onEdit: editFromList,
+                onReply: { m in editing = nil; replyingTo = m },
+                onImageTap: { path in openMediaViewer(.image(path)) },
+                onVideoTap: { path in openMediaViewer(.video(path)) },
+                onLoadOlder: { model.requestOlderMessages(conversationId) },
+                onActions: { m in actionMsg = m }
+            )
+            .id(conversationId)
+            .ignoresSafeArea(.container, edges: .vertical)
+
             if !isAtBottom {
                 scrollDownButton(bottomPadding: scrollButtonBottomPadding)
+                    .zIndex(1)
             }
         }
         .animation(.snappy(duration: 0.2), value: isAtBottom)
@@ -1883,20 +2006,38 @@ struct ChatView: View {
     }
 
     private func scrollDownButton(bottomPadding: CGFloat) -> some View {
+#if targetEnvironment(macCatalyst)
         Button {
-            scrollToBottomToken &+= 1   // the inverted table glides to row 0
+            scrollToBottomToken &+= 1
+        } label: {
+            Image(systemName: "chevron.down")
+                .frame(width: floatingButtonSize, height: floatingButtonSize)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .controlSize(.regular)
+        .accessibilityLabel("Scroll to latest messages")
+        .padding(.trailing, composerHorizontalPadding)
+        .padding(.bottom, bottomPadding)
+        .transition(.scale(scale: 0.5).combined(with: .opacity))
+#else
+        Button {
+            scrollToBottomToken &+= 1
         } label: {
             Image(systemName: "chevron.down")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Color.primary)
                 .frame(width: floatingButtonSize, height: floatingButtonSize)
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .circle)
-        .contentShape(.circle)
         .accessibilityLabel("Scroll to latest messages")
         .padding(.trailing, composerHorizontalPadding)
         .padding(.bottom, bottomPadding)
         .transition(.scale(scale: 0.5).combined(with: .opacity))
+#endif
     }
 
     @ToolbarContentBuilder
@@ -1904,6 +2045,38 @@ struct ChatView: View {
         ToolbarItem(placement: .principal) {
             chatTitleItem
         }
+#if targetEnvironment(macCatalyst)
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Menu {
+                notifyOption("All messages", "on")
+                if isGroupChat {
+                    notifyOption("Only when mentioned", "highlight")
+                }
+                notifyOption("Off", "off")
+            } label: {
+                Label("Notifications", systemImage: bellIcon)
+            }
+            .labelStyle(.iconOnly)
+
+            if isGroupChat {
+                Button {
+                    model.requestOccupants(conversationId)
+                    showOccupants = true
+                } label: {
+                    Label("Participants", systemImage: "person.2")
+                }
+                .labelStyle(.iconOnly)
+            }
+
+            Button {
+                toggleEncryption()
+            } label: {
+                Label(lockAccessibilityLabel, systemImage: lockIcon)
+                    .foregroundStyle(lockTint)
+            }
+            .labelStyle(.iconOnly)
+        }
+#else
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
                 notifyOption("All messages", "on")
@@ -1936,6 +2109,7 @@ struct ChatView: View {
             }
             .accessibilityLabel(lockAccessibilityLabel)
         }
+#endif
     }
 
     /// The tappable avatar+name shown in the navigation bar's principal slot.
@@ -2126,18 +2300,12 @@ struct ChatView: View {
             }
             .environmentObject(model)
         }
-        .fullScreenCover(item: $viewerItem) { item in
-            ImageViewer(path: item.path)
-        }
-        .fullScreenCover(item: $videoViewerItem) { item in
-            VideoViewer(path: item.path)
-        }
         .sheet(item: $actionMsg) { m in
             reactionSheet(for: m)
         }
         .onChange(of: model.viewerRequest) { _, path in
             if let path {
-                viewerItem = ImageViewerItem(id: path)
+                openMediaViewer(.image(path))
                 model.viewerRequest = nil
             }
         }

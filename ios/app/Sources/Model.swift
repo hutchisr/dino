@@ -162,6 +162,7 @@ final class AppModel: ObservableObject {
     @Published var sendTyping = true
     @Published var sendMarker = true
     @Published var viewerRequest: String?   // used by UI automation to open the image viewer
+    @Published var mediaViewerItem: MediaViewerItem?
     @Published var accountAlias: String = ""
     @Published var omemoDeviceId: Int = 0
     @Published var omemoFingerprint: String = ""
@@ -571,8 +572,10 @@ final class AppModel: ObservableObject {
                     accounts.append(XmppAccount(id: jid, state: state))
                 }
                 if state == "CONNECTED" {
+#if !targetEnvironment(macCatalyst)
                     PushRegistration.start()
                     PushRegistration.enableOnServer()
+#endif
                     runConnectedAutomation()
                     // The libdino auto-rejoin runs on a worker thread where it's
                     // unreliable; drive it from here once the rejoins should

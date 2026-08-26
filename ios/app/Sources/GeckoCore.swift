@@ -22,6 +22,16 @@ final class GeckoCore {
         setenv("XDG_DATA_HOME", dirs.data, 1)
         setenv("XDG_CONFIG_HOME", dirs.config, 1)
         setenv("XDG_CACHE_HOME", dirs.cache, 1)
+#if targetEnvironment(macCatalyst)
+        // GLib was cross-compiled under the source tree, so its compiled GIO
+        // module directory points into ~/Documents. The TLS backend is linked
+        // and registered statically; scan the read-only app resources instead
+        // so macOS never asks for Documents access on each newly signed build.
+        if let resources = Bundle.main.resourcePath {
+            setenv("GIO_MODULE_DIR", resources, 1)
+        }
+        unsetenv("GIO_EXTRA_MODULES")
+#endif
         dino_ios_init_glib_tls()
         dino_ios_start(eventTrampoline, Unmanaged.passRetained(self).toOpaque(), releaseContext)
     }

@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // Must be set before launch finishes to receive notification responses.
         UNUserNotificationCenter.current().delegate = self
 #if targetEnvironment(macCatalyst)
+        MacLocalNotifications.start()
         persistenceActivity = ProcessInfo.processInfo.beginActivity(
             options: [.automaticTerminationDisabled, .suddenTerminationDisabled],
             reason: "Keep the XMPP connection available for notifications"
@@ -127,6 +128,24 @@ enum MacLocalNotifications {
         appIsActive = active
     }
 
+    static func start() {
+        UNUserNotificationCenter.current().requestAuthorization(
+            options: [.alert, .sound, .badge]
+        ) { _, _ in }
+    }
+
+    private static var applicationIsActive: Bool {
+        guard let applicationClass = NSClassFromString("NSApplication") as? NSObject.Type,
+              let application = applicationClass
+                .perform(NSSelectorFromString("sharedApplication"))?
+                .takeUnretainedValue() as? NSObject,
+              let active = application.value(forKey: "active") as? Bool
+        else {
+            return appIsActive
+        }
+        return active
+    }
+
     static func post(
         message: ChatMessage,
         conversation: XmppConversation,
@@ -134,7 +153,7 @@ enum MacLocalNotifications {
         isSynced: Bool
     ) {
         let input = LocalNotificationPolicyInput(
-            appIsActive: appIsActive,
+            appIsActive: applicationIsActive,
             isNew: isNew,
             isSynced: isSynced,
             direction: message.direction,

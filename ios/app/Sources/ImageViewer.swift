@@ -2,18 +2,29 @@ import SwiftUI
 import UIKit
 import AVKit
 
-struct ImageViewerItem: Identifiable {
-    let id: String
-    var path: String { id }
-}
+enum MediaViewerItem: Codable, Hashable, Identifiable {
+    case image(String)
+    case video(String)
 
-struct VideoViewerItem: Identifiable {
-    let id: String
-    var path: String { id }
+    static let windowGroupID = "media-viewer-v2"
+
+    var id: String {
+        switch self {
+        case .image(let path): return "image:\(path)"
+        case .video(let path): return "video:\(path)"
+        }
+    }
+
+    var path: String {
+        switch self {
+        case .image(let path), .video(let path): return path
+        }
+    }
 }
 
 struct ImageViewer: View {
     let path: String
+    var onDismiss: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
@@ -24,13 +35,21 @@ struct ImageViewer: View {
         return max(1200, min(4096, Int((longestSide * displayScale * 2).rounded())))
     }
 
+    private func closeViewer() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
+        }
+    }
+
     var body: some View {
         GeometryReader { geo in
             let pixelBudget = maxPixel(for: geo.size)
             NavigationStack {
                 Group {
                     if let image {
-                        ZoomableImageView(image: image, onSwipeDismiss: { dismiss() })
+                        ZoomableImageView(image: image, onSwipeDismiss: closeViewer)
                             .ignoresSafeArea()
                             .background(Color.black)
                     } else if failed {
@@ -41,21 +60,36 @@ struct ImageViewer: View {
                     }
                 }
                 .background(Color.black)
+                .navigationTitle("")
                 .toolbar {
+#if targetEnvironment(macCatalyst)
+                    ToolbarItem(placement: .primaryAction) {
+                        ShareLink(item: URL(fileURLWithPath: path)) {
+                            Image(systemName: "square.and.arrow.up")
+                                .frame(width: 36, height: 36)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+#else
                     ToolbarItem(placement: .cancellationAction) {
                         Button {
-                            dismiss()
+                            closeViewer()
                         } label: {
                             Image(systemName: "xmark")
                         }
+                        .accessibilityLabel("Close")
                     }
                     ToolbarItem(placement: .primaryAction) {
                         ShareLink(item: URL(fileURLWithPath: path)) {
                             Image(systemName: "square.and.arrow.up")
                         }
                     }
+#endif
                 }
-                .toolbarBackground(.black.opacity(0.6), for: .navigationBar)
+                .toolbarBackground(.hidden, for: .navigationBar)
                 .toolbarColorScheme(.dark, for: .navigationBar)
             }
             .task(id: "\(path)@\(pixelBudget)") {
@@ -63,6 +97,7 @@ struct ImageViewer: View {
             }
         }
         .background(Color.black)
+        .preferredColorScheme(.dark)
     }
 
     private func loadImage(maxPixel: Int) async {
@@ -85,11 +120,20 @@ struct ImageViewer: View {
 
 struct VideoViewer: View {
     let path: String
+    var onDismiss: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
 
     private var url: URL {
         URL(fileURLWithPath: path)
+    }
+
+    private func closeViewer() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
+        }
     }
 
     var body: some View {
@@ -99,24 +143,40 @@ struct VideoViewer: View {
                 VideoPlayer(player: player)
                     .ignoresSafeArea()
             }
+            .navigationTitle("")
             .toolbar {
+#if targetEnvironment(macCatalyst)
+                ToolbarItem(placement: .primaryAction) {
+                    ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up")
+                            .frame(width: 36, height: 36)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                }
+                .sharedBackgroundVisibility(.hidden)
+#else
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
-                        dismiss()
+                        closeViewer()
                     } label: {
                         Image(systemName: "xmark")
                     }
+                    .accessibilityLabel("Close")
                 }
                 ToolbarItem(placement: .primaryAction) {
                     ShareLink(item: url) {
                         Image(systemName: "square.and.arrow.up")
                     }
                 }
+#endif
             }
-            .toolbarBackground(.black.opacity(0.6), for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .background(Color.black)
+        .preferredColorScheme(.dark)
         .onAppear {
             let p = AVPlayer(url: url)
             player = p
