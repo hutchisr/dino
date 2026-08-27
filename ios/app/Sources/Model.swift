@@ -171,6 +171,7 @@ final class AppModel: ObservableObject {
     /// user to confirm creating it.
     @Published var pendingMucCreate: PendingMucCreate?
     @Published var newMessagePresented = false
+    @Published var accountSettingsPresented = false
 
     private var pendingChatJid: String?
     private var requestedAvatars = Set<String>()

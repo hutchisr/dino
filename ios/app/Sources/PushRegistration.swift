@@ -31,6 +31,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // Must be set before launch finishes to receive notification responses.
         UNUserNotificationCenter.current().delegate = self
 #if targetEnvironment(macCatalyst)
+        let searchBar = UISearchBar.appearance()
+        let searchContentOffset = UIOffset(horizontal: 0, vertical: 3)
+        searchBar.searchTextPositionAdjustment = searchContentOffset
+        searchBar.setPositionAdjustment(searchContentOffset, for: .search)
         MacLocalNotifications.start()
         persistenceActivity = ProcessInfo.processInfo.beginActivity(
             options: [.automaticTerminationDisabled, .suddenTerminationDisabled],

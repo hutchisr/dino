@@ -6,6 +6,11 @@ INFOPLIST_FILE = ios/app/Info.plist
 INFOPLIST_FILE[sdk=macosx*] = ios/app/Info-Catalyst.plist
 CODE_SIGN_ENTITLEMENTS = ios/app/Gecko.entitlements
 CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = ios/app/GeckoCatalyst.entitlements
+CODE_SIGN_ENTITLEMENTS[config=Debug][sdk=macosx*] = ios/app/GeckoCatalystDebug.entitlements
+CODE_SIGN_STYLE[sdk=macosx*] = Manual
+CODE_SIGN_IDENTITY[sdk=macosx*] = -
+DEVELOPMENT_TEAM[sdk=macosx*] =
+PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*] =
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 INFOPLIST_KEY_LSMinimumSystemVersion[sdk=macosx*] = 26.0
 INFOPLIST_KEY_NSHighResolutionCapable[sdk=macosx*] = YES
