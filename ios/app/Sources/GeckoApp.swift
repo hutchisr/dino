@@ -141,6 +141,14 @@ enum CatalystWindowLifecycle {
     private static var proxies: [ObjectIdentifier: CatalystWindowDelegateProxy] = [:]
     private static var applicationProxy: CatalystApplicationDelegateProxy?
     private static var hiddenWindow: NSObject?
+    private static var visibilityHandler: ((Bool) -> Void)?
+
+    static var isVisible: Bool { hiddenWindow == nil }
+
+    static func setVisibilityHandler(_ handler: @escaping (Bool) -> Void) {
+        visibilityHandler = handler
+        handler(isVisible)
+    }
 
     static func install() {
         guard let applicationClass = NSClassFromString("NSApplication") as? NSObject.Type,
@@ -180,6 +188,7 @@ enum CatalystWindowLifecycle {
         CatalystWindowSize.save()
         MacLocalNotifications.setAppIsActive(false)
         hiddenWindow = window
+        visibilityHandler?(false)
         window.perform(NSSelectorFromString("orderOut:"), with: nil)
     }
 
@@ -189,6 +198,7 @@ enum CatalystWindowLifecycle {
         MacLocalNotifications.setAppIsActive(true)
         PushRegistration.clearDelivered()
         window.perform(NSSelectorFromString("makeKeyAndOrderFront:"), with: nil)
+        visibilityHandler?(true)
     }
 }
 
@@ -239,9 +249,15 @@ struct GeckoApp: App {
             .environmentObject(model)
             .onAppear {
                 model.boot()
+                model.setApplicationActive(scenePhase == .active)
                 AppDelegate.setOpenHandler { jid in model.openChat(with: jid) }
 #if targetEnvironment(macCatalyst)
                 configureDesktopWindow()
+                CatalystWindowLifecycle.setVisibilityHandler { visible in
+                    model.setApplicationActive(
+                        visible && UIApplication.shared.applicationState == .active
+                    )
+                }
 #endif
             }
     }
@@ -336,6 +352,7 @@ struct GeckoApp: App {
         }
         .onChange(of: scenePhase) { _, phase in
             MacLocalNotifications.setAppIsActive(phase == .active)
+            model.setApplicationActive(phase == .active && CatalystWindowLifecycle.isVisible)
             if phase != .active {
                 CatalystWindowSize.save()
             }
@@ -352,6 +369,7 @@ struct GeckoApp: App {
             appContent
         }
         .onChange(of: scenePhase) { _, phase in
+            model.setApplicationActive(phase == .active)
             switch phase {
             case .active:
                 // Cancel any pending background-disconnect (quick toggle) and

@@ -147,7 +147,9 @@ final class AppModel: ObservableObject {
     @Published var conversations: [XmppConversation] = []
     @Published var messages: [Int32: [ChatMessage]] = [:]
     @Published var lastError: String?
-    @Published var navigation: [Int32] = []
+    @Published var navigation: [Int32] = [] {
+        didSet { reconcileConversationFocus() }
+    }
     @Published var roster: [RosterContact] = []
     @Published var subscriptionRequests: [String] = []
     @Published var avatars: [String: String] = [:]      // bare jid -> file path
@@ -189,6 +191,8 @@ final class AppModel: ObservableObject {
     private var avatarRevision = 0
 
     private var booted = false
+    private var applicationIsActive = false
+    private var conversationFocus = ConversationFocusState()
 
     var hasAccount: Bool { !accounts.isEmpty }
     var connected: Bool { accounts.contains { $0.state == "CONNECTED" } }
@@ -298,12 +302,34 @@ final class AppModel: ObservableObject {
         GeckoCore.shared.requestState()
     }
 
+    func setApplicationActive(_ active: Bool) {
+        applicationIsActive = active
+        reconcileConversationFocus()
+    }
+
     func focusConversation(_ id: Int32) {
-        GeckoCore.shared.focusConversation(id)
+        guard applicationIsActive, navigation.last == id else { return }
+        applyConversationFocus(conversationFocus.transition(to: id))
     }
 
     func blurConversation(_ id: Int32) {
-        GeckoCore.shared.blurConversation(id)
+        applyConversationFocus(conversationFocus.conversationDisappeared(id))
+    }
+
+    private func reconcileConversationFocus() {
+        let conversation = applicationIsActive ? navigation.last : nil
+        applyConversationFocus(conversationFocus.transition(to: conversation))
+    }
+
+    private func applyConversationFocus(_ actions: [ConversationFocusAction]) {
+        for action in actions {
+            switch action {
+            case .blur(let id):
+                GeckoCore.shared.blurConversation(id)
+            case .focus(let id):
+                GeckoCore.shared.focusConversation(id)
+            }
+        }
     }
 
     func setTyping(_ id: Int32, _ typing: Bool) {
