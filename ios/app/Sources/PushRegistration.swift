@@ -126,7 +126,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 #if targetEnvironment(macCatalyst)
 @MainActor
 enum MacLocalNotifications {
-    private static var appIsActive = true
+    /// True while the chat window is both frontmost and actually on screen.
+    /// Fed by the app scene: AppKit's own `NSApplication.isActive` cannot see
+    /// that closing the window only hid it, so it would suppress every banner
+    /// while Gecko sits in the Dock with no visible window.
+    private static var appIsActive = false
 
     static func setAppIsActive(_ active: Bool) {
         appIsActive = active
@@ -138,18 +142,6 @@ enum MacLocalNotifications {
         ) { _, _ in }
     }
 
-    private static var applicationIsActive: Bool {
-        guard let applicationClass = NSClassFromString("NSApplication") as? NSObject.Type,
-              let application = applicationClass
-                .perform(NSSelectorFromString("sharedApplication"))?
-                .takeUnretainedValue() as? NSObject,
-              let active = application.value(forKey: "active") as? Bool
-        else {
-            return appIsActive
-        }
-        return active
-    }
-
     static func post(
         message: ChatMessage,
         conversation: XmppConversation,
@@ -157,7 +149,7 @@ enum MacLocalNotifications {
         isSynced: Bool
     ) {
         let input = LocalNotificationPolicyInput(
-            appIsActive: applicationIsActive,
+            appIsActive: appIsActive,
             isNew: isNew,
             isSynced: isSynced,
             direction: message.direction,

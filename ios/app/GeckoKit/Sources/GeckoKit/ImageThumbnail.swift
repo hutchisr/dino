@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import ImageIO
 
 /// Decoded, downsampled thumbnails for inline chat image previews, plus the
 /// up-front sizing math that lets a row reserve its final height before the
@@ -16,11 +17,46 @@ enum ThumbnailLoader {
         return CGSize(width: (source.width * scale).rounded(),
                       height: (source.height * scale).rounded())
     }
+
+    private static let sizeCache = NSCache<NSString, SizeBox>()
+
+    /// Pixel dimensions of an image read from its header only — no full decode,
+    /// so it's cheap enough to call synchronously while a row lays out. EXIF
+    /// orientation is honoured (portrait photos store landscape pixels + a
+    /// rotate tag), so the returned size is the displayed orientation. Cached;
+    /// a `.zero` sentinel records "no dimensions" to avoid re-reading bad files.
+    /// Foundation + ImageIO only, so the host `swift test` build exercises it.
+    public static func pixelSize(path: String) -> CGSize? {
+        let k = "size:\(path)" as NSString
+        if let v = sizeCache.object(forKey: k) {
+            return v.size == .zero ? nil : v.size
+        }
+        let url = URL(fileURLWithPath: path) as CFURL
+        let opt = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let src = CGImageSourceCreateWithURL(url, opt),
+              let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? CGFloat,
+              let h = props[kCGImagePropertyPixelHeight] as? CGFloat, w > 0, h > 0 else {
+            sizeCache.setObject(SizeBox(.zero), forKey: k)
+            return nil
+        }
+        // Orientations 5–8 are the 90°-rotated cases: swap to get display size.
+        let orientation = (props[kCGImagePropertyOrientation] as? UInt32) ?? 1
+        let size = orientation >= 5 ? CGSize(width: h, height: w) : CGSize(width: w, height: h)
+        sizeCache.setObject(SizeBox(size), forKey: k)
+        return size
+    }
+}
+
+/// NSCache stores class references only, and `NSValue(cgSize:)` is iOS-only —
+/// this box is what lets the size cache compile on the macOS host build too.
+private final class SizeBox {
+    let size: CGSize
+    init(_ size: CGSize) { self.size = size }
 }
 
 #if canImport(UIKit)
 import UIKit
-import ImageIO
 import AVFoundation
 
 /// Why the cache exists: a chat row's SwiftUI body re-evaluates constantly while
@@ -30,8 +66,8 @@ import AVFoundation
 /// image. Here the decode happens once, off the main thread, downsampled to the
 /// preview size, and the result is cached; subsequent renders are a cache hit.
 ///
-/// UIKit/ImageIO-only, so excluded from the host `swift test` build (the iOS
-/// Simulator run exercises it).
+/// UIKit/AVFoundation-only, so excluded from the host `swift test` build (the
+/// iOS Simulator run exercises it).
 extension ThumbnailLoader {
     private static let cache: NSCache<NSString, UIImage> = {
         let c = NSCache<NSString, UIImage>()
@@ -57,34 +93,6 @@ extension ThumbnailLoader {
 
     private static func videoKey(_ path: String, _ maxPixel: Int) -> NSString {
         "video:\(path)@\(maxPixel)" as NSString
-    }
-
-    /// Pixel dimensions of an image read from its header only — no full decode,
-    /// so it's cheap enough to call synchronously while a row lays out. EXIF
-    /// orientation is honoured (portrait photos store landscape pixels + a
-    /// rotate tag), so the returned size is the displayed orientation. Cached;
-    /// a `.zero` sentinel records "no dimensions" to avoid re-reading bad files.
-    private static let sizeCache = NSCache<NSString, NSValue>()
-    public static func pixelSize(path: String) -> CGSize? {
-        let k = "size:\(path)" as NSString
-        if let v = sizeCache.object(forKey: k) {
-            let s = v.cgSizeValue
-            return s == .zero ? nil : s
-        }
-        let url = URL(fileURLWithPath: path) as CFURL
-        let opt = [kCGImageSourceShouldCache: false] as CFDictionary
-        guard let src = CGImageSourceCreateWithURL(url, opt),
-              let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
-              let w = props[kCGImagePropertyPixelWidth] as? CGFloat,
-              let h = props[kCGImagePropertyPixelHeight] as? CGFloat, w > 0, h > 0 else {
-            sizeCache.setObject(NSValue(cgSize: .zero), forKey: k)
-            return nil
-        }
-        // Orientations 5–8 are the 90°-rotated cases: swap to get display size.
-        let orientation = (props[kCGImagePropertyOrientation] as? UInt32) ?? 1
-        let size = orientation >= 5 ? CGSize(width: h, height: w) : CGSize(width: w, height: h)
-        sizeCache.setObject(NSValue(cgSize: size), forKey: k)
-        return size
     }
 
     /// Cache-only lookup (no decode). Synchronous and cheap — use it to seed a

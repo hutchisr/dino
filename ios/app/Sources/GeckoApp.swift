@@ -6,6 +6,18 @@ enum ChatLayout {
     static let horizontalPadding: CGFloat = 16
 }
 
+extension View {
+    /// Sheets float as free-standing panels on the Mac, where the iPhone-derived
+    /// default width reads as a narrow strip. No-op elsewhere.
+    func macDialogWidth() -> some View {
+#if targetEnvironment(macCatalyst)
+        frame(width: 560)
+#else
+        self
+#endif
+    }
+}
+
 #if targetEnvironment(macCatalyst)
 private struct CatalystToolbarButtonStyle: ButtonStyle {
     @State private var isHovered = false
@@ -29,16 +41,17 @@ private enum CatalystWindowSize {
     private static let widthKey = "macWindowContentWidth"
     private static let heightKey = "macWindowContentHeight"
     private static let fallback = CGSize(width: 1_100, height: 760)
-    private static let minimum = CGSize(width: 820, height: 600)
-    private static let maximum = CGSize(width: 4_096, height: 4_096)
-        private static var runningInPreview: Bool {
-            ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
-        }
+    static let minimum = CGSize(width: 820, height: 600)
+    static let maximum = CGSize(width: 4_096, height: 4_096)
+
+    private static var runningInPreview: Bool {
+        ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
+    }
 
     static var current = restored
 
     static var restored: CGSize {
-            guard !runningInPreview else { return fallback }
+        guard !runningInPreview else { return fallback }
         let defaults = UserDefaults.standard
         let size = CGSize(
             width: defaults.double(forKey: widthKey),
@@ -68,7 +81,7 @@ private enum CatalystWindowSize {
     }
 
     static func save() {
-            guard !runningInPreview else { return }
+        guard !runningInPreview else { return }
         let defaults = UserDefaults.standard
         defaults.set(current.width, forKey: widthKey)
         defaults.set(current.height, forKey: heightKey)
@@ -115,8 +128,8 @@ private final class CatalystApplicationDelegateProxy: NSObject {
 
     @objc(applicationShouldHandleReopen:hasVisibleWindows:)
     private func applicationShouldHandleReopen(
-        _ sender: NSObject,
-        hasVisibleWindows: Bool
+        _: NSObject,
+        hasVisibleWindows _: Bool
     ) -> Bool {
         CatalystWindowLifecycle.reopenIfNeeded()
         return true
@@ -186,7 +199,6 @@ enum CatalystWindowLifecycle {
 
     static func hideInsteadOfClosing(_ window: NSObject) {
         CatalystWindowSize.save()
-        MacLocalNotifications.setAppIsActive(false)
         hiddenWindow = window
         visibilityHandler?(false)
         window.perform(NSSelectorFromString("orderOut:"), with: nil)
@@ -195,7 +207,6 @@ enum CatalystWindowLifecycle {
     static func reopenIfNeeded() {
         guard let window = hiddenWindow else { return }
         hiddenWindow = nil
-        MacLocalNotifications.setAppIsActive(true)
         PushRegistration.clearDelivered()
         window.perform(NSSelectorFromString("makeKeyAndOrderFront:"), with: nil)
         visibilityHandler?(true)
@@ -203,7 +214,7 @@ enum CatalystWindowLifecycle {
 }
 
 private struct CatalystMediaWindowConfigurator: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIView {
+    func makeUIView(context _: Context) -> UIView {
         let view = UIView(frame: .zero)
         DispatchQueue.main.async {
             configure(view)
@@ -211,7 +222,7 @@ private struct CatalystMediaWindowConfigurator: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ view: UIView, context: Context) {
+    func updateUIView(_ view: UIView, context _: Context) {
         DispatchQueue.main.async {
             configure(view)
         }
@@ -222,7 +233,7 @@ private struct CatalystMediaWindowConfigurator: UIViewRepresentable {
         scene.titlebar?.titleVisibility = .hidden
         guard let restrictions = scene.sizeRestrictions else { return }
         restrictions.minimumSize = CGSize(width: 480, height: 320)
-        restrictions.maximumSize = CGSize(width: 4_096, height: 4_096)
+        restrictions.maximumSize = CatalystWindowSize.maximum
         restrictions.allowsFullScreen = true
     }
 }
@@ -253,8 +264,10 @@ struct GeckoApp: App {
                 AppDelegate.setOpenHandler { jid in model.openChat(with: jid) }
 #if targetEnvironment(macCatalyst)
                 configureDesktopWindow()
+                // Fires immediately with the current visibility, which is also
+                // the only place the initial desktop activity is published.
                 CatalystWindowLifecycle.setVisibilityHandler { visible in
-                    model.setApplicationActive(
+                    setDesktopActive(
                         visible && UIApplication.shared.applicationState == .active
                     )
                 }
@@ -263,6 +276,14 @@ struct GeckoApp: App {
     }
 
 #if targetEnvironment(macCatalyst)
+    /// "The user can actually see this chat window": frontmost AND not hidden
+    /// by a window close, which on the Mac only orders the window out. Both the
+    /// unread bookkeeping and notification suppression key off this.
+    private func setDesktopActive(_ active: Bool) {
+        model.setApplicationActive(active)
+        MacLocalNotifications.setAppIsActive(active)
+    }
+
     private func configureDesktopWindow() {
         // SwiftUI's contentMinSize currently gives Catalyst identical minimum
         // and maximum sizes. Override only the maximum after scene creation so
@@ -270,8 +291,8 @@ struct GeckoApp: App {
         DispatchQueue.main.async {
             for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
                 guard let restrictions = scene.sizeRestrictions else { continue }
-                restrictions.minimumSize = CGSize(width: 820, height: 600)
-                restrictions.maximumSize = CGSize(width: 4_096, height: 4_096)
+                restrictions.minimumSize = CatalystWindowSize.minimum
+                restrictions.maximumSize = CatalystWindowSize.maximum
                 restrictions.allowsFullScreen = true
             }
             CatalystWindowLifecycle.install()
@@ -308,7 +329,10 @@ struct GeckoApp: App {
         let restoredSize = CatalystWindowSize.restored
         return WindowGroup {
             appContent
-                .frame(minWidth: 820, minHeight: 600)
+                .frame(
+                    minWidth: CatalystWindowSize.minimum.width,
+                    minHeight: CatalystWindowSize.minimum.height
+                )
                 .onGeometryChange(for: CGSize.self) { proxy in
                     proxy.size
                 } action: { size in
@@ -342,17 +366,17 @@ struct GeckoApp: App {
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(model.navigation.isEmpty)
             }
-                CommandGroup(replacing: .appSettings) {
-                    Button("Settings…") {
-                        model.accountSettingsPresented = true
-                    }
-                    .keyboardShortcut(",", modifiers: .command)
-                    .disabled(!model.ready || !model.hasAccount)
+
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    model.accountSettingsPresented = true
                 }
+                .keyboardShortcut(",", modifiers: .command)
+                .disabled(!model.ready || !model.hasAccount)
+            }
         }
         .onChange(of: scenePhase) { _, phase in
-            MacLocalNotifications.setAppIsActive(phase == .active)
-            model.setApplicationActive(phase == .active && CatalystWindowLifecycle.isVisible)
+            setDesktopActive(phase == .active && CatalystWindowLifecycle.isVisible)
             if phase != .active {
                 CatalystWindowSize.save()
             }
@@ -404,7 +428,6 @@ private enum GeckoPreviewFixtures {
     static let conversations: [XmppConversation] = [
         XmppConversation(
             id: 1,
-            account: "rachel@example.org",
             jid: "anemone@xmpp.is",
             name: "Anemone",
             encryption: "OMEMO",
@@ -414,12 +437,10 @@ private enum GeckoPreviewFixtures {
             preview: "Sent a few image-heavy test messages",
             previewDirection: "in",
             time: Date().addingTimeInterval(-180),
-            notify: "default",
             notifyEffective: "on"
         ),
         XmppConversation(
             id: 2,
-            account: "rachel@example.org",
             jid: "gecko@conference.example.org",
             name: "Gecko Dev",
             encryption: "",
@@ -429,12 +450,10 @@ private enum GeckoPreviewFixtures {
             preview: "I will test the new composer layout",
             previewDirection: "out",
             time: Date().addingTimeInterval(-3600),
-            notify: "default",
             notifyEffective: "highlight"
         ),
         XmppConversation(
             id: 3,
-            account: "rachel@example.org",
             jid: "offline@example.org",
             name: "Offline Contact",
             encryption: "",
@@ -444,7 +463,6 @@ private enum GeckoPreviewFixtures {
             preview: "See you later",
             previewDirection: "in",
             time: Date().addingTimeInterval(-86400),
-            notify: "default",
             notifyEffective: "off"
         ),
     ]
@@ -684,14 +702,12 @@ private enum GeckoPreviewFixtures {
         model.roster = [
             RosterContact(
                 id: "anemone@xmpp.is",
-                account: "rachel@example.org",
                 name: "Anemone",
                 subscription: "both",
                 show: "online"
             ),
             RosterContact(
                 id: "offline@example.org",
-                account: "rachel@example.org",
                 name: "Offline Contact",
                 subscription: "both",
                 show: "offline"
@@ -967,14 +983,25 @@ struct ConversationListView: View {
         .accessibilityLabel("Account")
     }
 
-    private var platformList: some View {
-        List {
-            ListContents()
+    /// The Join channel / Account entries behind the toolbar's "More" menu.
+    @ViewBuilder
+    private var moreMenuContent: some View {
+        Button {
+            showJoinMuc = true
+        } label: {
+            Label("Join channel", systemImage: "person.2")
+        }
+        Button {
+            model.accountSettingsPresented = true
+        } label: {
+            Label("Account", systemImage: "person.crop.circle")
         }
     }
 
     private var list: some View {
-        platformList
+        List {
+            ListContents()
+        }
         .contentMargins(.horizontal, ChatLayout.horizontalPadding, for: .scrollContent)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Int32.self) { id in
@@ -987,66 +1014,48 @@ struct ConversationListView: View {
                     accountButton(for: account)
                 }
             }
-                #if targetEnvironment(macCatalyst)
-                    ToolbarItem(placement: .topBarTrailing) {
-                        HStack(spacing: 0) {
-                            Button {
-                                model.presentNewMessage()
-                            } label: {
-                                Image(systemName: "square.and.pencil")
-                                    .frame(width: 32, height: 32)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(CatalystToolbarButtonStyle())
+#if targetEnvironment(macCatalyst)
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 0) {
+                    Button {
+                        model.presentNewMessage()
+                    } label: {
+                        Image(systemName: "square.and.pencil")
                             .frame(width: 32, height: 32)
-                            .contentShape(.interaction, Rectangle())
-                            .accessibilityLabel("New Message")
-
-                            Menu {
-                                Button {
-                                    showJoinMuc = true
-                                } label: {
-                                    Label("Join channel", systemImage: "person.2")
-                                }
-                                Button {
-                                    model.accountSettingsPresented = true
-                                } label: {
-                                    Label("Account", systemImage: "person.crop.circle")
-                                }
-                            } label: {
-                                Image(systemName: "ellipsis")
-                                    .frame(width: 32, height: 32)
-                                    .contentShape(Rectangle())
-                            }
-                            .menuIndicator(.hidden)
-                            .buttonStyle(.plain)
-                            .frame(width: 32, height: 32)
-                            .contentShape(.interaction, Rectangle())
-                            .accessibilityLabel("More")
-                        }
+                            .contentShape(Rectangle())
                     }
-                    .sharedBackgroundVisibility(.visible)
-                #else
+                    .buttonStyle(CatalystToolbarButtonStyle())
+                    .frame(width: 32, height: 32)
+                    .contentShape(.interaction, Rectangle())
+                    .accessibilityLabel("New Message")
+
+                    Menu {
+                        moreMenuContent
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .menuIndicator(.hidden)
+                    .buttonStyle(.plain)
+                    .frame(width: 32, height: 32)
+                    .contentShape(.interaction, Rectangle())
+                    .accessibilityLabel("More")
+                }
+            }
+            .sharedBackgroundVisibility(.visible)
+#else
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button("New Message", systemImage: "square.and.pencil", action: model.presentNewMessage)
                     .labelStyle(.iconOnly)
                 Menu {
-                    Button {
-                        showJoinMuc = true
-                    } label: {
-                        Label("Join channel", systemImage: "person.2")
-                    }
-                    Button {
-                                model.accountSettingsPresented = true
-                    } label: {
-                        Label("Account", systemImage: "person.crop.circle")
-                    }
+                    moreMenuContent
                 } label: {
                     Label("More", systemImage: "ellipsis.circle")
                         .labelStyle(.iconOnly)
                 }
             }
-                #endif
+#endif
         }
     }
 
@@ -1055,16 +1064,12 @@ struct ConversationListView: View {
         .sheet(isPresented: $model.newMessagePresented) {
             ContactsView(isPresented: $model.newMessagePresented)
                 .environmentObject(model)
-#if targetEnvironment(macCatalyst)
-                .frame(width: 560)
-#endif
+                .macDialogWidth()
         }
         .sheet(isPresented: $model.accountSettingsPresented) {
             AccountSettingsView(isPresented: $model.accountSettingsPresented)
                 .environmentObject(model)
-#if targetEnvironment(macCatalyst)
-                .frame(width: 560)
-#endif
+                .macDialogWidth()
         }
         .alert("Join channel", isPresented: $showJoinMuc) {
             TextField("room@conference.example.org", text: $mucJid)
@@ -1462,8 +1467,7 @@ private struct PendingFileSend {
             self.sizeLabel = ""
         }
         self.isImage = ThumbnailLoader.pixelSize(path: url.path) != nil
-        let ext = (url.lastPathComponent as NSString).pathExtension.lowercased()
-        self.isVideo = ["mp4", "m4v", "mov", "qt", "3gp", "3g2"].contains(ext)
+        self.isVideo = MediaFileKind.isVideo(fileName: self.name)
     }
 }
 
@@ -2022,7 +2026,6 @@ struct ChatView: View {
         ZStack(alignment: .bottomTrailing) {
             SwiftUIMessageList(
                 messages: chatMessages,
-                messageRevision: model.messageRevision(for: conversationId),
                 messageUpdateWasSynced: model.messageUpdateWasSynced(for: conversationId),
                 historyPageRevision: model.historyPageRevision(for: conversationId),
                 historyPageRenderedRowsAdded:
@@ -2031,7 +2034,6 @@ struct ChatView: View {
                 conversationId: conversationId,
                 isGroupchat: isGroupChat,
                 avatarPaths: model.avatars,
-                avatarRevision: model.avatarRevisionToken,
                 visualTopInset: topChromeInset,
                 visualBottomInset: bottomChromeInset,
                 visualScrollIndicatorTopInset: scrollIndicatorTopInset,
@@ -2162,69 +2164,72 @@ struct ChatView: View {
 #endif
     }
 
+    /// Per-conversation notification setting; identical on both platforms, only
+    /// its menu chrome differs.
+    @ViewBuilder
+    private var notifyMenuContent: some View {
+        notifyOption("All messages", "on")
+        if isGroupChat {
+            notifyOption("Only when mentioned", "highlight")
+        }
+        notifyOption("Off", "off")
+    }
+
+    private func showParticipants() {
+        model.requestOccupants(conversationId)
+        showOccupants = true
+    }
+
     @ToolbarContentBuilder
     private var chatToolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             chatTitleItem
         }
 #if targetEnvironment(macCatalyst)
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 0) {
-                    Menu {
-                        notifyOption("All messages", "on")
-                        if isGroupChat {
-                            notifyOption("Only when mentioned", "highlight")
-                        }
-                        notifyOption("Off", "off")
+        ToolbarItem(placement: .topBarTrailing) {
+            HStack(spacing: 0) {
+                Menu {
+                    notifyMenuContent
                 } label: {
-                        Image(systemName: bellIcon)
-                            .frame(width: 32, height: 32)
-                            .contentShape(Rectangle())
-                }
-                    .menuIndicator(.hidden)
-                    .buttonStyle(.plain)
-                    .frame(width: 32, height: 32)
-                    .contentShape(.interaction, Rectangle())
-                    .accessibilityLabel("Notifications")
-
-                    if isGroupChat {
-                        Button {
-                            model.requestOccupants(conversationId)
-                            showOccupants = true
-                        } label: {
-                            Image(systemName: "person.2")
-                                .frame(width: 32, height: 32)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(CatalystToolbarButtonStyle())
+                    Image(systemName: bellIcon)
                         .frame(width: 32, height: 32)
-                        .contentShape(.interaction, Rectangle())
-                        .accessibilityLabel("Participants")
-                    }
+                        .contentShape(Rectangle())
+                }
+                .menuIndicator(.hidden)
+                .buttonStyle(.plain)
+                .frame(width: 32, height: 32)
+                .contentShape(.interaction, Rectangle())
+                .accessibilityLabel("Notifications")
 
-                    Button {
-                        toggleEncryption()
-                    } label: {
-                        Image(systemName: lockIcon)
-                            .foregroundStyle(lockTint)
+                if isGroupChat {
+                    Button(action: showParticipants) {
+                        Image(systemName: "person.2")
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(CatalystToolbarButtonStyle())
                     .frame(width: 32, height: 32)
                     .contentShape(.interaction, Rectangle())
-                    .accessibilityLabel(lockAccessibilityLabel)
+                    .accessibilityLabel("Participants")
+                }
+
+                Button(action: toggleEncryption) {
+                    Image(systemName: lockIcon)
+                        .foregroundStyle(lockTint)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(CatalystToolbarButtonStyle())
+                .frame(width: 32, height: 32)
+                .contentShape(.interaction, Rectangle())
+                .accessibilityLabel(lockAccessibilityLabel)
             }
         }
-            .sharedBackgroundVisibility(.visible)
+        .sharedBackgroundVisibility(.visible)
 #else
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                notifyOption("All messages", "on")
-                if isGroupChat {
-                    notifyOption("Only when mentioned", "highlight")
-                }
-                notifyOption("Off", "off")
+                notifyMenuContent
             } label: {
                 Image(systemName: bellIcon)
             }
@@ -2232,19 +2237,14 @@ struct ChatView: View {
         }
         if isGroupChat {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    model.requestOccupants(conversationId)
-                    showOccupants = true
-                } label: {
+                Button(action: showParticipants) {
                     Image(systemName: "person.2")
                 }
                 .accessibilityLabel("Participants")
             }
         }
         ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                toggleEncryption()
-            } label: {
+            Button(action: toggleEncryption) {
                 Image(systemName: lockIcon)
                     .foregroundStyle(lockTint)
             }
@@ -2415,9 +2415,7 @@ struct ChatView: View {
                     if scoped { url.stopAccessingSecurityScopedResource() }
                     return
                 }
-                let dest = AttachmentStaging.temporaryCopyURL(for: url)
-                try? FileManager.default.removeItem(at: dest)
-                if (try? FileManager.default.copyItem(at: url, to: dest)) != nil {
+                if let dest = AttachmentStaging.stageCopy(of: url) {
                     setPendingFileSend(dest)
                 }
                 if scoped { url.stopAccessingSecurityScopedResource() }

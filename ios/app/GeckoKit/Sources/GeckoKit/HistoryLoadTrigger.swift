@@ -3,12 +3,6 @@
 /// prepend it waits for the preserved viewport's geometry before rearming, so
 /// layout changes cannot cascade through pages on their own.
 struct HistoryLoadTrigger {
-    enum Zone: Equatable {
-        case near
-        case middle
-        case away
-    }
-
     enum State: Equatable {
         case disabled
         case awaitingUserScroll
@@ -22,13 +16,6 @@ struct HistoryLoadTrigger {
 
     private(set) var state = State.disabled
     private(set) var triggerDistance = loadDistance
-    static func zone(distanceFromTop rawDistance: Double) -> Zone {
-        guard rawDistance.isFinite else { return .middle }
-        let distance = max(0, rawDistance)
-        if distance <= loadDistance { return .near }
-        if distance >= rearmDistance { return .away }
-        return .middle
-    }
 
     /// Unit anchor that keeps a visible row at the same vertical offset when
     /// SwiftUI repositions that stable ID after rows are prepended. The same
@@ -181,16 +168,6 @@ func shouldFollowNewestMessage(
     measuredAtBottom: Bool
 ) -> Bool {
     intent || measuredAtBottom
-}
-
-/// SwiftUI's resting lower scroll boundary. The bottom content margin remains
-/// slack outside this range, while the top margin shifts the content offset.
-func bottomContentOffset(
-    contentHeight: Double,
-    viewportHeight: Double,
-    topInset: Double
-) -> Double {
-    max(-topInset, contentHeight - viewportHeight - topInset)
 }
 
 /// Holds a composer-send scroll request until the asynchronously-created local

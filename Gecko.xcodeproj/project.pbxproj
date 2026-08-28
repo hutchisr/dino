@@ -21,6 +21,7 @@
 		A1B2C3D4E5F6478899AA0003 /* DebugLogging.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0013 /* DebugLogging.swift */; };
 		A1B2C3D4E5F6478899AA0004 /* TypingIndicatorText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0014 /* TypingIndicatorText.swift */; };
 		A1B2C3D4E5F6478899AA0005 /* HistoryPagination.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0015 /* HistoryPagination.swift */; };
+		A1B2C3D4E5F6478899AA0025 /* MediaFileKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0026 /* MediaFileKind.swift */; };
 		A1B2C3D4E5F6478899AA0006 /* HistoryLoadTrigger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0016 /* HistoryLoadTrigger.swift */; };
 		A1B2C3D4E5F6478899AA0007 /* BottomScrollAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0017 /* BottomScrollAnimation.swift */; };
 		A1B2C3D4E5F6478899AA0008 /* ScrollToBottomAnimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0018 /* ScrollToBottomAnimator.swift */; };
@@ -91,6 +92,7 @@
 		A1B2C3D4E5F6478899AA0013 /* DebugLogging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLogging.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6478899AA0014 /* TypingIndicatorText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypingIndicatorText.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6478899AA0015 /* HistoryPagination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryPagination.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6478899AA0026 /* MediaFileKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaFileKind.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6478899AA0016 /* HistoryLoadTrigger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryLoadTrigger.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6478899AA0017 /* BottomScrollAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomScrollAnimation.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6478899AA0018 /* ScrollToBottomAnimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollToBottomAnimator.swift; sourceTree = "<group>"; };
@@ -149,6 +151,7 @@
 				583D2717B8994C76AABDE233 /* ImageEncoding.swift */,
 				38386EE938FC4181A3DA8C74 /* ImageThumbnail.swift */,
 				A1B2C3D4E5F6478899AA0019 /* NewestMessageUpdatePolicy.swift */,
+				A1B2C3D4E5F6478899AA0026 /* MediaFileKind.swift */,
 				A0556F003C354589BE42AF2E /* MessageFormatting.swift */,
 				A1B2C3D4E5F6478899AA0012 /* PrivacyFormatting.swift */,
 				A1B2C3D4E5F6478899AA0014 /* TypingIndicatorText.swift */,
@@ -354,6 +357,7 @@
 				A1B2C3D4E5F6478899AA0006 /* HistoryLoadTrigger.swift in Sources */,
 				A1B2C3D4E5F6478899AA0005 /* HistoryPagination.swift in Sources */,
 				A1B2C3D4E5F6478899AA0009 /* NewestMessageUpdatePolicy.swift in Sources */,
+				A1B2C3D4E5F6478899AA0025 /* MediaFileKind.swift in Sources */,
 				A1B2C3D4E5F6478899AA0022 /* LocalNotificationPolicy.swift in Sources */,
 				A1B2C3D4E5F6478899AA0024 /* ConversationFocus.swift in Sources */,
 				E1060F31A33848E8A17F81BE /* ImageEncoding.swift in Sources */,

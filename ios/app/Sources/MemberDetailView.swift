@@ -49,8 +49,6 @@ struct MemberDetailView: View {
 
     private var iAmOwner: Bool { me?.isOwner ?? false }
     private var iAmAdmin: Bool { me?.isAdmin ?? false }
-    private var canModerate: Bool { (me?.isModerator ?? false) || iAmAdmin || iAmOwner }
-    private var canAffiliate: Bool { iAmOwner || iAmAdmin }
 
     private func rank(_ affiliation: String) -> Int {
         switch affiliation {
@@ -61,8 +59,10 @@ struct MemberDetailView: View {
         }
     }
 
-    /// Owners can manage anyone; admins only members/none (not other admins or
-    /// owners). Never yourself.
+    /// The single moderation gate: owners can manage anyone, admins only
+    /// members/none (not other admins or owners), and never yourself. Anyone
+    /// who passes it is an owner or admin, so they already hold both the
+    /// affiliation and moderation rights the individual actions need.
     private var canManageTarget: Bool {
         guard !occupant.isSelf else { return false }
         if iAmOwner { return true }
@@ -72,7 +72,7 @@ struct MemberDetailView: View {
 
     /// Voice is meaningful only for plain members/visitors, not staff or mods.
     private var canManageVoice: Bool {
-        canModerate && canManageTarget && !occupant.isModerator
+        canManageTarget && !occupant.isModerator
             && !occupant.isOwner && !occupant.isAdmin
     }
 
@@ -102,7 +102,7 @@ struct MemberDetailView: View {
                 }
             }
 
-            if canAffiliate && canManageTarget {
+            if canManageTarget {
                 Section("Role") {
                     if iAmOwner && !occupant.isOwner {
                         Button { run { setAffiliation("owner") } } label: { Label("Make owner", systemImage: "crown.fill") }
@@ -121,15 +121,11 @@ struct MemberDetailView: View {
 
             if canManageTarget {
                 Section {
-                    if canModerate {
-                        Button(role: .destructive) { confirmKick = true } label: {
-                            Label("Kick from room", systemImage: "door.left.hand.open")
-                        }
+                    Button(role: .destructive) { confirmKick = true } label: {
+                        Label("Kick from room", systemImage: "door.left.hand.open")
                     }
-                    if canAffiliate {
-                        Button(role: .destructive) { confirmBan = true } label: {
-                            Label("Ban from room", systemImage: "nosign")
-                        }
+                    Button(role: .destructive) { confirmBan = true } label: {
+                        Label("Ban from room", systemImage: "nosign")
                     }
                 }
             }

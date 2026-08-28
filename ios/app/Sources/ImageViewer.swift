@@ -2,23 +2,47 @@ import SwiftUI
 import UIKit
 import AVKit
 
-enum MediaViewerItem: Codable, Hashable, Identifiable {
+enum MediaViewerItem: Codable, Hashable {
     case image(String)
     case video(String)
 
     static let windowGroupID = "media-viewer-v2"
+}
 
-    var id: String {
-        switch self {
-        case .image(let path): return "image:\(path)"
-        case .video(let path): return "video:\(path)"
-        }
-    }
+/// Both viewers wear the same chrome, so it lives here once. On macCatalyst the
+/// window's own title bar already provides a close affordance, so only the share
+/// button is added — styled as a floating glass circle over the black backdrop.
+private struct MediaViewerToolbar: ToolbarContent {
+    let url: URL
+    let onClose: () -> Void
 
-    var path: String {
-        switch self {
-        case .image(let path), .video(let path): return path
+    var body: some ToolbarContent {
+#if targetEnvironment(macCatalyst)
+        ToolbarItem(placement: .primaryAction) {
+            ShareLink(item: url) {
+                Image(systemName: "square.and.arrow.up")
+                    .frame(width: 36, height: 36)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
         }
+        .sharedBackgroundVisibility(.hidden)
+#else
+        ToolbarItem(placement: .cancellationAction) {
+            Button {
+                onClose()
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .accessibilityLabel("Close")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            ShareLink(item: url) {
+                Image(systemName: "square.and.arrow.up")
+            }
+        }
+#endif
     }
 }
 
@@ -62,32 +86,7 @@ struct ImageViewer: View {
                 .background(Color.black)
                 .navigationTitle("")
                 .toolbar {
-#if targetEnvironment(macCatalyst)
-                    ToolbarItem(placement: .primaryAction) {
-                        ShareLink(item: URL(fileURLWithPath: path)) {
-                            Image(systemName: "square.and.arrow.up")
-                                .frame(width: 36, height: 36)
-                                .contentShape(Circle())
-                        }
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.circle)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-#else
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button {
-                            closeViewer()
-                        } label: {
-                            Image(systemName: "xmark")
-                        }
-                        .accessibilityLabel("Close")
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        ShareLink(item: URL(fileURLWithPath: path)) {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                    }
-#endif
+                    MediaViewerToolbar(url: URL(fileURLWithPath: path), onClose: closeViewer)
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
                 .toolbarColorScheme(.dark, for: .navigationBar)
@@ -145,32 +144,7 @@ struct VideoViewer: View {
             }
             .navigationTitle("")
             .toolbar {
-#if targetEnvironment(macCatalyst)
-                ToolbarItem(placement: .primaryAction) {
-                    ShareLink(item: url) {
-                        Image(systemName: "square.and.arrow.up")
-                            .frame(width: 36, height: 36)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                }
-                .sharedBackgroundVisibility(.hidden)
-#else
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        closeViewer()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .accessibilityLabel("Close")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    ShareLink(item: url) {
-                        Image(systemName: "square.and.arrow.up")
-                    }
-                }
-#endif
+                MediaViewerToolbar(url: url, onClose: closeViewer)
             }
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
@@ -196,11 +170,11 @@ struct ZoomableImageView: UIViewRepresentable {
     let image: UIImage
     var onSwipeDismiss: (() -> Void)? = nil
 
-    func makeUIView(context: Context) -> ImageScrollView {
+    func makeUIView(context _: Context) -> ImageScrollView {
         ImageScrollView(image: image, onSwipeDismiss: onSwipeDismiss)
     }
 
-    func updateUIView(_ view: ImageScrollView, context: Context) {}
+    func updateUIView(_: ImageScrollView, context _: Context) {}
 }
 
 final class ImageScrollView: UIScrollView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
@@ -235,14 +209,14 @@ final class ImageScrollView: UIScrollView, UIScrollViewDelegate, UIGestureRecogn
         addGestureRecognizer(swipeDown)
     }
 
-    @objc private func handleSwipeDismiss(_ gesture: UISwipeGestureRecognizer) {
+    @objc private func handleSwipeDismiss(_: UISwipeGestureRecognizer) {
         if zoomScale <= 1.01 {
             onSwipeDismiss?()
         }
     }
 
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
-                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+    func gestureRecognizer(_: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith _: UIGestureRecognizer) -> Bool {
         true
     }
 
@@ -265,9 +239,9 @@ final class ImageScrollView: UIScrollView, UIScrollViewDelegate, UIGestureRecogn
         contentInset = UIEdgeInsets(top: dy, left: dx, bottom: dy, right: dx)
     }
 
-    func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+    func viewForZooming(in _: UIScrollView) -> UIView? { imageView }
 
-    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+    func scrollViewDidZoom(_: UIScrollView) {
         centerImage()
     }
 

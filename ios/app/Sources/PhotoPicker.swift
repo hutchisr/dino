@@ -20,7 +20,7 @@ struct PhotoPicker: UIViewControllerRepresentable {
         return picker
     }
 
-    func updateUIViewController(_ controller: PHPickerViewController, context: Context) {}
+    func updateUIViewController(_: PHPickerViewController, context _: Context) {}
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -28,7 +28,7 @@ struct PhotoPicker: UIViewControllerRepresentable {
         let parent: PhotoPicker
         init(_ parent: PhotoPicker) { self.parent = parent }
 
-        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        func picker(_: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             parent.dismiss()
             guard let provider = results.first?.itemProvider else { return }
             guard let typeIdentifier = preferredTypeIdentifier(for: provider) else { return }
@@ -41,9 +41,7 @@ struct PhotoPicker: UIViewControllerRepresentable {
                     return
                 }
                 // the provider's URL is only valid inside this callback
-                let dest = AttachmentStaging.temporaryCopyURL(for: url)
-                try? FileManager.default.removeItem(at: dest)
-                guard (try? FileManager.default.copyItem(at: url, to: dest)) != nil else { return }
+                guard let dest = AttachmentStaging.stageCopy(of: url) else { return }
                 DispatchQueue.main.async {
                     parent.onPicked(dest)
                 }

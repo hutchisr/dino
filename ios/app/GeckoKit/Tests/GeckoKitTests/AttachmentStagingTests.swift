@@ -70,4 +70,25 @@ final class AttachmentStagingTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
         XCTAssertEqual(AttachmentStaging.byteCount(at: url), 4)
     }
+
+    func testStageCopyDuplicatesSourceBytes() throws {
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)-source.jpg")
+        let bytes = Data([9, 8, 7, 6, 5])
+        try bytes.write(to: source)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let staged = try XCTUnwrap(AttachmentStaging.stageCopy(of: source))
+        defer { try? FileManager.default.removeItem(at: staged) }
+
+        XCTAssertNotEqual(staged.path, source.path)
+        XCTAssertEqual(staged.lastPathComponent.hasSuffix("-source.jpg"), true)
+        XCTAssertEqual(try Data(contentsOf: staged), bytes)
+    }
+
+    func testStageCopyReturnsNilForMissingSource() {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)-absent.jpg")
+        XCTAssertNil(AttachmentStaging.stageCopy(of: missing))
+    }
 }

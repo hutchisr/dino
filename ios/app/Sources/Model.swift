@@ -9,7 +9,6 @@ struct XmppAccount: Identifiable {
 
 struct XmppConversation: Identifiable {
     let id: Int32
-    let account: String
     let jid: String
     var name: String
     var encryption: String
@@ -19,7 +18,6 @@ struct XmppConversation: Identifiable {
     var preview: String = ""
     var previewDirection: String = ""
     var time: Date = Date(timeIntervalSince1970: 0)
-    var notify: String = "default"
     var notifyEffective: String = "on"
 
     var isGroupchat: Bool { kind == "groupchat" }
@@ -83,7 +81,6 @@ struct RoomInfo {
 
 struct RosterContact: Identifiable {
     let id: String   // bare jid
-    let account: String
     var name: String
     var subscription: String
     var show: String
@@ -126,17 +123,13 @@ struct ChatMessage: Identifiable, Equatable {
 
     var isFile: Bool { content == "file" }
     var isImage: Bool {
-        if mime.hasPrefix("image/") { return true }
         // iOS has no shared-mime-info database, so GIO often reports
-        // application/octet-stream; fall back to the file extension.
-        let ext = (fileName as NSString).pathExtension.lowercased()
-        return ["png", "jpg", "jpeg", "gif", "webp", "heic", "bmp"].contains(ext)
+        // application/octet-stream; MediaFileKind falls back to the extension.
+        mime.hasPrefix("image/") || MediaFileKind.isImage(fileName: fileName)
     }
 
     var isVideo: Bool {
-        if mime.hasPrefix("video/") { return true }
-        let ext = (fileName as NSString).pathExtension.lowercased()
-        return ["mp4", "m4v", "mov", "qt", "3gp", "3g2"].contains(ext)
+        mime.hasPrefix("video/") || MediaFileKind.isVideo(fileName: fileName)
     }
 }
 
@@ -182,7 +175,7 @@ final class AppModel: ObservableObject {
     private var replacingMessageHistory = Set<Int32>()
     private var pendingOlderMessages: [Int32: [ChatMessage]] = [:]
 #if targetEnvironment(macCatalyst)
-    private var groupHistoryRetryGeneration = 0
+    private var groupHistoryRetry: Task<Void, Never>?
 #endif
     private var messageRevisions: [Int32: Int] = [:]
     private var messageUpdateWasSynced: [Int32: Bool] = [:]
@@ -195,7 +188,6 @@ final class AppModel: ObservableObject {
     private var conversationFocus = ConversationFocusState()
 
     var hasAccount: Bool { !accounts.isEmpty }
-    var connected: Bool { accounts.contains { $0.state == "CONNECTED" } }
     var avatarRevisionToken: Int { avatarRevision }
 
     func messageRevision(for conversation: Int32) -> Int {
@@ -268,13 +260,16 @@ final class AppModel: ObservableObject {
         GeckoCore.shared.signOut()
     }
 
+    /// Publishing an avatar wants PNG bytes; that conversion is a full decode
+    /// and re-encode, so it runs off the main actor. A failed conversion falls
+    /// back to the original file rather than dropping the request.
+    private static func avatarUploadPath(for source: String) async -> String {
+        await Task.detached(priority: .userInitiated) { avatarPNG(from: source) }.value ?? source
+    }
+
     func setAvatar(path: String) {
-        let source = path
         Task {
-            let pngPath = await Task.detached(priority: .userInitiated) {
-                avatarPNG(from: source)
-            }.value
-            GeckoCore.shared.setAvatar(path: pngPath ?? source)
+            GeckoCore.shared.setAvatar(path: await Self.avatarUploadPath(for: path))
             // re-request our own avatar once published
             if let jid = accounts.first?.id {
                 requestedAvatars.remove(jid)
@@ -397,12 +392,8 @@ final class AppModel: ObservableObject {
         GeckoCore.shared.mucSetModerated(id, moderated)
     }
     func setRoomAvatar(_ id: Int32, path: String) {
-        let source = path
         Task {
-            let pngPath = await Task.detached(priority: .userInitiated) {
-                avatarPNG(from: source)
-            }.value
-            GeckoCore.shared.mucSetAvatar(id, path: pngPath ?? source)
+            GeckoCore.shared.mucSetAvatar(id, path: await Self.avatarUploadPath(for: path))
         }
     }
 
@@ -483,22 +474,24 @@ final class AppModel: ObservableObject {
         replacingMessageHistory.insert(id)
         GeckoCore.shared.requestMessages(conversation: id, count: messagePageSize)
 #if targetEnvironment(macCatalyst)
-        groupHistoryRetryGeneration &+= 1
-        let generation = groupHistoryRetryGeneration
-        if conversations.first(where: { $0.id == id })?.isGroupchat == true {
-            scheduleGroupHistoryRetries(id, generation: generation)
-        }
+        restartGroupHistoryRetries(for: id)
 #endif
     }
 
 #if targetEnvironment(macCatalyst)
-    private func scheduleGroupHistoryRetries(_ id: Int32, generation: Int) {
-        for delay in [0.75, 1.5, 3.5, 6.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self,
-                      self.groupHistoryRetryGeneration == generation,
+    /// A Mac window can reopen a room before its asynchronous MUC rejoin has
+    /// backfilled anything, and the empty first response looks exactly like a
+    /// genuinely empty room, so nothing wakes the chat again. Re-ask a few
+    /// times while it is still both open and blank.
+    private func restartGroupHistoryRetries(for id: Int32) {
+        groupHistoryRetry?.cancel()
+        groupHistoryRetry = nil
+        guard conversations.first(where: { $0.id == id })?.isGroupchat == true else { return }
+        groupHistoryRetry = Task { [weak self] in
+            for delay in [0.75, 0.75, 2.0, 2.5] {
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled, let self,
                       self.navigation.last == id,
-                      self.conversations.first(where: { $0.id == id })?.isGroupchat == true,
                       (self.messages[id] ?? []).isEmpty
                 else {
                     return
@@ -626,8 +619,8 @@ final class AppModel: ObservableObject {
                 conversations = list.compactMap { c in
                     guard let id = c["id"] as? Int, let jid = c["jid"] as? String else { return nil }
                     return XmppConversation(
-                        id: Int32(id), account: c["account"] as? String ?? "",
-                        jid: jid, name: c["name"] as? String ?? jid,
+                        id: Int32(id), jid: jid,
+                        name: c["name"] as? String ?? jid,
                         encryption: c["encryption"] as? String ?? "NONE",
                         encryptionAvailable: c["encryption_available"] as? Bool ?? false,
                         kind: c["kind"] as? String ?? "chat",
@@ -635,7 +628,6 @@ final class AppModel: ObservableObject {
                         preview: c["preview"] as? String ?? "",
                         previewDirection: c["preview_direction"] as? String ?? "",
                         time: Date(timeIntervalSince1970: TimeInterval(c["time"] as? Int ?? 0)),
-                        notify: c["notify"] as? String ?? "default",
                         notifyEffective: c["notify_effective"] as? String ?? "on")
                 }.sorted { $0.time > $1.time }
                 if let pending = pendingChatJid,
@@ -677,8 +669,6 @@ final class AppModel: ObservableObject {
                         role: o["role"] as? String ?? "none")
                 }.sorted { $0.nick.lowercased() < $1.nick.lowercased() }
             }
-        case "diag":
-            geckoDebugLog("Gecko-diag: %@", e["message"] as? String ?? "?")
         case "self_presence":
             selfShow = e["show"] as? String ?? "online"
             selfStatus = e["status"] as? String ?? ""
@@ -712,7 +702,7 @@ final class AppModel: ObservableObject {
                 roster = list.compactMap { r in
                     guard let jid = r["jid"] as? String else { return nil }
                     return RosterContact(
-                        id: jid, account: r["account"] as? String ?? "",
+                        id: jid,
                         name: r["name"] as? String ?? "",
                         subscription: r["subscription"] as? String ?? "",
                         show: r["show"] as? String ?? "offline")
@@ -798,7 +788,7 @@ final class AppModel: ObservableObject {
                     }
                 }
             }
-        case "message", "item":
+        case "message":
             if let m = Self.decodeMessage(e), let cid = e["conversation"] as? Int {
                 let conversationId = Int32(cid)
                 let isNew = !(messages[conversationId]?.contains { $0.id == m.id } ?? false)
@@ -815,6 +805,11 @@ final class AppModel: ObservableObject {
                 }
 #endif
             }
+        case "app_background_error":
+            // The background clean-disconnect is best-effort and the app is on
+            // its way out; log it instead of arming a modal for the next launch.
+            geckoDebugLog("Gecko: background disconnect failed (%@)",
+                          e["msg"] as? String ?? "?")
         case "error", "fatal":
             lastError = e["message"] as? String
         default:

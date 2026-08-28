@@ -175,15 +175,6 @@ final class HistoryLoadTriggerTests: XCTestCase {
         XCTAssertTrue(trigger.observe(distanceFromTop: 0))
     }
 
-    func testDistanceZonesUseHysteresisThresholds() {
-        XCTAssertEqual(HistoryLoadTrigger.zone(distanceFromTop: 0), .near)
-        XCTAssertEqual(HistoryLoadTrigger.zone(distanceFromTop: 240), .near)
-        XCTAssertEqual(HistoryLoadTrigger.zone(distanceFromTop: 241), .middle)
-        XCTAssertEqual(HistoryLoadTrigger.zone(distanceFromTop: 359), .middle)
-        XCTAssertEqual(HistoryLoadTrigger.zone(distanceFromTop: 360), .away)
-        XCTAssertEqual(HistoryLoadTrigger.zone(distanceFromTop: .nan), .middle)
-    }
-
     func testViewportAnchorPreservesFullyVisibleRowOffset() throws {
         let anchor = try XCTUnwrap(HistoryLoadTrigger.viewportAnchorY(
             rowMinY: 220,
@@ -351,20 +342,6 @@ final class HistoryLoadTriggerTests: XCTestCase {
         XCTAssertFalse(shouldFollowNewestMessage(
             intent: false,
             measuredAtBottom: false))
-    }
-
-    func testBottomContentOffsetMatchesSwiftUIRestingBoundary() {
-        XCTAssertEqual(bottomContentOffset(
-            contentHeight: 2_000,
-            viewportHeight: 800,
-            topInset: 60), 1_140)
-    }
-
-    func testBottomContentOffsetClampsUnderfilledContentToTop() {
-        XCTAssertEqual(bottomContentOffset(
-            contentHeight: 500,
-            viewportHeight: 800,
-            topInset: 60), -60)
     }
 
 }

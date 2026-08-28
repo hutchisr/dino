@@ -92,7 +92,6 @@ final class GeckoCore {
     func appBackgrounded() { dino_ios_app_backgrounded() }
     func enablePush(proxyJid: String, node: String) { dino_ios_enable_push(proxyJid, node) }
     func setNotify(_ id: Int32, _ setting: String) { dino_ios_set_notify(id, setting) }
-    func requestRoster() { dino_ios_request_roster() }
     func setPresence(show: String, status: String) { dino_ios_set_presence(show, status) }
     func requestSelfPresence() { dino_ios_request_self_presence() }
     func requestBlocklist() { dino_ios_request_blocklist() }

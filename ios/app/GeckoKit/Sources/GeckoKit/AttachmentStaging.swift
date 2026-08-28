@@ -27,6 +27,24 @@ enum AttachmentStaging {
         return temporaryDirectory.appendingPathComponent("\(id.uuidString)-\(name)")
     }
 
+    /// Copies `source` into the temporary directory and returns the copy, or
+    /// nil when the copy fails.
+    ///
+    /// Why copy at all: the URLs the pickers hand us are borrowed. A
+    /// `PHPickerResult` file representation is deleted as soon as its callback
+    /// returns, and a `fileImporter` URL is only readable while its
+    /// security-scoped access is held. Sending is asynchronous and outlives
+    /// both, so staging our own copy is what keeps the bytes alive until the
+    /// send completes.
+    static func stageCopy(of source: URL) -> URL? {
+        let dest = temporaryCopyURL(for: source)
+        // A UUID-prefixed name makes a collision practically impossible, but
+        // clear the destination anyway so copyItem cannot fail on leftovers.
+        try? FileManager.default.removeItem(at: dest)
+        guard (try? FileManager.default.copyItem(at: source, to: dest)) != nil else { return nil }
+        return dest
+    }
+
     static func temporaryPastedImageURL(
         fileExtension: String,
         in temporaryDirectory: URL = FileManager.default.temporaryDirectory,

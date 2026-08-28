@@ -10,7 +10,6 @@ import UIKit
 /// and follows new messages only while already pinned to the bottom.
 struct SwiftUIMessageList: View {
     let messages: [ChatMessage]           // chronological: oldest first
-    let messageRevision: Int
     let messageUpdateWasSynced: Bool
     let historyPageRevision: Int
     let historyPageRenderedRowsAdded: Bool
@@ -18,7 +17,6 @@ struct SwiftUIMessageList: View {
     let conversationId: Int32
     let isGroupchat: Bool
     let avatarPaths: [String: String]
-    let avatarRevision: Int
     let visualTopInset: CGFloat
     let visualBottomInset: CGFloat
     let visualScrollIndicatorTopInset: CGFloat
@@ -117,7 +115,6 @@ struct SwiftUIMessageList: View {
     /// This prevents a fast local-database response from reusing pre-page
     /// top/bottom metrics and immediately starting another request.
     private struct ScrollSample: Equatable {
-        let contentOffsetY: CGFloat
         let distanceFromTop: CGFloat
         let distanceFromBottom: CGFloat
         let contentHeight: CGFloat
@@ -204,7 +201,6 @@ struct SwiftUIMessageList: View {
                 let distanceFromTop = max(0, geo.contentOffset.y + geo.contentInsets.top)
                 let distanceFromBottom = max(0, bottomOffsetY - geo.contentOffset.y)
                 return ScrollSample(
-                    contentOffsetY: geo.contentOffset.y,
                     distanceFromTop: distanceFromTop,
                     distanceFromBottom: distanceFromBottom,
                     contentHeight: geo.contentSize.height,
@@ -423,11 +419,10 @@ struct SwiftUIMessageList: View {
             await Task.yield()
             if animated {
                 // Scale the duration with the distance to the bottom so a scroll
-                // from far up doesn't whip past in a fixed-time blur — keep a
-                // roughly constant glide speed, clamped so short hops stay snappy
-                // and very long ones don't drag.
-                let distance = metrics.distanceFromBottom
-                let duration = min(0.7, max(0.25, distance / 5000))
+                // from far up doesn't whip past in a fixed-time blur — the same
+                // constant-glide policy the UIKit animator uses.
+                let duration = bottomScrollAnimationDuration(
+                    distance: Double(metrics.distanceFromBottom))
                 withAnimation(.easeInOut(duration: duration)) {
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
@@ -717,7 +712,8 @@ struct SwiftUIMessageList: View {
             let showSender = isGroupchat && msg.direction == "in"
                 && (newDay || messages[i - 1].from != msg.from)
             let avatarPath = isGroupchat && msg.direction == "in" ? avatarPaths[msg.from] : nil
-            out.append(Row(msg: msg, showDay: newDay, dayLabel: Self.dayLabel(msg.time),
+            out.append(Row(msg: msg, showDay: newDay,
+                           dayLabel: GeckoDisplayFormatters.dayLabel(msg.time),
                            showSender: showSender, senderAvatarPath: avatarPath))
         }
         return out
@@ -752,13 +748,6 @@ struct SwiftUIMessageList: View {
         .padding(.vertical, 3)
     }
 
-    private static func dayLabel(_ date: Date) -> String {
-        let cal = Calendar.current
-        if cal.isDateInToday(date) { return "Today" }
-        if cal.isDateInYesterday(date) { return "Yesterday" }
-        return GeckoDisplayFormatters.dayLabel(date)
-    }
-
     /// One chat row's display model (chronological order): the message plus the
     /// neighbour-derived day/sender flags.
     private struct Row: Identifiable, Equatable {
@@ -777,11 +766,11 @@ struct SwiftUIMessageList: View {
     private struct ScrollViewResolver: UIViewRepresentable {
         let metrics: ScrollMetrics
 
-        func makeUIView(context: Context) -> ScrollViewProbe {
+        func makeUIView(context _: Context) -> ScrollViewProbe {
             ScrollViewProbe(metrics: metrics)
         }
 
-        func updateUIView(_ view: ScrollViewProbe, context: Context) {
+        func updateUIView(_ view: ScrollViewProbe, context _: Context) {
             view.metrics = metrics
             view.resolve()
         }
