@@ -9,6 +9,35 @@ enum MediaViewerItem: Codable, Hashable {
     static let windowGroupID = "media-viewer-v2"
 }
 
+#if targetEnvironment(macCatalyst)
+private struct FocusedMediaViewerItemKey: FocusedValueKey {
+    typealias Value = MediaViewerItem
+}
+
+extension FocusedValues {
+    var mediaViewerItem: MediaViewerItem? {
+        get { self[FocusedMediaViewerItemKey.self] }
+        set { self[FocusedMediaViewerItemKey.self] = newValue }
+    }
+}
+
+struct MediaViewerCommands: Commands {
+    @Environment(\.dismissWindow) private var dismissWindow
+    @FocusedValue(\.mediaViewerItem) private var item
+
+    var body: some Commands {
+        CommandGroup(after: .printItem) {
+            Button("Close Media Preview") {
+                guard let item else { return }
+                dismissWindow(id: MediaViewerItem.windowGroupID, value: item)
+            }
+            .keyboardShortcut(.cancelAction)
+            .disabled(item == nil)
+        }
+    }
+}
+#endif
+
 /// Both viewers wear the same chrome, so it lives here once. On macCatalyst the
 /// window's own title bar already provides a close affordance, so only the share
 /// button is added — styled as a floating glass circle over the black backdrop.

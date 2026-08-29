@@ -7,11 +7,11 @@ enum ChatLayout {
 }
 
 extension View {
-    /// Sheets float as free-standing panels on the Mac, where the iPhone-derived
-    /// default width reads as a narrow strip. No-op elsewhere.
-    func macDialogWidth() -> some View {
+    /// Use the platform's standard form size for sheets on the Mac.
+    /// No-op elsewhere.
+    func macDialogSizing() -> some View {
 #if targetEnvironment(macCatalyst)
-        frame(width: 560)
+        presentationSizing(.form)
 #else
         self
 #endif
@@ -316,6 +316,7 @@ struct GeckoApp: App {
                     Color.black
                 }
             }
+            .focusedSceneValue(\.mediaViewerItem, item)
             .background {
                 CatalystMediaWindowConfigurator()
                     .frame(width: 0, height: 0)
@@ -374,6 +375,9 @@ struct GeckoApp: App {
                 .keyboardShortcut(",", modifiers: .command)
                 .disabled(!model.ready || !model.hasAccount)
             }
+
+            MediaViewerCommands()
+
         }
         .onChange(of: scenePhase) { _, phase in
             setDesktopActive(phase == .active && CatalystWindowLifecycle.isVisible)
@@ -886,6 +890,115 @@ struct ConversationListView: View {
     @State private var mucJid = ""
     @State private var mucNick = ""
 
+    private struct ChannelSheetCancelButton: View {
+        let action: () -> Void
+
+        var body: some View {
+#if targetEnvironment(macCatalyst)
+            Button(action: action) {
+                Image(systemName: "xmark")
+                    .padding(4)
+            }
+            .accessibilityLabel("Close")
+            .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .controlSize(.large)
+            .keyboardShortcut(.cancelAction)
+#else
+            Button("Cancel", role: .cancel, action: action)
+                .keyboardShortcut(.cancelAction)
+#endif
+        }
+    }
+    private struct ChannelSheetActionButton: View {
+        let title: String
+        let action: () -> Void
+
+        var body: some View {
+#if targetEnvironment(macCatalyst)
+            Button(action: action) {
+                Text(title)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 4)
+                    .contentShape(.interaction, Capsule())
+            }
+            .buttonStyle(.glass)
+            .buttonBorderShape(.capsule)
+            .controlSize(.large)
+#else
+            Button(title, action: action)
+#endif
+        }
+    }
+
+    private struct JoinChannelSheet: View {
+        @Binding var jid: String
+        @Binding var nick: String
+        let onJoin: () -> Void
+        @Environment(\.dismiss) private var dismiss
+
+        var body: some View {
+            NavigationStack {
+                Form {
+                    TextField("room@conference.example.org", text: $jid)
+                        .textInputAutocapitalization(.never)
+                    TextField("Nickname (optional)", text: $nick)
+                        .textInputAutocapitalization(.never)
+                }
+                .navigationTitle("Join Channel")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        ChannelSheetCancelButton {
+                            dismiss()
+                        }
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                    ToolbarItem(placement: .confirmationAction) {
+                        ChannelSheetActionButton(title: "Join") {
+                            onJoin()
+                            dismiss()
+                        }
+                        .keyboardShortcut(.defaultAction)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
+            }
+        }
+    }
+
+    private struct CreateChannelSheet: View {
+        let request: PendingMucCreate
+        let onCreate: () -> Void
+        @Environment(\.dismiss) private var dismiss
+
+        var body: some View {
+            NavigationStack {
+                Form {
+                    Text("\(request.jid) doesn't exist yet. Create it as a new channel?")
+                }
+                .navigationTitle("Create Channel?")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        ChannelSheetCancelButton {
+                            dismiss()
+                        }
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                    ToolbarItem(placement: .confirmationAction) {
+                        ChannelSheetActionButton(title: "Create") {
+                            onCreate()
+                            dismiss()
+                        }
+                        .keyboardShortcut(.defaultAction)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
+            }
+        }
+    }
+
     private struct ListContents: View {
         @EnvironmentObject var model: AppModel
 
@@ -974,8 +1087,6 @@ struct ConversationListView: View {
                 .padding(3)
                 .glassEffect(.regular.tint(accountStatusColor(account.state)).interactive(), in: Circle())
                 .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
-                // Include the glass ring around the avatar in the
-                // tap target, not just the opaque avatar image.
                 .contentShape(Circle())
 #endif
         }
@@ -1014,6 +1125,9 @@ struct ConversationListView: View {
                     accountButton(for: account)
                 }
             }
+#if !targetEnvironment(macCatalyst)
+            .sharedBackgroundVisibility(.hidden)
+#endif
 #if targetEnvironment(macCatalyst)
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 0) {
@@ -1064,36 +1178,26 @@ struct ConversationListView: View {
         .sheet(isPresented: $model.newMessagePresented) {
             ContactsView(isPresented: $model.newMessagePresented)
                 .environmentObject(model)
-                .macDialogWidth()
+                .macDialogSizing()
         }
         .sheet(isPresented: $model.accountSettingsPresented) {
             AccountSettingsView(isPresented: $model.accountSettingsPresented)
                 .environmentObject(model)
-                .macDialogWidth()
+                .macDialogSizing()
         }
-        .alert("Join channel", isPresented: $showJoinMuc) {
-            TextField("room@conference.example.org", text: $mucJid)
-                .textInputAutocapitalization(.never)
-            TextField("Nickname (optional)", text: $mucNick)
-                .textInputAutocapitalization(.never)
-            Button("Join") {
+        .sheet(isPresented: $showJoinMuc) {
+            JoinChannelSheet(jid: $mucJid, nick: $mucNick) {
                 model.joinMuc(jid: mucJid, nick: mucNick.isEmpty ? nil : mucNick)
                 mucJid = ""
                 mucNick = ""
             }
-            Button("Cancel", role: .cancel) {}
+            .macDialogSizing()
         }
-        .alert("Create channel?", isPresented: Binding(
-            get: { model.pendingMucCreate != nil },
-            set: { if !$0 { model.pendingMucCreate = nil } }
-        ), presenting: model.pendingMucCreate) { pending in
-            Button("Create") {
+        .sheet(item: $model.pendingMucCreate) { pending in
+            CreateChannelSheet(request: pending) {
                 model.createMuc(jid: pending.jid, nick: pending.nick)
-                model.pendingMucCreate = nil
             }
-            Button("Cancel", role: .cancel) { model.pendingMucCreate = nil }
-        } message: { pending in
-            Text("\(pending.jid) doesn't exist yet. Create it as a new channel?")
+            .macDialogSizing()
         }
     }
 }

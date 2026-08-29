@@ -161,10 +161,22 @@ struct AccountSettingsView: View {
             .navigationTitle("Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                Button("Done") {
-                    savePresenceIfNeeded()
-                    isPresented = false
+#if targetEnvironment(macCatalyst)
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(action: closeSheet) {
+                        Image(systemName: "xmark")
+                            .padding(4)
+                    }
+                    .accessibilityLabel("Close")
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
+                    .keyboardShortcut(.cancelAction)
                 }
+                .sharedBackgroundVisibility(.hidden)
+#else
+                Button("Done", action: closeSheet)
+#endif
             }
             .sheet(isPresented: $showPhotoPicker) {
                 PhotoPicker(
@@ -196,6 +208,11 @@ struct AccountSettingsView: View {
                 Text("Your account password was updated on the server.")
             }
         }
+    }
+
+    private func closeSheet() {
+        savePresenceIfNeeded()
+        isPresented = false
     }
 
     private func saveAlias() {
