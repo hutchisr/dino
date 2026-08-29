@@ -44,8 +44,12 @@ public class ContentItemStore : StreamInteractionModule, Object {
         Gee.TreeSet<ContentItem> items = new Gee.TreeSet<ContentItem>(ContentItem.compare_func);
 
         foreach (var row in select) {
-            ContentItem content_item = get_item_from_row(row, conversation);
-            items.add(content_item);
+            try {
+                ContentItem content_item = get_item_from_row(row, conversation);
+                items.add(content_item);
+            } catch (Error e) {
+                warning("Ignoring invalid content item row: %s", e.message);
+            }
         }
 
         Gee.List<ContentItem> ret = new ArrayList<ContentItem>();

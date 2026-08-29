@@ -16,11 +16,21 @@ struct RoomDetailsView: View {
     @State private var nameDraft = ""
     @State private var topicDraft = ""
     @State private var showPhotoPicker = false
+    @FocusState private var inviteFocused: Bool
 
     private var occupants: [Occupant] { model.occupants[conversationId] ?? [] }
     private var me: Occupant? { occupants.first { $0.isSelf } }
     private var info: RoomInfo { model.roomInfo[conversationId] ?? RoomInfo() }
     private var conversation: XmppConversation? { model.conversations.first { $0.id == conversationId } }
+
+    private var inviteSuggestions: [RosterContact] {
+        let query = inviteJid.trimmingCharacters(in: .whitespaces)
+        guard inviteFocused, !query.isEmpty else { return [] }
+        return Array(model.roster.lazy.filter {
+            $0.displayName.localizedCaseInsensitiveContains(query) ||
+            $0.id.localizedCaseInsensitiveContains(query)
+        }.prefix(5))
+    }
 
     var body: some View {
         NavigationStack {
@@ -143,8 +153,34 @@ struct RoomDetailsView: View {
                     .autocorrectionDisabled()
                     .submitLabel(.send)
                     .onSubmit(sendInvite)
+                    .focused($inviteFocused)
                 Button("Invite", action: sendInvite)
                     .disabled(inviteJid.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            ForEach(inviteSuggestions) { contact in
+                Button {
+                    inviteJid = contact.id
+                    inviteFocused = false
+                } label: {
+                    HStack(spacing: 10) {
+                        AvatarView(jid: contact.id, name: contact.displayName, isGroup: false, size: 32,
+                                   presence: contact.show, avatarPath: model.avatars[contact.id],
+                                   requestAvatar: { model.ensureAvatar(for: contact.id) })
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(contact.displayName)
+                                .foregroundStyle(.primary)
+                            if contact.displayName != contact.id {
+                                Text(contact.id)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Invite \(contact.displayName), \(contact.id)")
             }
         }
     }

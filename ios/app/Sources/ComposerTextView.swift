@@ -9,6 +9,10 @@ struct ComposerPastedImage {
 struct PasteAwareComposerTextView: UIViewRepresentable {
     @Binding var text: String
     let maxLines: Int
+    let minimumHeight: CGFloat
+    let horizontalInset: CGFloat
+    let verticalInset: CGFloat
+    let verticalAlignmentOffset: CGFloat
     let canPasteImages: Bool
     let onImagePaste: (ComposerPastedImage) -> Void
 #if targetEnvironment(macCatalyst)
@@ -27,7 +31,7 @@ struct PasteAwareComposerTextView: UIViewRepresentable {
         view.adjustsFontForContentSizeCategory = true
         view.textColor = .label
         view.tintColor = .systemBlue
-        view.textContainerInset = .zero
+        view.textContainerInset = textContainerInset
         view.textContainer.lineFragmentPadding = 0
         view.isScrollEnabled = false
         view.alwaysBounceVertical = false
@@ -50,6 +54,11 @@ struct PasteAwareComposerTextView: UIViewRepresentable {
     func updateUIView(_ uiView: PasteAwareTextView, context: Context) {
         context.coordinator.parent = self
         uiView.canPasteImages = canPasteImages
+        let inset = textContainerInset
+        if uiView.textContainerInset != inset {
+            uiView.textContainerInset = inset
+            uiView.invalidateIntrinsicContentSize()
+        }
         if uiView.text != text {
             uiView.text = text
             uiView.invalidateIntrinsicContentSize()
@@ -80,12 +89,29 @@ struct PasteAwareComposerTextView: UIViewRepresentable {
         width > 0 ? width : nil
     }
 
+    private var textContainerInset: UIEdgeInsets {
+        UIEdgeInsets(
+            top: verticalInset + verticalAlignmentOffset,
+            left: horizontalInset,
+            bottom: max(0, verticalInset - verticalAlignmentOffset),
+            right: horizontalInset
+        )
+    }
+
     private func minTextHeight(_ uiView: UITextView) -> CGFloat {
-        ceil((uiView.font ?? UIFont.preferredFont(forTextStyle: .body)).lineHeight)
+        let lineHeight = (uiView.font ?? UIFont.preferredFont(forTextStyle: .body)).lineHeight
+        let contentHeight = ceil(lineHeight + uiView.textContainerInset.top + uiView.textContainerInset.bottom)
+        return max(minimumHeight, contentHeight)
     }
 
     private func maxTextHeight(_ uiView: UITextView) -> CGFloat {
-        minTextHeight(uiView) * CGFloat(max(maxLines, 1))
+        let lineHeight = (uiView.font ?? UIFont.preferredFont(forTextStyle: .body)).lineHeight
+        let contentHeight = ceil(
+            lineHeight * CGFloat(max(maxLines, 1))
+                + uiView.textContainerInset.top
+                + uiView.textContainerInset.bottom
+        )
+        return max(minimumHeight, contentHeight)
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {

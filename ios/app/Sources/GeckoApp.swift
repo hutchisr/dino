@@ -1454,6 +1454,43 @@ struct ContactsView: View {
     @State private var newJid = ""
     @State private var newAlias = ""
     @State private var search = ""
+#if targetEnvironment(macCatalyst)
+    private struct ContactSearchField: View {
+        @Binding var text: String
+
+        var body: some View {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+
+                TextField("Search contacts", text: $text)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+                .opacity(text.isEmpty ? 0 : 1)
+                .allowsHitTesting(!text.isEmpty)
+                .accessibilityLabel("Clear search")
+                .accessibilityHidden(text.isEmpty)
+            }
+            .padding(.leading, 8)
+            .padding(.trailing, 4)
+            .frame(width: 170, height: 30)
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+        }
+    }
+#endif
 
     private var filtered: [RosterContact] {
         if search.isEmpty { return model.roster }
@@ -1514,7 +1551,9 @@ struct ContactsView: View {
                     }
                 }
             }
+#if !targetEnvironment(macCatalyst)
             .searchable(text: $search, prompt: "Search contacts")
+#endif
             .navigationTitle("Contacts")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { model.requestBlocklist() }
@@ -1546,6 +1585,9 @@ struct ContactsView: View {
                     .controlSize(.large)
                 }
                 .sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .primaryAction) {
+                    ContactSearchField(text: $search)
+                }
 #else
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { isPresented = false }
@@ -1619,6 +1661,10 @@ struct ChatView: View {
     @State private var showAttach = false
     /// Shared height for the composer's buttons and text field so they align.
     private let composerControlHeight: CGFloat = 44
+    private let composerTextHorizontalInset: CGFloat = 16
+    private let composerTextVerticalInset: CGFloat = 11
+    /// UITextView's insertion caret sits slightly above its geometric line box.
+    private let composerTextVerticalAlignmentOffset: CGFloat = 2
 #if targetEnvironment(macCatalyst)
     private let floatingButtonSize: CGFloat = 36
 #else
@@ -1889,6 +1935,10 @@ struct ChatView: View {
         PasteAwareComposerTextView(
             text: $draft,
             maxLines: 6,
+            minimumHeight: composerControlHeight,
+            horizontalInset: composerTextHorizontalInset,
+            verticalInset: composerTextVerticalInset,
+            verticalAlignmentOffset: composerTextVerticalAlignmentOffset,
             canPasteImages: editing == nil,
             onImagePaste: stagePastedImage,
             onSubmit: submitComposer
@@ -1897,6 +1947,10 @@ struct ChatView: View {
         PasteAwareComposerTextView(
             text: $draft,
             maxLines: 6,
+            minimumHeight: composerControlHeight,
+            horizontalInset: composerTextHorizontalInset,
+            verticalInset: composerTextVerticalInset,
+            verticalAlignmentOffset: composerTextVerticalAlignmentOffset,
             canPasteImages: editing == nil,
             onImagePaste: stagePastedImage
         )
@@ -1944,15 +1998,22 @@ struct ChatView: View {
                     if draft.isEmpty {
                         Text("Message")
                             .foregroundStyle(.secondary)
+                            .padding(.horizontal, composerTextHorizontalInset)
+                            .padding(
+                                .top,
+                                composerTextVerticalInset + composerTextVerticalAlignmentOffset
+                            )
+                            .padding(
+                                .bottom,
+                                composerTextVerticalInset - composerTextVerticalAlignmentOffset
+                            )
                             .allowsHitTesting(false)
                     }
                     composerTextView
                 }
-                // Vertical inset too (not just horizontal) so multi-line text
-                // stays inside the capsule instead of spilling past its
-                // rounded top/bottom edges.
-                .padding(.horizontal, 16)
-                .padding(.vertical, 11)
+                // UIKit owns the text inset so the UITextView itself fills the
+                // capsule. SwiftUI padding here would leave an arrow-cursor strip
+                // around the editor that could not focus the text input.
                 .frame(maxWidth: .infinity, minHeight: composerControlHeight)
                 // RoundedRectangle, not Capsule: a wide multi-line field made
                 // a Capsule rounds its left/right ends into big semicircles
@@ -2619,12 +2680,28 @@ struct ChatView: View {
 // MessageFormatting.swift — compiled into this app module by build-app.sh and
 // unit-tested via `swift test` in the GeckoKit package.
 
+@ViewBuilder
+private func messageText(_ text: AttributedString, quote: Bool = false, actions: MessageTextActions? = nil) -> some View {
+#if targetEnvironment(macCatalyst)
+    SelectableMessageText(text: text, style: quote ? .quote : .body, actions: actions)
+        .layoutPriority(1)
+#else
+    if quote {
+        Text(text)
+            .italic()
+            .foregroundStyle(.secondary)
+    } else {
+        Text(text)
+    }
+#endif
+}
+
 /// Render a message body: lines starting with `>` become a blockquote (accent
 /// bar + muted text), everything else is normal linkified text.
 @ViewBuilder
-private func messageBody(_ text: String) -> some View {
+private func messageBody(_ text: String, actions: MessageTextActions? = nil) -> some View {
     if !text.hasPrefix(">") && !text.contains("\n>") {
-        Text(linkifiedBody(text)).tint(.accentColor)   // common path: no quotes
+        messageText(linkifiedBody(text), actions: actions).tint(.accentColor)   // common path: no quotes
     } else {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(messageRuns(text).enumerated()), id: \.offset) { _, run in
@@ -2633,15 +2710,13 @@ private func messageBody(_ text: String) -> some View {
                         RoundedRectangle(cornerRadius: 1)
                             .fill(Color.accentColor.opacity(0.5))
                             .frame(width: 3)
-                        Text(linkifiedBody(run.text))
-                            .italic()
-                            .foregroundStyle(.secondary)
+                        messageText(linkifiedBody(run.text), quote: true, actions: actions)
                             .tint(.accentColor)
                         Spacer(minLength: 0)
                     }
                     .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    Text(linkifiedBody(run.text)).tint(.accentColor)
+                    messageText(linkifiedBody(run.text), actions: actions).tint(.accentColor)
                 }
             }
         }
@@ -2711,33 +2786,22 @@ struct MessageBubble: View {
             EmptyView()
         }
     }
+    private var textActions: MessageTextActions {
+        MessageTextActions(
+            canEdit: msg.editable,
+            reply: { onReply?(msg) },
+            edit: { onEdit?(msg) },
+            copy: { UIPasteboard.general.string = msg.body },
+            more: { onActions?(msg) }
+        )
+    }
 
     var body: some View {
-        // The whole row slides right on swipe; the reply icon is anchored to the
-        // bubble's leading edge (a leading-aligned background on the bubble) and
-        // counter-offset by the drag so it holds still, getting revealed from
-        // beneath the bubble as it slides off it.
+        // On iOS the whole row slides right on swipe; the reply icon is anchored
+        // to the bubble's leading edge and revealed from beneath it.
 #if targetEnvironment(macCatalyst)
         bubbleRow
             .offset(x: dragOffset)
-            .contextMenu {
-                Button("Reply", systemImage: "arrowshape.turn.up.left") {
-                    onReply?(msg)
-                }
-                if msg.editable {
-                    Button("Edit", systemImage: "pencil") {
-                        onEdit?(msg)
-                    }
-                }
-                if !msg.body.isEmpty {
-                    Button("Copy", systemImage: "doc.on.doc") {
-                        UIPasteboard.general.string = msg.body
-                    }
-                }
-                Button("Reactions and More…", systemImage: "face.smiling") {
-                    onActions?(msg)
-                }
-            }
 #else
         bubbleRow
             .offset(x: dragOffset)
@@ -2802,7 +2866,7 @@ struct MessageBubble: View {
                                     onDownloadFile: onDownloadFile,
                                     onImageRendered: onImageRendered)
                     } else {
-                        messageBody(msg.body)
+                        messageBody(msg.body, actions: textActions)
                     }
                     HStack(spacing: 4) {
                         if msg.encryption == "OMEMO" {
@@ -2829,6 +2893,7 @@ struct MessageBubble: View {
                         .offset(x: -dragOffset)
                 }
                 .contentShape(Rectangle())
+#if !targetEnvironment(macCatalyst)
                 .onLongPressGesture(minimumDuration: 0.35) {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     onActions?(msg)
@@ -2838,6 +2903,7 @@ struct MessageBubble: View {
                 // a reply. The whole row still slides as visual feedback (the
                 // offset lives on `bubbleRow`).
                 .gesture(replySwipeGesture)
+#endif
                 if !msg.reactions.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(msg.reactions, id: \.emoji) { r in
