@@ -52,6 +52,15 @@ final class ThumbnailFitTests: XCTestCase {
         }
     }
 
+    func testExtremeAspectRatiosKeepBothDimensionsVisible() {
+        XCTAssertEqual(
+            ThumbnailLoader.fit(CGSize(width: 100_000, height: 1), in: box),
+            CGSize(width: 220, height: 1))
+        XCTAssertEqual(
+            ThumbnailLoader.fit(CGSize(width: 1, height: 100_000), in: box),
+            CGSize(width: 1, height: 280))
+    }
+
     func testSmallImageIsUpscaledToFill() {
         // A tiny source still fills the box (one dimension reaches the edge),
         // matching .scaledToFit on a fixed frame — so no surprise letterboxing.

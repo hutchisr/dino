@@ -2736,7 +2736,6 @@ struct MessageBubble: View {
     var onAvatarNeeded: ((String) -> Void)? = nil
     var onReaction: ((String, Bool) -> Void)? = nil
     var onDownloadFile: ((Int32) -> Void)? = nil
-    var onImageRendered: (() -> Void)? = nil
 
     @State private var dragOffset: CGFloat = 0
     @State private var replyArmed = false
@@ -2863,8 +2862,7 @@ struct MessageBubble: View {
                     }
                     if msg.isFile {
                         FileContent(msg: msg, onImageTap: onImageTap, onVideoTap: onVideoTap,
-                                    onDownloadFile: onDownloadFile,
-                                    onImageRendered: onImageRendered)
+                                    onDownloadFile: onDownloadFile)
                     } else {
                         messageBody(msg.body, actions: textActions)
                     }
@@ -3104,7 +3102,6 @@ struct FileContent: View {
     var onImageTap: ((String) -> Void)? = nil
     var onVideoTap: ((String) -> Void)? = nil
     var onDownloadFile: ((Int32) -> Void)? = nil
-    var onImageRendered: (() -> Void)? = nil
 
     private var sizeLabel: String {
         GeckoDisplayFormatters.fileSize(msg.size)
@@ -3119,17 +3116,6 @@ struct FileContent: View {
             // header) so the row doesn't grow when the decode lands.
             CachedThumbnail(path: msg.path)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                // Safety net: should the reserved size ever be wrong (an
-                // unreadable header), report a late height change so the chat can
-                // still re-pin. With the size reserved this normally fires once.
-                .background {
-                    GeometryReader { geo in
-                        Color.clear
-                            .onChange(of: geo.size.height, initial: true) { _, _ in
-                                onImageRendered?()
-                            }
-                    }
-                }
                 .onTapGesture {
                     onImageTap?(msg.path)
                 }

@@ -14,8 +14,8 @@ enum ThumbnailLoader {
     public static func fit(_ source: CGSize, in box: CGSize) -> CGSize {
         guard source.width > 0, source.height > 0 else { return box }
         let scale = min(box.width / source.width, box.height / source.height)
-        return CGSize(width: (source.width * scale).rounded(),
-                      height: (source.height * scale).rounded())
+        return CGSize(width: max(1, (source.width * scale).rounded()),
+                      height: max(1, (source.height * scale).rounded()))
     }
 
     private static let sizeCache = NSCache<NSString, SizeBox>()
