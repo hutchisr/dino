@@ -360,8 +360,8 @@ final class AppModel: ObservableObject {
     func createMuc(jid: String, nick: String?) {
         GeckoCore.shared.createMuc(jid: jid, nick: nick)
     }
+
     func acceptMucInvite(_ invitation: MucInvitation) {
-        guard pendingMucInvite?.id == invitation.id else { return }
         pendingMucInvite = nil
         acceptingMucInvite = invitation
         GeckoCore.shared.acceptMucInvite(
@@ -372,7 +372,6 @@ final class AppModel: ObservableObject {
     }
 
     func ignoreMucInvite(_ invitation: MucInvitation) {
-        guard pendingMucInvite?.id == invitation.id else { return }
         pendingMucInvite = nil
         presentNextMucInvite()
     }
