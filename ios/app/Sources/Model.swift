@@ -742,6 +742,15 @@ final class AppModel: ObservableObject {
                     self.pendingMucInvite = failed
                 }
             }
+        case "muc_removed":
+            if let rawConversation = e["conversation"] as? Int,
+               let conversation = Int32(exactly: rawConversation) {
+                removeMucConversation(
+                    conversation,
+                    room: e["room"] as? String ?? "",
+                    reason: e["reason"] as? String ?? "removed"
+                )
+            }
         case "push_state":
             geckoDebugLog("gecko-push: server push enabled=%@", String(describing: e["enabled"]))
         case "chat_state":
@@ -923,6 +932,31 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func removeMucConversation(_ id: Int32, room: String, reason: String) {
+        lastError = MucRemoval(
+            conversationID: id,
+            room: room,
+            reason: reason
+        ).apply(
+            to: &conversations,
+            navigation: &navigation,
+            id: { $0.id },
+            name: { $0.name }
+        )
+        messages[id] = nil
+        messageRevisions[id] = nil
+        messageUpdateWasSynced[id] = nil
+        historyPageRevisions[id] = nil
+        historyPageRenderedRowsAdded[id] = nil
+        historyPagination[id] = nil
+        replacingMessageHistory.remove(id)
+        pendingOlderMessages[id] = nil
+        chatStates[id] = nil
+        typingNames[id] = nil
+        occupants[id] = nil
+        roomInfo[id] = nil
+    }
+
     private func replaceMessages(
         _ list: [ChatMessage],
         for cid: Int32,
@@ -1099,6 +1133,24 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 guard self?.autoMucInviteFailure != nil else { return }
                 GeckoCore.shared.appBackgrounded()
+            }
+        }
+        if let reason = env["DINO_AUTOMUCREMOVED"] {
+            let delay = env["DINO_AUTOMUCREMOVED_DELAY"].flatMap { Double($0) } ?? 2
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0, delay)) { [weak self] in
+                guard let self else { return }
+                let room = env["DINO_AUTOMUCREMOVED_ROOM"]
+                let conversation = room.flatMap { room in
+                    self.conversations.first { $0.jid == room }
+                } ?? self.conversations.first { $0.isGroupchat }
+                guard let conversation else { return }
+                self.handle([
+                    "type": "muc_removed",
+                    "conversation": Int(conversation.id),
+                    "account": self.accounts.first?.id ?? "",
+                    "room": conversation.jid,
+                    "reason": reason,
+                ])
             }
         }
         if let jid = env["DINO_AUTOCLOSE"] {

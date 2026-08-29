@@ -9,7 +9,7 @@ public class MucManager : StreamInteractionModule, Object {
     public static ModuleIdentity<MucManager> IDENTITY = new ModuleIdentity<MucManager>("muc_manager");
     public string id { get { return IDENTITY.id; } }
 
-    public signal void left(Account account, Jid jid);
+    public signal void left(Account account, Jid jid, Xep.Muc.StatusCode code);
     public signal void subject_set(Account account, Jid jid, string? subject);
     public signal void room_info_updated(Account account, Jid muc_jid);
     public signal void private_room_occupant_updated(Account account, Jid room, Jid occupant);
@@ -420,7 +420,11 @@ public class MucManager : StreamInteractionModule, Object {
     private void on_account_added(Account account) {
         stream_interactor.module_manager.get_module(account, Xep.Muc.Module.IDENTITY).self_removed_from_room.connect( (stream, jid, code) => {
             cancel_sync(account, jid);
-            left(account, jid);
+            var conversation_manager = stream_interactor.get_module(ConversationManager.IDENTITY);
+            Conversation? conversation = conversation_manager.get_conversation(
+                jid.bare_jid, account, Conversation.Type.GROUPCHAT);
+            if (conversation != null) conversation_manager.close_conversation(conversation);
+            left(account, jid.bare_jid, code);
         });
         stream_interactor.module_manager.get_module(account, Xep.Muc.Module.IDENTITY).subject_set.connect( (stream, subject, jid) => {
             subject_set(account, jid, subject);

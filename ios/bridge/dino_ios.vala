@@ -391,6 +391,14 @@ public void start(owned EventCb cb) {
             var conv = si.get_module(Dino.ConversationManager.IDENTITY).get_conversation(jid.bare_jid, account, Conversation.Type.GROUPCHAT);
             if (conv != null) { emit_room_info(conv); push_conversations(); }
         });
+        muc_mod.left.connect((account, room, code) => {
+            var conv = si.get_module(Dino.ConversationManager.IDENTITY)
+                .get_conversation(room.bare_jid, account, Conversation.Type.GROUPCHAT);
+            if (conv != null) {
+                emit(@"{\"type\":\"muc_removed\",\"conversation\":$(conv.id),\"account\":\"$(esc(account.bare_jid.to_string()))\",\"room\":\"$(esc(room.bare_jid.to_string()))\",\"reason\":\"$(muc_removal_reason(code))\"}");
+            }
+            push_conversations();
+        });
         muc_mod.invite_received.connect((account, room, inviter, password, reason) => {
             if (has_active_groupchat(account, room)) return;
             emit(@"{\"type\":\"muc_invite\",\"account\":\"$(esc(account.bare_jid.to_string()))\",\"room\":\"$(esc(room.bare_jid.to_string()))\",\"inviter\":\"$(esc(inviter.bare_jid.to_string()))\",\"password\":\"$(esc(password ?? ""))\",\"reason\":\"$(esc(reason ?? ""))\"}");
@@ -685,6 +693,23 @@ private static bool has_active_groupchat(Account account, Xmpp.Jid room) {
         }
     }
     return false;
+}
+
+private static string muc_removal_reason(Xmpp.Xep.Muc.StatusCode code) {
+    switch (code) {
+        case Xmpp.Xep.Muc.StatusCode.BANNED:
+            return "banned";
+        case Xmpp.Xep.Muc.StatusCode.KICKED:
+            return "kicked";
+        case Xmpp.Xep.Muc.StatusCode.REMOVED_AFFILIATION_CHANGE:
+            return "affiliation_changed";
+        case Xmpp.Xep.Muc.StatusCode.REMOVED_MEMBERS_ONLY:
+            return "members_only";
+        case Xmpp.Xep.Muc.StatusCode.REMOVED_SHUTDOWN:
+            return "shutdown";
+        default:
+            return "removed";
+    }
 }
 
 // Re-emits a content item shortly after a change; the small delay lets
