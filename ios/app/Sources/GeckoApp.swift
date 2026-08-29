@@ -835,6 +835,20 @@ struct RootView: View {
             }
 #endif
         }
+        .alert(item: $model.pendingMucInvite) { invitation in
+            Alert(
+                title: Text(invitation.failureMessage == nil
+                    ? "Group Chat Invitation"
+                    : "Couldn’t Join Group Chat"),
+                message: Text(invitationMessage(invitation)),
+                primaryButton: .default(Text(invitation.failureMessage == nil ? "Join" : "Retry")) {
+                    model.acceptMucInvite(invitation)
+                },
+                secondaryButton: .cancel(Text("Ignore")) {
+                    model.ignoreMucInvite(invitation)
+                }
+            )
+        }
         .alert("Error", isPresented: Binding(
             get: { model.lastError != nil },
             set: { if !$0 { model.lastError = nil } })
@@ -843,6 +857,20 @@ struct RootView: View {
         } message: {
             Text(model.lastError ?? "")
         }
+    }
+
+    private func invitationMessage(_ invitation: MucInvitation) -> String {
+        var lines: [String] = []
+        if let failure = invitation.failureMessage {
+            lines.append(failure)
+            lines.append("")
+        }
+        lines.append("\(invitation.inviter) invited you to join \(invitation.room).")
+        if let reason = invitation.reason {
+            lines.append("Reason: \(reason)")
+        }
+        lines.append("Account: \(invitation.account)")
+        return lines.joined(separator: "\n")
     }
 }
 

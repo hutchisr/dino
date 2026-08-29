@@ -204,7 +204,8 @@ conversation previews/unread counts/read markers (XEP-0333), typing
 notifications (XEP-0085), file transfers (HTTP upload via libsoup,
 OMEMO-encrypted aesgcm files, inline image previews, full-screen viewer;
 note: GIO mime sniffing is extension-based on iOS — no shared-mime-info),
-MUC management (join/leave, participant list, per-sender avatars/nicks),
+MUC management (join/leave, mediated and direct invitations, participant list,
+per-sender avatars/nicks),
 emoji reactions (XEP-0444), message corrections (XEP-0308), replies
 (XEP-0461), delivery markers, account settings (avatar publishing,
 display name, password change, OMEMO fingerprint), TLS via the iOS trust

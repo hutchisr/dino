@@ -202,9 +202,11 @@ public class MucManager : StreamInteractionModule, Object {
         }
     }
 
-    public void invite(Account account, Jid muc, Jid invitee) {
+    public bool invite(Account account, Jid muc, Jid invitee) {
         XmppStream? stream = stream_interactor.get_stream(account);
-        if (stream != null) stream.get_module(Xep.Muc.Module.IDENTITY).invite(stream, muc.bare_jid, invitee.bare_jid);
+        if (stream == null) return false;
+        stream.get_module(Xep.Muc.Module.IDENTITY).invite(stream, muc.bare_jid, invitee.bare_jid);
+        return true;
     }
 
     public void kick(Account account, Jid jid, string nick) {

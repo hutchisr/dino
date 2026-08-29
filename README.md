@@ -18,7 +18,8 @@ Status
 Working end to end against real servers:
 
 - Login over SCRAM/STARTTLS, roster and bookmark sync, contact management
-- One-to-one and group chats (MUC), with per-sender avatars and nicks
+- One-to-one and group chats (MUC), including invitations, per-sender avatars,
+  and nicks
 - **OMEMO** encryption (statically linked libomemo-c), with a stable device identity
 - File transfers over HTTP upload, OMEMO-encrypted, with inline image previews
 - Reactions (XEP-0444), corrections (XEP-0308), replies (XEP-0461),

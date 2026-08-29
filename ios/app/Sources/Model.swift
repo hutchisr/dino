@@ -31,6 +31,16 @@ struct PendingMucCreate: Identifiable {
     let nick: String?
 }
 
+struct MucInvitation: Identifiable, Equatable {
+    var id: String { account + "\n" + room }
+    let account: String
+    let room: String
+    let inviter: String
+    let password: String?
+    let reason: String?
+    var failureMessage: String?
+}
+
 /// A participant in a group chat.
 struct Occupant: Identifiable {
     var id: String { jid }
@@ -165,10 +175,14 @@ final class AppModel: ObservableObject {
     /// Set when a join targeted a room that doesn't exist yet; the UI asks the
     /// user to confirm creating it.
     @Published var pendingMucCreate: PendingMucCreate?
+    @Published var pendingMucInvite: MucInvitation?
     @Published var newMessagePresented = false
     @Published var accountSettingsPresented = false
 
     private var pendingChatJid: String?
+    private var queuedMucInvites: [MucInvitation] = []
+    private var acceptingMucInvite: MucInvitation?
+    private var autoMucInviteFailure: (conversation: Int32, invitee: String)?
     private var requestedAvatars = Set<String>()
     private let messagePageSize: Int32 = 50
     @Published private var historyPagination: [Int32: HistoryPagination] = [:]
@@ -345,6 +359,44 @@ final class AppModel: ObservableObject {
 
     func createMuc(jid: String, nick: String?) {
         GeckoCore.shared.createMuc(jid: jid, nick: nick)
+    }
+    func acceptMucInvite(_ invitation: MucInvitation) {
+        guard pendingMucInvite?.id == invitation.id else { return }
+        pendingMucInvite = nil
+        acceptingMucInvite = invitation
+        GeckoCore.shared.acceptMucInvite(
+            account: invitation.account,
+            room: invitation.room,
+            password: invitation.password
+        )
+    }
+
+    func ignoreMucInvite(_ invitation: MucInvitation) {
+        guard pendingMucInvite?.id == invitation.id else { return }
+        pendingMucInvite = nil
+        presentNextMucInvite()
+    }
+
+    private func enqueueMucInvite(_ invitation: MucInvitation) {
+        let duplicate = pendingMucInvite?.id == invitation.id
+            || acceptingMucInvite?.id == invitation.id
+            || queuedMucInvites.contains { $0.id == invitation.id }
+        guard !duplicate else { return }
+        if pendingMucInvite == nil && acceptingMucInvite == nil {
+            pendingMucInvite = invitation
+        } else {
+            queuedMucInvites.append(invitation)
+        }
+    }
+
+    private func presentNextMucInvite() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self,
+                  self.pendingMucInvite == nil,
+                  self.acceptingMucInvite == nil,
+                  !self.queuedMucInvites.isEmpty else { return }
+            self.pendingMucInvite = self.queuedMucInvites.removeFirst()
+        }
     }
 
     func closeConversation(_ id: Int32) {
@@ -583,6 +635,9 @@ final class AppModel: ObservableObject {
             replaceNavigation(with: [])
             roster = []
             subscriptionRequests = []
+            pendingMucInvite = nil
+            acceptingMucInvite = nil
+            queuedMucInvites = []
             GeckoCore.shared.requestState()
         case "connection":
             if let jid = e["account"] as? String, let state = e["state"] as? String {
@@ -640,6 +695,53 @@ final class AppModel: ObservableObject {
             if let jid = e["jid"] as? String {
                 let nick = e["nick"] as? String
                 pendingMucCreate = PendingMucCreate(jid: jid, nick: (nick?.isEmpty ?? true) ? nil : nick)
+            }
+        case "muc_invite":
+            if let account = e["account"] as? String,
+               let room = e["room"] as? String,
+               let inviter = e["inviter"] as? String {
+                let password = e["password"] as? String
+                let reason = e["reason"] as? String
+                enqueueMucInvite(MucInvitation(
+                    account: account,
+                    room: room,
+                    inviter: inviter,
+                    password: (password?.isEmpty ?? true) ? nil : password,
+                    reason: (reason?.isEmpty ?? true) ? nil : reason,
+                    failureMessage: nil
+                ))
+            }
+        case "muc_invite_joined":
+            if let account = e["account"] as? String,
+               let room = e["room"] as? String,
+               let rawConversation = e["conversation"] as? Int,
+               let conversation = Int32(exactly: rawConversation),
+               let invitation = acceptingMucInvite,
+               invitation.account == account,
+               invitation.room == room {
+                acceptingMucInvite = nil
+                replaceNavigation(with: [conversation])
+                presentNextMucInvite()
+            }
+        case "muc_invite_failed":
+            if let account = e["account"] as? String,
+               let room = e["room"] as? String,
+               let invitation = acceptingMucInvite,
+               invitation.account == account,
+               invitation.room == room {
+                let failed = MucInvitation(
+                    account: invitation.account,
+                    room: invitation.room,
+                    inviter: invitation.inviter,
+                    password: invitation.password,
+                    reason: invitation.reason,
+                    failureMessage: e["message"] as? String ?? "Could not join the invited room"
+                )
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    guard let self, self.acceptingMucInvite?.id == invitation.id else { return }
+                    self.acceptingMucInvite = nil
+                    self.pendingMucInvite = failed
+                }
             }
         case "push_state":
             geckoDebugLog("gecko-push: server push enabled=%@", String(describing: e["enabled"]))
@@ -805,6 +907,11 @@ final class AppModel: ObservableObject {
                 }
 #endif
             }
+        case "app_backgrounded":
+            if let request = autoMucInviteFailure {
+                autoMucInviteFailure = nil
+                GeckoCore.shared.mucInvite(request.conversation, jid: request.invitee)
+            }
         case "app_background_error":
             // The background clean-disconnect is best-effort and the app is on
             // its way out; log it instead of arming a modal for the next launch.
@@ -969,6 +1076,30 @@ final class AppModel: ObservableObject {
         if let jid = env["DINO_AUTOJOINMUC"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
                 self?.joinMuc(jid: jid, nick: nil)
+            }
+        }
+        if let room = env["DINO_AUTOMUCINVITE"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self else { return }
+                self.handle([
+                    "type": "muc_invite",
+                    "account": env["DINO_AUTOMUCINVITE_ACCOUNT"]
+                        ?? self.accounts.first?.id
+                        ?? "automation@example.invalid",
+                    "room": room,
+                    "inviter": env["DINO_AUTOMUCINVITE_FROM"] ?? "inviter@example.invalid",
+                    "password": env["DINO_AUTOMUCINVITE_PASSWORD"] ?? "",
+                    "reason": env["DINO_AUTOMUCINVITE_REASON"] ?? "",
+                ])
+            }
+        }
+        if let rawConversation = env["DINO_AUTOMUCINVITE_FAILURE_CONVERSATION"],
+           let conversation = Int32(rawConversation),
+           let invitee = env["DINO_AUTOMUCINVITE_FAILURE_TO"] {
+            autoMucInviteFailure = (conversation, invitee)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard self?.autoMucInviteFailure != nil else { return }
+                GeckoCore.shared.appBackgrounded()
             }
         }
         if let jid = env["DINO_AUTOCLOSE"] {

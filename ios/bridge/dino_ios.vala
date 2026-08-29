@@ -391,6 +391,10 @@ public void start(owned EventCb cb) {
             var conv = si.get_module(Dino.ConversationManager.IDENTITY).get_conversation(jid.bare_jid, account, Conversation.Type.GROUPCHAT);
             if (conv != null) { emit_room_info(conv); push_conversations(); }
         });
+        muc_mod.invite_received.connect((account, room, inviter, password, reason) => {
+            if (has_active_groupchat(account, room)) return;
+            emit(@"{\"type\":\"muc_invite\",\"account\":\"$(esc(account.bare_jid.to_string()))\",\"room\":\"$(esc(room.bare_jid.to_string()))\",\"inviter\":\"$(esc(inviter.bare_jid.to_string()))\",\"password\":\"$(esc(password ?? ""))\",\"reason\":\"$(esc(reason ?? ""))\"}");
+        });
         si.get_module(Dino.MessageCorrection.IDENTITY).received_correction.connect((item) => {
             re_emit_item(item.id);
         });
@@ -662,6 +666,25 @@ private static Account? first_enabled_account() {
         if (a.enabled) return a;
     }
     return null;
+}
+
+private static Account? enabled_account_by_jid(string jid) {
+    foreach (Account account in app.db.get_accounts()) {
+        if (account.enabled && account.bare_jid.to_string() == jid) return account;
+    }
+    return null;
+}
+
+private static bool has_active_groupchat(Account account, Xmpp.Jid room) {
+    foreach (Conversation conversation in app.stream_interactor
+            .get_module(Dino.ConversationManager.IDENTITY).get_active_conversations()) {
+        if (conversation.type_ == Conversation.Type.GROUPCHAT &&
+                conversation.account.equals(account) &&
+                conversation.counterpart.bare_jid.to_string() == room.bare_jid.to_string()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Re-emits a content item shortly after a change; the small delay lets
@@ -1478,13 +1501,41 @@ public void join_muc(string jid_str, string? nick) {
                 var identities = entity_info.get_identities.end(res);
                 bool exists = identities != null && identities.size > 0;
                 if (exists) {
-                    do_join_muc(account, jid, n);
+                    do_join_muc(account, jid, n, null, false);
                 } else {
                     emit(@"{\"type\":\"confirm_create_muc\",\"jid\":\"$(esc(jid.to_string()))\",\"nick\":\"$(esc(n ?? ""))\"}");
                 }
             });
         } catch (Error e) {
             emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
+        }
+        return Source.REMOVE;
+    });
+}
+
+public void accept_muc_invite(string account_str, string room_str, string? password) {
+    string account_jid = account_str;
+    string room_jid = room_str;
+    string? p = password == null || password == "" ? null : password;
+    Idle.add(() => {
+        try {
+            var account = enabled_account_by_jid(account_jid);
+            if (account == null) {
+                emit(@"{\"type\":\"muc_invite_failed\",\"account\":\"$(esc(account_jid))\",\"room\":\"$(esc(room_jid))\",\"message\":\"The invited account is unavailable\"}");
+                return Source.REMOVE;
+            }
+            var jid = new Xmpp.Jid(room_jid).bare_jid;
+            var entity_info = app.stream_interactor.get_module(Dino.EntityInfo.IDENTITY);
+            entity_info.get_identities.begin(account, jid, (_, res) => {
+                var identities = entity_info.get_identities.end(res);
+                if (identities == null || identities.size == 0) {
+                    emit(@"{\"type\":\"muc_invite_failed\",\"account\":\"$(esc(account_jid))\",\"room\":\"$(esc(jid.to_string()))\",\"message\":\"The invited room is unavailable\"}");
+                    return;
+                }
+                do_join_muc(account, jid, null, p, true);
+            });
+        } catch (Error e) {
+            emit(@"{\"type\":\"muc_invite_failed\",\"account\":\"$(esc(account_jid))\",\"room\":\"$(esc(room_jid))\",\"message\":\"$(esc(e.message))\"}");
         }
         return Source.REMOVE;
     });
@@ -1500,7 +1551,7 @@ public void create_muc(string jid_str, string? nick) {
             var account = first_enabled_account();
             if (account == null) return Source.REMOVE;
             var jid = new Xmpp.Jid(j).bare_jid;
-            do_join_muc(account, jid, n);
+            do_join_muc(account, jid, n, null, false);
         } catch (Error e) {
             emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
         }
@@ -1508,14 +1559,22 @@ public void create_muc(string jid_str, string? nick) {
     });
 }
 
-private void do_join_muc(Account account, Xmpp.Jid jid, string? nick) {
+private void do_join_muc(Account account, Xmpp.Jid jid, string? nick, string? password, bool invited) {
     var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
-    muc.join.begin(account, jid, nick, null, false, null, (_, res) => {
+    muc.join.begin(account, jid, nick, password, false, null, (_, res) => {
         var result = muc.join.end(res);
         if (result == null) {
-            emit("{\"type\":\"error\",\"message\":\"Could not join: not connected\"}");
-        } else if (result.nick == null) {
-            emit(@"{\"type\":\"error\",\"message\":\"Could not join $(esc(jid.to_string()))\"}");
+            if (invited) {
+                emit(@"{\"type\":\"muc_invite_failed\",\"account\":\"$(esc(account.bare_jid.to_string()))\",\"room\":\"$(esc(jid.to_string()))\",\"message\":\"Could not join while disconnected\"}");
+            } else {
+                emit("{\"type\":\"error\",\"message\":\"Could not join: not connected\"}");
+            }
+        } else if (result.nick == null || (invited && result.newly_created)) {
+            if (invited) {
+                emit(@"{\"type\":\"muc_invite_failed\",\"account\":\"$(esc(account.bare_jid.to_string()))\",\"room\":\"$(esc(jid.to_string()))\",\"message\":\"Could not join the invited room\"}");
+            } else {
+                emit(@"{\"type\":\"error\",\"message\":\"Could not join $(esc(jid.to_string()))\"}");
+            }
         } else if (result.newly_created) {
             // The room didn't exist, so the server created it locked
             // (XEP-0045 §10.1): nobody — not even us — can send until the owner
@@ -1524,6 +1583,15 @@ private void do_join_muc(Account account, Xmpp.Jid jid, string? nick) {
             finalize_created_muc(account, jid);
         } else {
             push_conversations();
+            if (invited) {
+                var conversation = app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY)
+                    .get_conversation(jid, account, Conversation.Type.GROUPCHAT);
+                if (conversation == null) {
+                    emit(@"{\"type\":\"muc_invite_failed\",\"account\":\"$(esc(account.bare_jid.to_string()))\",\"room\":\"$(esc(jid.to_string()))\",\"message\":\"The joined room could not be opened\"}");
+                    return;
+                }
+                emit(@"{\"type\":\"muc_invite_joined\",\"account\":\"$(esc(account.bare_jid.to_string()))\",\"room\":\"$(esc(jid.to_string()))\",\"conversation\":$(conversation.id)}");
+            }
             // Settle the Room Details view after a (re)join.
             refresh_room_after_join(account, jid);
         }
@@ -1769,7 +1837,11 @@ public void muc_invite(int conversation_id, string jid_str) {
         Conversation? c = conversation_by_id(cid);
         if (c == null) return Source.REMOVE;
         try {
-            app.stream_interactor.get_module(Dino.MucManager.IDENTITY).invite(c.account, c.counterpart, new Xmpp.Jid(j));
+            bool sent = app.stream_interactor.get_module(Dino.MucManager.IDENTITY).invite(
+                c.account, c.counterpart, new Xmpp.Jid(j));
+            if (!sent) {
+                emit("{\"type\":\"error\",\"message\":\"Could not send invitation while disconnected\"}");
+            }
         } catch (Error e) {
             emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
         }
