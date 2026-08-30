@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import ImageIO
+import UniformTypeIdentifiers
 
 /// Decoded, downsampled thumbnails for inline chat image previews, plus the
 /// up-front sizing math that lets a row reserve its final height before the
@@ -18,6 +19,7 @@ enum ThumbnailLoader {
                       height: max(1, (source.height * scale).rounded()))
     }
 
+    private static let animationFormatCache = NSCache<NSString, NSString>()
     private static let sizeCache = NSCache<NSString, SizeBox>()
 
     /// Pixel dimensions of an image read from its header only — no full decode,
@@ -45,6 +47,36 @@ enum ThumbnailLoader {
         let size = orientation >= 5 ? CGSize(width: h, height: w) : CGSize(width: w, height: h)
         sizeCache.setObject(SizeBox(size), forKey: k)
         return size
+    }
+
+    /// Returns the display format only for a multi-frame GIF or WebP. Like
+    /// `pixelSize`, this reads image metadata without decoding frame pixels.
+    static func animatedFormat(path: String) -> String? {
+        let key = "animation:\(path)" as NSString
+        if let cached = animationFormatCache.object(forKey: key) {
+            return cached.length == 0 ? nil : cached as String
+        }
+
+        let url = URL(fileURLWithPath: path) as CFURL
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(url, options),
+              CGImageSourceGetCount(source) > 1,
+              let sourceType = CGImageSourceGetType(source) else {
+            animationFormatCache.setObject("", forKey: key)
+            return nil
+        }
+
+        let typeIdentifier = sourceType as String
+        let format: String?
+        if typeIdentifier == UTType.gif.identifier {
+            format = "GIF"
+        } else if typeIdentifier == UTType.webP.identifier {
+            format = "WEBP"
+        } else {
+            format = nil
+        }
+        animationFormatCache.setObject((format ?? "") as NSString, forKey: key)
+        return format
     }
 }
 
@@ -87,6 +119,12 @@ extension ThumbnailLoader {
         return queue
     }()
 
+    /// Several animated rows can be visible at once, so each inline preview gets
+    /// a tighter decoded-frame budget than the single full-screen viewer.
+    private static let inlineAnimatedImageDecodedByteLimit = 24 * 1024 * 1024
+    private static let viewerAnimatedImageDecodedByteLimit = 64 * 1024 * 1024
+    private static let defaultFrameDuration: TimeInterval = 0.1
+
     private static func key(_ path: String, _ maxPixel: Int) -> NSString {
         "\(path)@\(maxPixel)" as NSString
     }
@@ -125,7 +163,31 @@ extension ThumbnailLoader {
         if let cached = cachedThumbnail(path: path, maxPixel: maxPixel) {
             return cached
         }
-        let operation = ThumbnailDecodeOperation(path: path, maxPixel: maxPixel)
+        let operation = ImageDecodeOperation(path: path, maxPixel: maxPixel)
+        return await withTaskCancellationHandler {
+            await operation.value(on: imageDecodeQueue)
+        } onCancel: {
+            operation.cancel()
+        }
+    }
+
+    /// Animated GIF or WebP frames for an inline chat row. This deliberately
+    /// returns nil for static images so the caller can keep its cached thumbnail.
+    static func loadInlineAnimatedImageAsync(path: String, maxPixel: Int) async -> UIImage? {
+        if Task.isCancelled { return nil }
+        let operation = ImageDecodeOperation(path: path, maxPixel: maxPixel, mode: .inlineAnimation)
+        return await withTaskCancellationHandler {
+            await operation.value(on: imageDecodeQueue)
+        } onCancel: {
+            operation.cancel()
+        }
+    }
+
+    /// Full-screen decode. GIF and WebP sources retain all animation frames;
+    /// every other source uses the same cached static thumbnail path as before.
+    static func loadViewerImageAsync(path: String, maxPixel: Int) async -> UIImage? {
+        if Task.isCancelled { return nil }
+        let operation = ImageDecodeOperation(path: path, maxPixel: maxPixel, mode: .viewer)
         return await withTaskCancellationHandler {
             await operation.value(on: imageDecodeQueue)
         } onCancel: {
@@ -177,18 +239,135 @@ extension ThumbnailLoader {
         guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, options) else { return nil }
         return UIImage(cgImage: cg)
     }
+
+    fileprivate static func loadInlineAnimatedImage(
+        path: String,
+        maxPixel: Int,
+        isCancelled: () -> Bool
+    ) -> UIImage? {
+        loadAnimatedImage(
+            path: path,
+            maxPixel: maxPixel,
+            decodedByteLimit: inlineAnimatedImageDecodedByteLimit,
+            isCancelled: isCancelled
+        )
+    }
+
+    fileprivate static func loadViewerImage(
+        path: String,
+        maxPixel: Int,
+        isCancelled: () -> Bool
+    ) -> UIImage? {
+        if let animated = loadAnimatedImage(
+            path: path,
+            maxPixel: maxPixel,
+            decodedByteLimit: viewerAnimatedImageDecodedByteLimit,
+            isCancelled: isCancelled
+        ) {
+            return animated
+        }
+        guard !isCancelled() else { return nil }
+        return loadThumbnail(path: path, maxPixel: maxPixel)
+    }
+
+    private static func loadAnimatedImage(
+        path: String,
+        maxPixel: Int,
+        decodedByteLimit: Int,
+        isCancelled: () -> Bool
+    ) -> UIImage? {
+        guard maxPixel > 0, decodedByteLimit > 0 else { return nil }
+        let url = URL(fileURLWithPath: path) as CFURL
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(url, sourceOptions),
+              let sourceType = CGImageSourceGetType(source) else {
+            return nil
+        }
+        let typeIdentifier = sourceType as String
+        guard typeIdentifier == UTType.gif.identifier ||
+                typeIdentifier == UTType.webP.identifier else {
+            return nil
+        }
+
+        let frameCount = CGImageSourceGetCount(source)
+        guard frameCount > 1 else { return nil }
+        let decodedBytesPerFrame = max(1, decodedByteLimit / frameCount)
+        let memoryBoundMaxPixel = Int((Double(decodedBytesPerFrame) / 4).squareRoot())
+        let frameMaxPixel = max(1, min(maxPixel, memoryBoundMaxPixel))
+        let options = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: frameMaxPixel,
+        ] as CFDictionary
+
+        var frames: [UIImage] = []
+        frames.reserveCapacity(frameCount)
+        var duration: TimeInterval = 0
+        for index in 0..<frameCount {
+            if isCancelled() { return nil }
+            guard let frame = CGImageSourceCreateThumbnailAtIndex(source, index, options) else {
+                return nil
+            }
+            frames.append(UIImage(cgImage: frame))
+            duration += frameDuration(
+                source: source,
+                index: index,
+                typeIdentifier: typeIdentifier
+            )
+        }
+        guard duration.isFinite, duration > 0 else { return nil }
+        return UIImage.animatedImage(with: frames, duration: duration)
+    }
+
+    private static func frameDuration(
+        source: CGImageSource,
+        index: Int,
+        typeIdentifier: String
+    ) -> TimeInterval {
+        let dictionaryKey: CFString
+        let unclampedDelayKey: CFString
+        let delayKey: CFString
+        if typeIdentifier == UTType.gif.identifier {
+            dictionaryKey = kCGImagePropertyGIFDictionary
+            unclampedDelayKey = kCGImagePropertyGIFUnclampedDelayTime
+            delayKey = kCGImagePropertyGIFDelayTime
+        } else {
+            dictionaryKey = kCGImagePropertyWebPDictionary
+            unclampedDelayKey = kCGImagePropertyWebPUnclampedDelayTime
+            delayKey = kCGImagePropertyWebPDelayTime
+        }
+
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil)
+                as? [CFString: Any],
+              let animationProperties = properties[dictionaryKey] as? [CFString: Any] else {
+            return defaultFrameDuration
+        }
+        let duration = (animationProperties[unclampedDelayKey] as? NSNumber)?.doubleValue
+            ?? (animationProperties[delayKey] as? NSNumber)?.doubleValue
+            ?? defaultFrameDuration
+        return duration.isFinite && duration > 0 ? duration : defaultFrameDuration
+    }
 }
 
-private final class ThumbnailDecodeOperation: Operation, @unchecked Sendable {
+private final class ImageDecodeOperation: Operation, @unchecked Sendable {
+    enum Mode {
+        case thumbnail
+        case inlineAnimation
+        case viewer
+    }
+
     private let path: String
     private let maxPixel: Int
+    private let mode: Mode
     private let lock = NSLock()
     private var continuation: CheckedContinuation<UIImage?, Never>?
     private var completed = false
 
-    init(path: String, maxPixel: Int) {
+    init(path: String, maxPixel: Int, mode: Mode = .thumbnail) {
         self.path = path
         self.maxPixel = maxPixel
+        self.mode = mode
     }
 
     func value(on queue: OperationQueue) async -> UIImage? {
@@ -216,7 +395,23 @@ private final class ThumbnailDecodeOperation: Operation, @unchecked Sendable {
             finish(nil)
             return
         }
-        let image = ThumbnailLoader.loadThumbnail(path: path, maxPixel: maxPixel)
+        let image: UIImage?
+        switch mode {
+        case .thumbnail:
+            image = ThumbnailLoader.loadThumbnail(path: path, maxPixel: maxPixel)
+        case .inlineAnimation:
+            image = ThumbnailLoader.loadInlineAnimatedImage(
+                path: path,
+                maxPixel: maxPixel,
+                isCancelled: { self.isCancelled }
+            )
+        case .viewer:
+            image = ThumbnailLoader.loadViewerImage(
+                path: path,
+                maxPixel: maxPixel,
+                isCancelled: { self.isCancelled }
+            )
+        }
         finish(isCancelled ? nil : image)
     }
 

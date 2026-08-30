@@ -15,6 +15,7 @@ struct PhotoPicker: UIViewControllerRepresentable {
         var config = PHPickerConfiguration()
         config.filter = allowsVideos ? .any(of: [.images, .videos]) : .images
         config.selectionLimit = 1
+        config.preferredAssetRepresentationMode = .current
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = context.coordinator
         return picker
@@ -31,7 +32,11 @@ struct PhotoPicker: UIViewControllerRepresentable {
         func picker(_: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             parent.dismiss()
             guard let provider = results.first?.itemProvider else { return }
-            guard let typeIdentifier = preferredTypeIdentifier(for: provider) else { return }
+            guard let typeIdentifier = MediaFileKind.preferredPickerTypeIdentifier(
+                in: provider.registeredTypeIdentifiers,
+                allowsVideos: parent.allowsVideos
+            ) else { return }
+            let preferredFilenameExtension = UTType(typeIdentifier)?.preferredFilenameExtension
             provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { [parent] url, _ in
                 guard let url else { return }
                 guard AttachmentStaging.canStageFile(
@@ -41,23 +46,15 @@ struct PhotoPicker: UIViewControllerRepresentable {
                     return
                 }
                 // the provider's URL is only valid inside this callback
-                guard let dest = AttachmentStaging.stageCopy(of: url) else { return }
+                guard let dest = AttachmentStaging.stageCopy(
+                    of: url,
+                    preferredFilenameExtension: preferredFilenameExtension
+                ) else { return }
                 DispatchQueue.main.async {
                     parent.onPicked(dest)
                 }
             }
         }
 
-        private func preferredTypeIdentifier(for provider: NSItemProvider) -> String? {
-            let identifiers = provider.registeredTypeIdentifiers
-            if parent.allowsVideos, let movie = identifiers.first(where: { identifier in
-                UTType(identifier)?.conforms(to: .movie) ?? false
-            }) {
-                return movie
-            }
-            return identifiers.first(where: { identifier in
-                UTType(identifier)?.conforms(to: .image) ?? false
-            })
-        }
     }
 }

@@ -9,6 +9,31 @@ struct MessageTextActions {
 }
 
 #if targetEnvironment(macCatalyst)
+@ViewBuilder
+func messageActionMenu(_ actions: MessageTextActions) -> some View {
+    Button {
+        actions.reply()
+    } label: {
+        Label("Reply", systemImage: "arrowshape.turn.up.left")
+    }
+    if actions.canEdit {
+        Button {
+            actions.edit()
+        } label: {
+            Label("Edit", systemImage: "pencil")
+        }
+    }
+    Button {
+        actions.copy()
+    } label: {
+        Label("Copy", systemImage: "doc.on.doc")
+    }
+    Button {
+        actions.more()
+    } label: {
+        Label("Reactions and More…", systemImage: "face.smiling")
+    }
+}
 
 struct SelectableMessageText: View {
     enum Style: Equatable {
@@ -27,28 +52,7 @@ struct SelectableMessageText: View {
             .textSelection(.enabled)
             .contextMenu {
                 if let actions {
-                    Button {
-                        actions.reply()
-                    } label: {
-                        Label("Reply", systemImage: "arrowshape.turn.up.left")
-                    }
-                    if actions.canEdit {
-                        Button {
-                            actions.edit()
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
-                        }
-                    }
-                    Button {
-                        actions.copy()
-                    } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
-                    }
-                    Button {
-                        actions.more()
-                    } label: {
-                        Label("Reactions and More…", systemImage: "face.smiling")
-                    }
+                    messageActionMenu(actions)
                 }
             }
     }

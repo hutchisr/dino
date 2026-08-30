@@ -202,8 +202,11 @@ Done beyond the basics: contact management (roster, presence,
 subscription requests), sign in/out with stable OMEMO identity, avatars,
 conversation previews/unread counts/read markers (XEP-0333), typing
 notifications (XEP-0085), file transfers (HTTP upload via libsoup,
-OMEMO-encrypted aesgcm files, inline image previews, full-screen viewer;
-note: GIO mime sniffing is extension-based on iOS — no shared-mime-info),
+OMEMO-encrypted aesgcm files, photo-library uploads that preserve animated GIF
+and WebP files, memory-bounded inline GIF/WebP playback controlled by
+tap-to-play/tap-to-pause format badges (static images still open full-screen);
+note: GIO MIME sniffing is extension-based
+on iOS — no shared-mime-info),
 MUC management (join/leave, mediated and direct invitations, participant list,
 per-sender avatars/nicks),
 emoji reactions (XEP-0444), message corrections (XEP-0308), replies

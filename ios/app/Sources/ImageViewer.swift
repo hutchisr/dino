@@ -129,19 +129,16 @@ struct ImageViewer: View {
     }
 
     private func loadImage(maxPixel: Int) async {
-        if let cached = ThumbnailLoader.cachedThumbnail(path: path, maxPixel: maxPixel) {
-            image = cached
-            failed = false
-            return
-        }
-
-        image = nil
+        image = ThumbnailLoader.cachedThumbnail(path: path, maxPixel: maxPixel)
         failed = false
+
         let p = path
-        let decoded = await ThumbnailLoader.loadThumbnailAsync(path: p, maxPixel: maxPixel)
-        if !Task.isCancelled {
+        let decoded = await ThumbnailLoader.loadViewerImageAsync(path: p, maxPixel: maxPixel)
+        guard !Task.isCancelled else { return }
+        if let decoded {
             image = decoded
-            failed = decoded == nil
+        } else {
+            failed = image == nil
         }
     }
 }
@@ -203,16 +200,19 @@ struct ZoomableImageView: UIViewRepresentable {
         ImageScrollView(image: image, onSwipeDismiss: onSwipeDismiss)
     }
 
-    func updateUIView(_: ImageScrollView, context _: Context) {}
+    func updateUIView(_ uiView: ImageScrollView, context _: Context) {
+        uiView.setImage(image)
+    }
 }
 
 final class ImageScrollView: UIScrollView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     private let imageView: UIImageView
+    private var displayedImage: UIImage?
     private var lastLaidOutSize: CGSize = .zero
     private let onSwipeDismiss: (() -> Void)?
 
     init(image: UIImage, onSwipeDismiss: (() -> Void)? = nil) {
-        imageView = UIImageView(image: image)
+        imageView = UIImageView()
         self.onSwipeDismiss = onSwipeDismiss
         super.init(frame: .zero)
         delegate = self
@@ -227,6 +227,7 @@ final class ImageScrollView: UIScrollView, UIScrollViewDelegate, UIGestureRecogn
         imageView.contentMode = .scaleAspectFit
         imageView.isUserInteractionEnabled = true
         addSubview(imageView)
+        setImage(image)
 
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
@@ -236,6 +237,36 @@ final class ImageScrollView: UIScrollView, UIScrollViewDelegate, UIGestureRecogn
         swipeDown.direction = .down
         swipeDown.delegate = self
         addGestureRecognizer(swipeDown)
+    }
+
+    func setImage(_ image: UIImage) {
+        if let displayedImage, displayedImage === image { return }
+        displayedImage = image
+        imageView.stopAnimating()
+        imageView.animationImages = nil
+        imageView.animationDuration = 0
+        imageView.animationRepeatCount = 0
+
+        if let frames = image.images, frames.count > 1 {
+            imageView.image = frames.first
+            imageView.animationImages = frames
+            imageView.animationDuration = image.duration
+            if window != nil {
+                imageView.startAnimating()
+            }
+        } else {
+            imageView.image = image
+        }
+        setNeedsLayout()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            imageView.stopAnimating()
+        } else if imageView.animationImages?.isEmpty == false {
+            imageView.startAnimating()
+        }
     }
 
     @objc private func handleSwipeDismiss(_: UISwipeGestureRecognizer) {

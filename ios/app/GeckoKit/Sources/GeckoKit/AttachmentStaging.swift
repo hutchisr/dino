@@ -20,10 +20,19 @@ enum AttachmentStaging {
 
     static func temporaryCopyURL(
         for source: URL,
+        preferredFilenameExtension: String? = nil,
         in temporaryDirectory: URL = FileManager.default.temporaryDirectory,
         id: UUID = UUID()
     ) -> URL {
-        let name = source.lastPathComponent.isEmpty ? "File" : source.lastPathComponent
+        let sourceName = source.lastPathComponent.isEmpty ? "File" : source.lastPathComponent
+        let fileExtension = normalizedFileExtension(preferredFilenameExtension)
+        let name: String
+        if fileExtension.isEmpty {
+            name = sourceName
+        } else {
+            let stem = (sourceName as NSString).deletingPathExtension
+            name = "\(stem.isEmpty ? "File" : stem).\(fileExtension)"
+        }
         return temporaryDirectory.appendingPathComponent("\(id.uuidString)-\(name)")
     }
 
@@ -36,8 +45,13 @@ enum AttachmentStaging {
     /// security-scoped access is held. Sending is asynchronous and outlives
     /// both, so staging our own copy is what keeps the bytes alive until the
     /// send completes.
-    static func stageCopy(of source: URL) -> URL? {
-        let dest = temporaryCopyURL(for: source)
+    static func stageCopy(
+        of source: URL,
+        preferredFilenameExtension: String? = nil
+    ) -> URL? {
+        let dest = temporaryCopyURL(
+            for: source,
+            preferredFilenameExtension: preferredFilenameExtension)
         // A UUID-prefixed name makes a collision practically impossible, but
         // clear the destination anyway so copyItem cannot fail on leftovers.
         try? FileManager.default.removeItem(at: dest)
@@ -50,11 +64,15 @@ enum AttachmentStaging {
         in temporaryDirectory: URL = FileManager.default.temporaryDirectory,
         id: UUID = UUID()
     ) -> URL {
-        let trimmedExtension = fileExtension
-            .trimmingCharacters(in: CharacterSet(charactersIn: ".").union(.whitespacesAndNewlines))
-            .lowercased()
+        let trimmedExtension = normalizedFileExtension(fileExtension)
         let name = trimmedExtension.isEmpty ? "Pasted Image" : "Pasted Image.\(trimmedExtension)"
         return temporaryDirectory.appendingPathComponent("\(id.uuidString)-\(name)")
+    }
+
+    private static func normalizedFileExtension(_ fileExtension: String?) -> String {
+        (fileExtension ?? "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".").union(.whitespacesAndNewlines))
+            .lowercased()
     }
 
     static func isInTemporaryDirectory(
