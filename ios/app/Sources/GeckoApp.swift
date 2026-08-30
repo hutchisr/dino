@@ -2785,12 +2785,23 @@ struct MessageBubble: View {
             EmptyView()
         }
     }
+    private func copyMessage() {
+        if msg.fileState == "complete",
+           msg.isImage,
+           !msg.path.isEmpty,
+           let image = UIImage(contentsOfFile: msg.path) {
+            UIPasteboard.general.image = image
+        } else {
+            UIPasteboard.general.string = msg.body
+        }
+    }
+
     private var textActions: MessageTextActions {
         MessageTextActions(
             canEdit: msg.editable,
             reply: { onReply?(msg) },
             edit: { onEdit?(msg) },
-            copy: { UIPasteboard.general.string = msg.body },
+            copy: { copyMessage() },
             more: { onActions?(msg) }
         )
     }
