@@ -44,7 +44,24 @@ struct RoomDetailsView: View {
             .navigationTitle("Room details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+#if targetEnvironment(macCatalyst)
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .padding(4)
+                    }
+                    .accessibilityLabel("Close")
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
+                    .keyboardShortcut(.cancelAction)
+                }
+                .sharedBackgroundVisibility(.hidden)
+#else
                 Button("Close") { dismiss() }
+#endif
             }
         }
         .onAppear {
