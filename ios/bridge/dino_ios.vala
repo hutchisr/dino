@@ -547,7 +547,10 @@ private static string content_item_json(string type, Dino.ContentItem item, Conv
         FileTransfer ft = fi.file_transfer;
         string direction = ft.direction == FileTransfer.DIRECTION_SENT ? "out" : "in";
         string path = "";
-        if (ft.state == FileTransfer.State.COMPLETE) {
+        // Sent files are copied into Dino's storage before upload starts, so
+        // their local path remains valid while IN_PROGRESS. Incoming paths are
+        // exposed only after the download has completed.
+        if (ft.direction == FileTransfer.DIRECTION_SENT || ft.state == FileTransfer.State.COMPLETE) {
             File? f = ft.get_file();
             if (f != null && f.get_path() != null) path = f.get_path();
         }

@@ -99,6 +99,10 @@ public class FileManager : StreamInteractionModule, Object {
             yield save_file(file_transfer);
 
             stream_interactor.get_module(FileTransferStorage.IDENTITY).add_file(file_transfer);
+            // The local copy is complete, but the outgoing transfer remains
+            // pending until its remote send finishes. Publish that state from
+            // the first content-item event so clients never present it as sent.
+            file_transfer.state = FileTransfer.State.IN_PROGRESS;
             conversation.last_active = file_transfer.time;
             received_file(file_transfer, conversation);
         } catch (Error e) {
@@ -148,8 +152,6 @@ public class FileManager : StreamInteractionModule, Object {
             if (file_encryptor != null) {
                 file_send_data = file_encryptor.preprocess_send_file(conversation, file_transfer, file_send_data, file_meta);
             }
-
-            file_transfer.state = FileTransfer.State.IN_PROGRESS;
 
             // Update current download progress in the FileTransfer
             LimitInputStream? limit_stream = file_transfer.input_stream as LimitInputStream;

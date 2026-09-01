@@ -3268,15 +3268,39 @@ struct FileContent: View {
         GeckoDisplayFormatters.fileSize(msg.size)
     }
 
+    private var isUploadingImage: Bool {
+        msg.direction == "out" && msg.fileState == "in_progress"
+    }
+
+    private var showsImagePreview: Bool {
+        msg.isImage
+            && !msg.path.isEmpty
+            && (msg.fileState == "complete" || isUploadingImage)
+    }
+
     var body: some View {
-        if msg.fileState == "complete", msg.isImage, !msg.path.isEmpty {
+        if showsImagePreview {
             // Downsampled + cached off the main thread (CachedThumbnail), not
             // decoded full-res in body on every scroll frame. Static images open
             // the viewer; animated images play and pause in place.
             // CachedThumbnail reserves its final size up front (from the image
             // header) so the row doesn't grow when the decode lands.
-            CachedThumbnail(path: msg.path, onOpen: { onImageTap?(msg.path) })
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+            ZStack {
+                CachedThumbnail(path: msg.path, onOpen: { onImageTap?(msg.path) })
+                    .allowsHitTesting(!isUploadingImage)
+                    .accessibilityHidden(isUploadingImage)
+
+                if isUploadingImage {
+                    ProgressView()
+                        .controlSize(.regular)
+                        .tint(.white)
+                        .padding(12)
+                        .background(.black.opacity(0.5), in: Circle())
+                        .allowsHitTesting(false)
+                        .accessibilityLabel("Uploading image")
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
         } else if msg.fileState == "complete", msg.isVideo, !msg.path.isEmpty {
             Button {
                 onVideoTap?(msg.path)

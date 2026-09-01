@@ -152,6 +152,19 @@ struct SwiftUIMessageList: View {
     /// inverted table's 8pt threshold but a touch looser for SwiftUI's geometry.
     private static let bottomThreshold: CGFloat = 24
 
+    private var newestMessageInsertionAnimation: Animation? {
+#if targetEnvironment(macCatalyst)
+        // A tall row's insertion transition visibly pushes the Catalyst
+        // conversation upward before the explicit bottom scroll begins.
+        // Keep that scroll as the sole visible motion on Mac.
+        return nil
+#else
+        return messageUpdateWasSynced
+            ? nil
+            : .spring(response: 0.32, dampingFraction: 0.86)
+#endif
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -167,9 +180,7 @@ struct SwiftUIMessageList: View {
                                 .allowsHitTesting(false)
                         }
                         .animation(
-                            messageUpdateWasSynced
-                                ? nil
-                                : .spring(response: 0.32, dampingFraction: 0.86),
+                            newestMessageInsertionAnimation,
                             value: newestMessageID)
                     Color.clear
                         .frame(height: 0)
