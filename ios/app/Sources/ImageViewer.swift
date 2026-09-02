@@ -80,6 +80,7 @@ struct ImageViewer: View {
     var onDismiss: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var image: UIImage?
     @State private var failed = false
 
@@ -102,7 +103,10 @@ struct ImageViewer: View {
             NavigationStack {
                 Group {
                     if let image {
-                        ZoomableImageView(image: image, onSwipeDismiss: closeViewer)
+                        ZoomableImageView(
+                            image: image,
+                            reduceMotion: accessibilityReduceMotion,
+                            onSwipeDismiss: closeViewer)
                             .ignoresSafeArea()
                             .background(Color.black)
                     } else if failed {
@@ -194,13 +198,18 @@ struct VideoViewer: View {
 /// view works regardless of when SwiftUI sizes it.
 struct ZoomableImageView: UIViewRepresentable {
     let image: UIImage
+    let reduceMotion: Bool
     var onSwipeDismiss: (() -> Void)? = nil
 
     func makeUIView(context _: Context) -> ImageScrollView {
-        ImageScrollView(image: image, onSwipeDismiss: onSwipeDismiss)
+        ImageScrollView(
+            image: image,
+            reduceMotion: reduceMotion,
+            onSwipeDismiss: onSwipeDismiss)
     }
 
     func updateUIView(_ uiView: ImageScrollView, context _: Context) {
+        uiView.setReduceMotion(reduceMotion)
         uiView.setImage(image)
     }
 }
@@ -210,9 +219,11 @@ final class ImageScrollView: UIScrollView, UIScrollViewDelegate, UIGestureRecogn
     private var displayedImage: UIImage?
     private var lastLaidOutSize: CGSize = .zero
     private let onSwipeDismiss: (() -> Void)?
+    private var reduceMotion: Bool
 
-    init(image: UIImage, onSwipeDismiss: (() -> Void)? = nil) {
+    init(image: UIImage, reduceMotion: Bool, onSwipeDismiss: (() -> Void)? = nil) {
         imageView = UIImageView()
+        self.reduceMotion = reduceMotion
         self.onSwipeDismiss = onSwipeDismiss
         super.init(frame: .zero)
         delegate = self
@@ -242,27 +253,41 @@ final class ImageScrollView: UIScrollView, UIScrollViewDelegate, UIGestureRecogn
     func setImage(_ image: UIImage) {
         if let displayedImage, displayedImage === image { return }
         displayedImage = image
+        configureDisplayedImage()
+        setNeedsLayout()
+    }
+
+    func setReduceMotion(_ reduceMotion: Bool) {
+        guard self.reduceMotion != reduceMotion else { return }
+        self.reduceMotion = reduceMotion
+        configureDisplayedImage()
+    }
+
+    private func configureDisplayedImage() {
+        guard let displayedImage else { return }
+
         imageView.stopAnimating()
         imageView.animationImages = nil
         imageView.animationDuration = 0
         imageView.animationRepeatCount = 0
 
-        if let frames = image.images, frames.count > 1 {
+        if let frames = displayedImage.images, frames.count > 1 {
             imageView.image = frames.first
-            imageView.animationImages = frames
-            imageView.animationDuration = image.duration
-            if window != nil {
-                imageView.startAnimating()
+            if !reduceMotion {
+                imageView.animationImages = frames
+                imageView.animationDuration = displayedImage.duration
+                if window != nil {
+                    imageView.startAnimating()
+                }
             }
         } else {
-            imageView.image = image
+            imageView.image = displayedImage
         }
-        setNeedsLayout()
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil {
+        if window == nil || reduceMotion {
             imageView.stopAnimating()
         } else if imageView.animationImages?.isEmpty == false {
             imageView.startAnimating()

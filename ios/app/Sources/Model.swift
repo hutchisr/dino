@@ -519,10 +519,15 @@ final class AppModel: ObservableObject {
         subscriptionRequests.removeAll { $0 == jid }
     }
 
+    /// First open establishes pagination and replaces any incidental live-only
+    /// cache. Every later open still reconciles the authoritative latest page,
+    /// while retaining older pages already loaded above it.
     func openConversation(_ id: Int32) {
-        pendingOlderMessages.removeValue(forKey: id)
-        historyPagination[id] = HistoryPagination()
-        replacingMessageHistory.insert(id)
+        if historyPagination[id] == nil {
+            pendingOlderMessages.removeValue(forKey: id)
+            historyPagination[id] = HistoryPagination()
+            replacingMessageHistory.insert(id)
+        }
         GeckoCore.shared.requestMessages(conversation: id, count: messagePageSize)
 #if targetEnvironment(macCatalyst)
         restartGroupHistoryRetries(for: id)

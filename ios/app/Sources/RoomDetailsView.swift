@@ -16,6 +16,7 @@ struct RoomDetailsView: View {
     @State private var nameDraft = ""
     @State private var topicDraft = ""
     @State private var showPhotoPicker = false
+    @StateObject private var avatarSelection = AttachmentSelectionPipeline()
     @FocusState private var inviteFocused: Bool
 
     private var occupants: [Occupant] { model.occupants[conversationId] ?? [] }
@@ -27,8 +28,8 @@ struct RoomDetailsView: View {
         let query = inviteJid.trimmingCharacters(in: .whitespaces)
         guard inviteFocused, !query.isEmpty else { return [] }
         return Array(model.roster.lazy.filter {
-            $0.displayName.localizedCaseInsensitiveContains(query) ||
-            $0.id.localizedCaseInsensitiveContains(query)
+            $0.displayName.localizedStandardContains(query) ||
+            $0.id.localizedStandardContains(query)
         }.prefix(5))
     }
 
@@ -81,10 +82,15 @@ struct RoomDetailsView: View {
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker(
                 allowsVideos: false,
+                pipeline: avatarSelection,
                 onPicked: { url in model.setRoomAvatar(conversationId, path: url.path) },
                 onTooLarge: {
                     model.lastError = AttachmentStaging.tooLargeMessage(noun: "image")
-                })
+                },
+                onError: { model.lastError = $0 })
+        }
+        .onDisappear {
+            avatarSelection.cancel()
         }
     }
 
@@ -109,6 +115,7 @@ struct RoomDetailsView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Change room photo")
                 } else {
                     avatar
                 }

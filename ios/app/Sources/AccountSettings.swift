@@ -7,6 +7,7 @@ struct AccountSettingsView: View {
     @State private var newPassword = ""
     @State private var confirmPassword = ""
     @State private var showPhotoPicker = false
+    @StateObject private var avatarSelection = AttachmentSelectionPipeline()
     @State private var aliasSaved = false
     @State private var presenceShow = "online"
     @State private var presenceStatus = ""
@@ -58,6 +59,7 @@ struct AccountSettingsView: View {
                                     }
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Change account photo")
                             Text(jid).font(.caption).foregroundStyle(.secondary)
                             if let state = model.accounts.first?.state {
                                 Text(state.lowercased())
@@ -181,10 +183,12 @@ struct AccountSettingsView: View {
             .sheet(isPresented: $showPhotoPicker) {
                 PhotoPicker(
                     allowsVideos: false,
+                    pipeline: avatarSelection,
                     onPicked: { url in model.setAvatar(path: url.path) },
                     onTooLarge: {
                         model.lastError = AttachmentStaging.tooLargeMessage(noun: "image")
-                    })
+                    },
+                    onError: { model.lastError = $0 })
             }
             .onAppear {
                 model.requestAccountDetails()
@@ -200,6 +204,7 @@ struct AccountSettingsView: View {
             .onChange(of: model.selfShow) { _, _ in if !presenceDirty { syncPresenceFromModel() } }
             .onChange(of: model.selfStatus) { _, _ in if !presenceDirty { syncPresenceFromModel() } }
             .onDisappear {
+                avatarSelection.cancel()
                 if !closingForSignOut { savePresenceIfNeeded() }
             }
             .alert("Password changed", isPresented: $model.passwordChanged) {

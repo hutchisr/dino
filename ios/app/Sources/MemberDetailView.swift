@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Small capsule badge (Owner / Admin / Mod / Muted) shown next to a participant.
 struct MemberBadge: View {
@@ -16,8 +17,11 @@ struct MemberBadge: View {
         .font(.caption2.weight(.semibold))
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
-        .background(color, in: Capsule())
-        .foregroundStyle(.white)
+        .background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+        .foregroundStyle(Color(uiColor: .label))
+        .overlay {
+            Capsule().stroke(color, lineWidth: 1)
+        }
     }
 }
 

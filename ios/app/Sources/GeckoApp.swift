@@ -2,6 +2,17 @@ import SwiftUI
 import UIKit
 import PhotosUI
 
+extension MediaViewerItem: Identifiable {
+    var id: String {
+        switch self {
+        case .image(let path):
+            return "image:\(path)"
+        case .video(let path):
+            return "video:\(path)"
+        }
+    }
+}
+
 enum ChatLayout {
     static let horizontalPadding: CGFloat = 16
 }
@@ -820,8 +831,10 @@ struct RootView: View {
 #endif
             }
 
+        }
 #if !targetEnvironment(macCatalyst)
-            if let item = model.mediaViewerItem {
+        .fullScreenCover(item: $model.mediaViewerItem) { item in
+            Group {
                 switch item {
                 case .image(let path):
                     ImageViewer(path: path) {
@@ -833,15 +846,18 @@ struct RootView: View {
                     }
                 }
             }
-#endif
+            .accessibilityAddTraits(.isModal)
         }
+#endif
         .alert(item: $model.pendingMucInvite) { invitation in
             Alert(
                 title: Text(invitation.failureMessage == nil
                     ? "Group Chat Invitation"
                     : "Couldn’t Join Group Chat"),
                 message: Text(invitationMessage(invitation)),
-                primaryButton: .default(Text(invitation.failureMessage == nil ? "Join" : "Retry")) {
+                primaryButton: .default(
+                    Text(invitation.failureMessage == nil ? "Join" : "Retry")
+                ) {
                     model.acceptMucInvite(invitation)
                 },
                 secondaryButton: .cancel(Text("Ignore")) {
@@ -1704,6 +1720,7 @@ struct ChatView: View {
     @State private var composerHeight: CGFloat = 0
     @State private var keyboardOverlap: CGFloat = 0
     @State private var pendingFileSend: PendingFileSend?
+    @StateObject private var attachmentSelection = AttachmentSelectionPipeline()
 
     private func openMediaViewer(_ item: MediaViewerItem) {
 #if targetEnvironment(macCatalyst)
@@ -1738,6 +1755,7 @@ struct ChatView: View {
 
     private var hasComposerAccessory: Bool {
         editing != nil || replyingTo != nil || pendingFileSend != nil
+            || attachmentSelection.isStaging
     }
 
     private var shouldShowSendButton: Bool {
@@ -1769,6 +1787,18 @@ struct ChatView: View {
                             .font(.caption)
                             .lineLimit(1)
                             .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if attachmentSelection.isStaging {
+                composerBanner(icon: "hourglass", cancelLabel: "Cancel attachment preparation") {
+                    attachmentSelection.cancel()
+                } label: {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Preparing attachment…")
+                            .font(.caption)
                     }
                 }
             }
@@ -1978,8 +2008,8 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(showAttach ? "Close attachments" : "Attach")
-                .disabled(editing != nil)
-                .opacity(editing == nil ? 1 : 0.45)
+                .disabled(editing != nil || attachmentSelection.isStaging)
+                .opacity(editing == nil && !attachmentSelection.isStaging ? 1 : 0.45)
                 // The Photo/File options grow upward out of the plus button —
                 // same GlassEffectContainer, so the glass blends as they emerge
                 // — instead of a system menu popping over it. Anchored to the
@@ -2121,20 +2151,16 @@ struct ChatView: View {
 
     private func stagePastedImage(_ image: ComposerPastedImage) {
         guard editing == nil else { return }
-        let byteCount = Int64(image.data.count)
-        guard AttachmentStaging.canStageFile(byteCount: byteCount) else {
-            model.lastError = AttachmentStaging.tooLargeMessage(noun: "image")
-            return
-        }
-
-        let url = AttachmentStaging.temporaryPastedImageURL(fileExtension: image.fileExtension)
-        do {
-            try image.data.write(to: url, options: .atomic)
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { showAttach = false }
-            setPendingFileSend(url)
-        } catch {
-            model.lastError = "Could not paste this image."
-        }
+        attachmentSelection.stagePastedImage(
+            image,
+            onPicked: { url in
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                    showAttach = false
+                }
+                setPendingFileSend(url)
+            },
+            onTooLarge: { model.lastError = AttachmentStaging.tooLargeMessage(noun: "image") },
+            onError: { model.lastError = $0 })
     }
 
     private func acceptAttachmentForStaging(_ url: URL) -> Bool {
@@ -2203,7 +2229,7 @@ struct ChatView: View {
             },
             onEdit: m.editable ? {
                 replyingTo = nil
-                pendingFileSend = nil
+                cancelPendingFileSend()
                 editing = m
                 draft = m.body
             } : nil)
@@ -2220,6 +2246,7 @@ struct ChatView: View {
             SwiftUIMessageList(
                 messages: chatMessages,
                 messageUpdateWasSynced: model.messageUpdateWasSynced(for: conversationId),
+                messageRevision: model.messageRevision(for: conversationId),
                 historyPageRevision: model.historyPageRevision(for: conversationId),
                 historyPageRenderedRowsAdded:
                     model.historyPageRenderedRowsAdded(for: conversationId),
@@ -2227,6 +2254,7 @@ struct ChatView: View {
                 conversationId: conversationId,
                 isGroupchat: isGroupChat,
                 avatarPaths: model.avatars,
+                avatarRevision: model.avatarRevisionToken,
                 visualTopInset: topChromeInset,
                 visualBottomInset: bottomChromeInset,
                 visualScrollIndicatorTopInset: scrollIndicatorTopInset,
@@ -2255,7 +2283,7 @@ struct ChatView: View {
     /// Shared "begin editing this message" action for both list backends.
     private func editFromList(_ m: ChatMessage) {
         replyingTo = nil
-        pendingFileSend = nil
+        cancelPendingFileSend()
         editing = m
         draft = m.body
     }
@@ -2598,20 +2626,21 @@ struct ChatView: View {
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker(
                 allowsVideos: true,
+                pipeline: attachmentSelection,
                 onPicked: { url in setPendingFileSend(url) },
-                onTooLarge: reportAttachmentTooLarge)
+                onTooLarge: reportAttachmentTooLarge,
+                onError: { model.lastError = $0 })
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
-            if case .success(let url) = result {
-                let scoped = url.startAccessingSecurityScopedResource()
-                guard acceptAttachmentForStaging(url) else {
-                    if scoped { url.stopAccessingSecurityScopedResource() }
-                    return
-                }
-                if let dest = AttachmentStaging.stageCopy(of: url) {
-                    setPendingFileSend(dest)
-                }
-                if scoped { url.stopAccessingSecurityScopedResource() }
+            switch result {
+            case .success(let url):
+                attachmentSelection.stageImportedFile(
+                    url,
+                    onPicked: { stagedURL in setPendingFileSend(stagedURL) },
+                    onTooLarge: reportAttachmentTooLarge,
+                    onError: { model.lastError = $0 })
+            case .failure(let error):
+                model.lastError = "Could not import this file. \(error.localizedDescription)"
             }
         }
         .navigationTitle(conversation?.name ?? "Chat")
@@ -2656,6 +2685,10 @@ struct ChatView: View {
             if isGroupChat { model.requestRoomInfo(conversationId) }
         }
         .onDisappear {
+            let pending = pendingFileSend
+            pendingFileSend = nil
+            cleanupTemporaryAttachment(pending)
+            attachmentSelection.cancel()
             guard talksToCore else { return }
             model.blurConversation(conversationId)
         }
@@ -2764,23 +2797,23 @@ struct MessageBubble: View {
                 Image(systemName: "clock.arrow.circlepath")
                 Text("Pending")
             }
-            .font(.system(size: 9))
+            .font(.caption2)
             .foregroundStyle(.orange)
         case "sending":
-            Image(systemName: "clock").font(.system(size: 8))
+            Image(systemName: "clock")
         case "sent":
-            Image(systemName: "checkmark").font(.system(size: 8))
+            Image(systemName: "checkmark")
         case "received", "acknowledged":
-            Image(systemName: "checkmark").font(.system(size: 8)).foregroundStyle(.secondary)
+            Image(systemName: "checkmark").foregroundStyle(.secondary)
         case "read":
             HStack(spacing: -3) {
                 Image(systemName: "checkmark")
                 Image(systemName: "checkmark")
             }
-            .font(.system(size: 8))
+            .font(.caption2)
             .foregroundStyle(Color.accentColor)
         case "error", "wontsend":
-            Image(systemName: "exclamationmark.circle").font(.system(size: 9)).foregroundStyle(.red)
+            Image(systemName: "exclamationmark.circle").foregroundStyle(.red)
         default:
             EmptyView()
         }
@@ -2879,13 +2912,14 @@ struct MessageBubble: View {
                     }
                     HStack(spacing: 4) {
                         if msg.encryption == "OMEMO" {
-                            Image(systemName: "lock.fill").font(.system(size: 8))
+                            Image(systemName: "lock.fill")
                         }
-                        Text(msg.time, style: .time).font(.system(size: 9))
+                        Text(msg.time, style: .time)
                         if msg.direction == "out" {
                             markIcon
                         }
                     }
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 10)
@@ -3316,14 +3350,19 @@ struct FileContent: View {
             // Files, etc.
             ShareLink(item: URL(fileURLWithPath: msg.path)) { fileRow }
                 .buttonStyle(.plain)
+        } else if isDownloadActionable {
+            Button {
+                onDownloadFile?(msg.id)
+            } label: {
+                fileRow
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(downloadAccessibilityLabel)
+            .accessibilityHint("Downloads this attachment")
         } else {
             fileRow
-                .onTapGesture {
-                    if msg.direction == "in",
-                       msg.fileState == "not_started" || msg.fileState == "failed" {
-                        onDownloadFile?(msg.id)
-                    }
-                }
         }
     }
 
@@ -3349,6 +3388,18 @@ struct FileContent: View {
                 .font(.caption2).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var isDownloadActionable: Bool {
+        msg.direction == "in"
+            && (msg.fileState == "not_started" || msg.fileState == "failed")
+            && onDownloadFile != nil
+    }
+
+    private var downloadAccessibilityLabel: String {
+        let action = msg.fileState == "failed" ? "Retry download" : "Download"
+        let name = msg.fileName.isEmpty ? "file" : msg.fileName
+        return "\(action) \(name)"
     }
 
     private var completeIcon: String {

@@ -141,4 +141,44 @@ final class AttachmentStagingTests: XCTestCase {
             .appendingPathComponent("\(UUID().uuidString)-absent.jpg")
         XCTAssertNil(AttachmentStaging.stageCopy(of: missing))
     }
+
+    func testCancellableCopyPreservesBytesAndPreferredExtension() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let staging = root.appendingPathComponent("staging", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("provider-file")
+        let bytes = Data((0..<10_000).map { UInt8($0 % 251) })
+        try bytes.write(to: source)
+
+        let staged = try AttachmentStaging.stageCopyCancellable(
+            of: source,
+            preferredFilenameExtension: "png",
+            in: staging,
+            copyChunkByteCount: 127,
+            isCancelled: { false })
+
+        XCTAssertTrue(staged.lastPathComponent.hasSuffix("-provider-file.png"))
+        XCTAssertEqual(try Data(contentsOf: staged), bytes)
+    }
+
+    func testCancelledCopyLeavesNoPartialTemporaryFile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let staging = root.appendingPathComponent("staging", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("source.bin")
+        try Data(repeating: 0xA5, count: 1024).write(to: source)
+
+        XCTAssertThrowsError(try AttachmentStaging.stageCopyCancellable(
+            of: source,
+            in: staging,
+            isCancelled: { true })
+        ) { error in
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: staging.path), [])
+    }
 }

@@ -11,12 +11,14 @@ import UIKit
 struct SwiftUIMessageList: View {
     let messages: [ChatMessage]           // chronological: oldest first
     let messageUpdateWasSynced: Bool
+    let messageRevision: Int
     let historyPageRevision: Int
     let historyPageRenderedRowsAdded: Bool
     let canLoadOlderHistory: Bool
     let conversationId: Int32
     let isGroupchat: Bool
     let avatarPaths: [String: String]
+    let avatarRevision: Int
     let visualTopInset: CGFloat
     let visualBottomInset: CGFloat
     let visualScrollIndicatorTopInset: CGFloat
@@ -32,6 +34,11 @@ struct SwiftUIMessageList: View {
     let onVideoTap: (String) -> Void
     let onLoadOlder: () -> Void
     let onActions: (ChatMessage) -> Void
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @Environment(\.calendar) private var calendar
+    @Environment(\.locale) private var locale
+    @Environment(\.timeZone) private var timeZone
+    @State private var rowPresentationCache = RowPresentationCache()
 
     /// Tracks whether the initial "open pinned to the newest message" scroll has
     /// happened. The first populated layout jumps to the bottom instantly; later
@@ -153,6 +160,9 @@ struct SwiftUIMessageList: View {
     private static let bottomThreshold: CGFloat = 24
 
     private var newestMessageInsertionAnimation: Animation? {
+        if accessibilityReduceMotion {
+            return nil
+        }
 #if targetEnvironment(macCatalyst)
         // A tall row's insertion transition visibly pushes the Catalyst
         // conversation upward before the explicit bottom scroll begins.
@@ -281,7 +291,7 @@ struct SwiftUIMessageList: View {
                 geo.contentSize.height
             } action: { _, _ in
                 if didInitialScroll && stickToBottom && !userInteracting {
-                    let animated = shouldAnimateBottomGrowth
+                    let animated = shouldAnimateBottomGrowth && !accessibilityReduceMotion
                     if animated { animateBottomGrowthForNewestID = nil }
                     scrollToNewest(proxy, animated: animated, initial: false)
                 }
@@ -309,10 +319,11 @@ struct SwiftUIMessageList: View {
                         measuredAtBottom: metrics.isAtBottom))
                 guard policy.followsNewest else { return }
                 stickToBottom = true
-                animateBottomGrowthForNewestID = policy.animates ? newest : nil
+                let animated = policy.animates && !accessibilityReduceMotion
+                animateBottomGrowthForNewestID = animated ? newest : nil
                 scrollToNewest(
                     proxy,
-                    animated: policy.animates,
+                    animated: animated,
                     initial: !didInitialScroll)
             }
             .onChange(of: historyPageRevision) { _, _ in
@@ -339,8 +350,9 @@ struct SwiftUIMessageList: View {
                 // any active deceleration from its current offset.
                 userInteracting = false
                 DispatchQueue.main.async {
-                    if !metrics.scrollToBottom(animated: true) {
-                        scrollToNewest(proxy, animated: true, initial: false)
+                    let animated = !accessibilityReduceMotion
+                    if !metrics.scrollToBottom(animated: animated) {
+                        scrollToNewest(proxy, animated: animated, initial: false)
                     }
                 }
             }
@@ -403,9 +415,7 @@ struct SwiftUIMessageList: View {
                                 }
                             })
                 }
-                .transition(.asymmetric(
-                    insertion: .move(edge: .bottom).combined(with: .opacity),
-                    removal: .opacity))
+                .transition(rowInsertionTransition)
         }
     }
 
@@ -716,19 +726,16 @@ struct SwiftUIMessageList: View {
     /// sender-header flags — the same derivation the inverted table does, minus
     /// the reversal (this list is laid out upright).
     private var rows: [Row] {
-        let cal = Calendar.current
-        var out: [Row] = []
-        out.reserveCapacity(messages.count)
-        for (i, msg) in messages.enumerated() {
-            let newDay = i == 0 || !cal.isDate(msg.time, inSameDayAs: messages[i - 1].time)
-            let showSender = isGroupchat && msg.direction == "in"
-                && (newDay || messages[i - 1].from != msg.from)
-            let avatarPath = isGroupchat && msg.direction == "in" ? avatarPaths[msg.from] : nil
-            out.append(Row(msg: msg, showDay: newDay,
-                           dayLabel: GeckoDisplayFormatters.dayLabel(msg.time),
-                           showSender: showSender, senderAvatarPath: avatarPath))
-        }
-        return out
+        rowPresentationCache.rows(
+            messages: messages,
+            messageRevision: messageRevision,
+            conversationId: conversationId,
+            isGroupchat: isGroupchat,
+            avatarPaths: avatarPaths,
+            avatarRevision: avatarRevision,
+            calendar: calendar,
+            localeIdentifier: locale.identifier,
+            timeZoneIdentifier: timeZone.identifier)
     }
 
     @ViewBuilder
@@ -769,6 +776,85 @@ struct SwiftUIMessageList: View {
         let showSender: Bool
         let senderAvatarPath: String?
         var id: Int32 { msg.id }
+    }
+
+    private var rowInsertionTransition: AnyTransition {
+        if accessibilityReduceMotion {
+            return .opacity
+        }
+        return .asymmetric(
+            insertion: .move(edge: .bottom).combined(with: .opacity),
+            removal: .opacity)
+    }
+
+    /// Reference-backed derived-data cache: per-frame scroll state still
+    /// invalidates `body`, but only message/avatar/calendar revisions rebuild
+    /// neighbour grouping, day labels, and avatar presentation.
+    @MainActor
+    private final class RowPresentationCache {
+        private struct Key: Equatable {
+            let conversationId: Int32
+            let messageRevision: Int
+            let messageCount: Int
+            let firstMessageID: Int32?
+            let lastMessageID: Int32?
+            let isGroupchat: Bool
+            let avatarRevision: Int
+            let calendarIdentifier: String
+            let localeIdentifier: String
+            let timeZoneIdentifier: String
+        }
+
+        private var key: Key?
+        private var cachedRows: [Row] = []
+
+        func rows(
+            messages: [ChatMessage],
+            messageRevision: Int,
+            conversationId: Int32,
+            isGroupchat: Bool,
+            avatarPaths: [String: String],
+            avatarRevision: Int,
+            calendar: Calendar,
+            localeIdentifier: String,
+            timeZoneIdentifier: String
+        ) -> [Row] {
+            let nextKey = Key(
+                conversationId: conversationId,
+                messageRevision: messageRevision,
+                messageCount: messages.count,
+                firstMessageID: messages.first?.id,
+                lastMessageID: messages.last?.id,
+                isGroupchat: isGroupchat,
+                avatarRevision: avatarRevision,
+                calendarIdentifier: String(describing: calendar.identifier),
+                localeIdentifier: localeIdentifier,
+                timeZoneIdentifier: timeZoneIdentifier)
+            if key == nextKey {
+                return cachedRows
+            }
+
+            var output: [Row] = []
+            output.reserveCapacity(messages.count)
+            for (index, message) in messages.enumerated() {
+                let startsDay = index == 0
+                    || !calendar.isDate(message.time, inSameDayAs: messages[index - 1].time)
+                let showsSender = isGroupchat && message.direction == "in"
+                    && (startsDay || messages[index - 1].from != message.from)
+                let avatarPath = isGroupchat && message.direction == "in"
+                    ? avatarPaths[message.from]
+                    : nil
+                output.append(Row(
+                    msg: message,
+                    showDay: startsDay,
+                    dayLabel: GeckoDisplayFormatters.dayLabel(message.time),
+                    showSender: showsSender,
+                    senderAvatarPath: avatarPath))
+            }
+            key = nextKey
+            cachedRows = output
+            return output
+        }
     }
 
     /// Resolves the UIKit scroll view that SwiftUI installs around the lazy

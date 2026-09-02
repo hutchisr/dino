@@ -1,7 +1,89 @@
 import Foundation
 
+enum AttachmentStagingError: LocalizedError, Equatable {
+    case tooLarge
+    case copyFailed
+    case writeFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .tooLarge:
+            return AttachmentStaging.tooLargeMessage(noun: "file")
+        case .copyFailed:
+            return "Could not copy this file for sending."
+        case .writeFailed:
+            return "Could not prepare this image for sending."
+        }
+    }
+}
+
+
 enum AttachmentStaging {
     static let maxByteCount: Int64 = 512 * 1024 * 1024
+
+    static func stageCopyCancellable(
+        of source: URL,
+        preferredFilenameExtension: String? = nil,
+        in temporaryDirectory: URL = FileManager.default.temporaryDirectory,
+        maxByteCount: Int64 = Self.maxByteCount,
+        copyChunkByteCount: Int = 1024 * 1024,
+        isCancelled: () -> Bool
+    ) throws -> URL {
+        try checkCancellation(isCancelled)
+        guard canStageFile(
+            byteCount: byteCount(at: source),
+            maxByteCount: maxByteCount
+        ) else {
+            throw AttachmentStagingError.tooLarge
+        }
+
+        let destination = temporaryCopyURL(
+            for: source,
+            preferredFilenameExtension: preferredFilenameExtension,
+            in: temporaryDirectory)
+        do {
+            try copy(
+                source,
+                to: destination,
+                chunkByteCount: max(1, copyChunkByteCount),
+                isCancelled: isCancelled)
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        }
+    }
+
+    static func stagePastedImageCancellable(
+        _ data: Data,
+        fileExtension: String,
+        in temporaryDirectory: URL = FileManager.default.temporaryDirectory,
+        maxByteCount: Int64 = Self.maxByteCount,
+        isCancelled: () -> Bool
+    ) throws -> URL {
+        try checkCancellation(isCancelled)
+        guard canStageFile(
+            byteCount: Int64(data.count),
+            maxByteCount: maxByteCount
+        ) else {
+            throw AttachmentStagingError.tooLarge
+        }
+
+        let destination = temporaryPastedImageURL(
+            fileExtension: fileExtension,
+            in: temporaryDirectory)
+        do {
+            try data.write(to: destination, options: .atomic)
+            try checkCancellation(isCancelled)
+            return destination
+        } catch is CancellationError {
+            try? FileManager.default.removeItem(at: destination)
+            throw CancellationError()
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw AttachmentStagingError.writeFailed
+        }
+    }
 
     static func byteCount(at url: URL) -> Int64? {
         let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
@@ -83,5 +165,49 @@ enum AttachmentStaging {
         var tempPath = temporaryDirectory.standardizedFileURL.path
         if !tempPath.hasSuffix("/") { tempPath += "/" }
         return path.hasPrefix(tempPath)
+    }
+
+    private static func checkCancellation(_ isCancelled: () -> Bool) throws {
+        if isCancelled() {
+            throw CancellationError()
+        }
+    }
+
+    private static func copy(
+        _ source: URL,
+        to destination: URL,
+        chunkByteCount: Int,
+        isCancelled: () -> Bool
+    ) throws {
+        try? FileManager.default.removeItem(at: destination)
+        guard FileManager.default.createFile(
+            atPath: destination.path,
+            contents: nil
+        ) else {
+            throw AttachmentStagingError.copyFailed
+        }
+
+        do {
+            let input = try FileHandle(forReadingFrom: source)
+            let output = try FileHandle(forWritingTo: destination)
+            defer {
+                try? input.close()
+                try? output.close()
+            }
+
+            while true {
+                try checkCancellation(isCancelled)
+                guard let chunk = try input.read(upToCount: chunkByteCount),
+                      !chunk.isEmpty else {
+                    break
+                }
+                try output.write(contentsOf: chunk)
+            }
+            try checkCancellation(isCancelled)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw AttachmentStagingError.copyFailed
+        }
     }
 }

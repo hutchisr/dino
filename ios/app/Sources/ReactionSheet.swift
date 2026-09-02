@@ -13,104 +13,156 @@ struct ReactionSheet: View {
     @State private var detent: PresentationDetent = .fraction(0.45)
     @FocusState private var searchFocused: Bool
 
-    private static let quickEmojis = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "🦎"]
+    private struct EmojiItem: Identifiable {
+        let emoji: String
+        let name: String
+        var id: String { emoji }
+    }
 
-    /// Every emoji with default emoji presentation, straight from Unicode
-    /// metadata — no curated list to go stale — paired with its lowercased
-    /// Unicode name so the grid can be searched (e.g. "fire" → 🔥).
-    private static let allEmojis: [(emoji: String, name: String)] = {
-        var out: [(String, String)] = []
+    private static let quickEmojis: [EmojiItem] = [
+        EmojiItem(emoji: "👍", name: "thumbs up"),
+        EmojiItem(emoji: "❤️", name: "red heart"),
+        EmojiItem(emoji: "😂", name: "face with tears of joy"),
+        EmojiItem(emoji: "😮", name: "face with open mouth"),
+        EmojiItem(emoji: "😢", name: "crying face"),
+        EmojiItem(emoji: "🔥", name: "fire"),
+        EmojiItem(emoji: "🎉", name: "party popper"),
+        EmojiItem(emoji: "🦎", name: "lizard"),
+    ]
+
+    /// Lightweight Unicode scalar catalog. This intentionally favors the
+    /// common default-presentation emoji over the much larger RGI sequence set.
+    private static let allEmojis: [EmojiItem] = {
         let ranges: [ClosedRange<UInt32>] = [
             0x1F600...0x1F64F,  // smileys
             0x1F900...0x1F9FF,  // supplemental symbols
             0x1FA70...0x1FAFF,  // extended-A
-            0x1F300...0x1F5FF,  // misc symbols & pictographs
+            0x1F300...0x1F5FF,  // misc symbols and pictographs
             0x1F680...0x1F6FF,  // transport
             0x2600...0x26FF,    // misc symbols
             0x2700...0x27BF,    // dingbats
         ]
+        var items: [EmojiItem] = []
         for range in ranges {
             for value in range {
                 guard let scalar = Unicode.Scalar(value),
                       scalar.properties.isEmojiPresentation else { continue }
-                out.append((String(scalar), (scalar.properties.name ?? "").lowercased()))
+                items.append(
+                    EmojiItem(
+                        emoji: String(scalar),
+                        name: (scalar.properties.name ?? "").lowercased()
+                    )
+                )
             }
         }
-        return out
+        return items
     }()
 
-    private var filteredEmojis: [(emoji: String, name: String)] {
-        let query = search.trimmingCharacters(in: .whitespaces).lowercased()
+    private var filteredEmojis: [EmojiItem] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return Self.allEmojis }
         return Self.allEmojis.filter { $0.name.contains(query) }
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            Capsule().fill(Color(.systemGray4)).frame(width: 36, height: 5).padding(.top, 8)
-
-            HStack(spacing: 10) {
-                ForEach(Self.quickEmojis, id: \.self) { emoji in
-                    Button {
-                        onReact(emoji)
-                        dismiss()
-                    } label: {
-                        Text(emoji).font(.system(size: 28))
+        NavigationStack {
+            VStack(spacing: 12) {
+                HStack(spacing: 10) {
+                    ForEach(Self.quickEmojis) { item in
+                        Button {
+                            onReact(item.emoji)
+                            dismiss()
+                        } label: {
+                            Text(item.emoji).font(.system(size: 28))
+                        }
+                        .accessibilityLabel(item.name)
+#if targetEnvironment(macCatalyst)
+                        .buttonStyle(.plain)
+#endif
                     }
                 }
-            }
-            .padding(.horizontal)
+                .padding(.horizontal)
 
-            HStack(spacing: 24) {
-                Button {
-                    onReply()
-                    dismiss()
-                } label: {
-                    Label("Reply", systemImage: "arrowshape.turn.up.left")
-                }
-                if let onEdit {
+                HStack(spacing: 24) {
                     Button {
-                        onEdit()
+                        onReply()
                         dismiss()
                     } label: {
-                        Label("Edit", systemImage: "pencil")
+                        Label("Reply", systemImage: "arrowshape.turn.up.left")
                     }
-                }
-                if !msg.isFile {
-                    Button {
-                        UIPasteboard.general.string = msg.body
-                        dismiss()
-                    } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
-                    }
-                }
-            }
-            .font(.callout)
-
-            Divider()
-
-            searchBar
-
-            ScrollView {
-                if filteredEmojis.isEmpty {
-                    ContentUnavailableView.search(text: search)
-                        .padding(.top, 24)
-                } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))], spacing: 6) {
-                        ForEach(filteredEmojis, id: \.emoji) { item in
-                            Button {
-                                onReact(item.emoji)
-                                dismiss()
-                            } label: {
-                                Text(item.emoji).font(.system(size: 30))
-                            }
+                    if let onEdit {
+                        Button {
+                            onEdit()
+                            dismiss()
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
                         }
                     }
-                    .padding(.horizontal, 12)
+                    if !msg.isFile {
+                        Button {
+                            UIPasteboard.general.string = msg.body
+                            dismiss()
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
+                    }
                 }
+                .font(.callout)
+
+                Divider()
+
+                searchBar
+
+                ScrollView {
+                    if filteredEmojis.isEmpty {
+                        ContentUnavailableView.search(text: search)
+                            .padding(.top, 24)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))], spacing: 6) {
+                            ForEach(filteredEmojis) { item in
+                                Button {
+                                    onReact(item.emoji)
+                                    dismiss()
+                                } label: {
+                                    Text(item.emoji).font(.system(size: 30))
+                                }
+                                .accessibilityLabel(item.name)
+#if targetEnvironment(macCatalyst)
+                                .buttonStyle(.plain)
+#endif
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                    }
+                }
+#if targetEnvironment(macCatalyst)
+                // Wheel events require a rendered native hit-test surface; a
+                // contentShape alone does not cover transparent grid gaps.
+                .background(Color(uiColor: .systemBackground))
+#endif
+                // Dismiss the keyboard when the user starts scrolling the grid.
+                .scrollDismissesKeyboard(.immediately)
             }
-            // Dismiss the keyboard when the user starts scrolling the grid.
-            .scrollDismissesKeyboard(.immediately)
+            .toolbar {
+#if targetEnvironment(macCatalyst)
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .padding(4)
+                    }
+                    .accessibilityLabel("Close")
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
+                    .keyboardShortcut(.cancelAction)
+                }
+                .sharedBackgroundVisibility(.hidden)
+#else
+                Button("Close") { dismiss() }
+#endif
+            }
         }
         .presentationDetents([.fraction(0.45), .large], selection: $detent)
         .presentationDragIndicator(.hidden)
