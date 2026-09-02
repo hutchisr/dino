@@ -143,8 +143,11 @@ struct ReactionSheet: View {
                 // Dismiss the keyboard when the user starts scrolling the grid.
                 .scrollDismissesKeyboard(.immediately)
             }
-            .toolbar {
+#if !targetEnvironment(macCatalyst)
+            .padding(.top, 25)
+#endif
 #if targetEnvironment(macCatalyst)
+            .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
                         dismiss()
@@ -159,13 +162,15 @@ struct ReactionSheet: View {
                     .keyboardShortcut(.cancelAction)
                 }
                 .sharedBackgroundVisibility(.hidden)
-#else
-                Button("Close") { dismiss() }
-#endif
             }
+#endif
         }
         .presentationDetents([.fraction(0.45), .large], selection: $detent)
+#if targetEnvironment(macCatalyst)
         .presentationDragIndicator(.hidden)
+#else
+        .presentationDragIndicator(.visible)
+#endif
         // Expand to full height when searching so the keyboard doesn't cover
         // the results.
         .onChange(of: searchFocused) { _, focused in
