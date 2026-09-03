@@ -7,6 +7,9 @@ final class ScrollToBottomAnimator: NSObject {
     private var startOffset = CGPoint.zero
     private var startTime: CFTimeInterval = 0
     private var duration: CFTimeInterval = 0
+    var isAnimating: Bool {
+        displayLink != nil
+    }
 
     @MainActor
     func scrollToBottom(_ scrollView: UIScrollView, animated: Bool) -> Bool {

@@ -101,20 +101,78 @@ struct SwiftUIMessageList: View {
         var historyLoadTrigger = HistoryLoadTrigger()
         weak var scrollView: UIScrollView?
         private let bottomScrollAnimator = ScrollToBottomAnimator()
+        private var pendingBottomScrollTask: Task<Void, Never>?
+        private var pendingBottomScrollPriority = Int.min
+        private var bottomScrollGeneration = 0
 
-        /// Takes ownership from active deceleration and drives the native
-        /// scroll view to its live lower boundary with deterministic timing.
+        var isBottomScrollAnimating: Bool {
+            bottomScrollAnimator.isAnimating
+        }
+
+        /// Coalesces bottom-scroll requests onto one post-layout task. A higher
+        /// priority request owns the pending turn; lower-priority geometry pins
+        /// cannot replace an explicit command or newest-message follow.
         @MainActor
-        func scrollToBottom(animated: Bool) -> Bool {
+        func scheduleBottomScroll(
+            priority: Int,
+            delay: Duration? = nil,
+            interruptsActiveAnimation: Bool = false,
+            action: @escaping @MainActor () -> Void
+        ) {
+            if bottomScrollAnimator.isAnimating {
+                guard interruptsActiveAnimation else { return }
+                bottomScrollAnimator.cancel()
+            }
+            guard pendingBottomScrollTask == nil
+                    || priority >= pendingBottomScrollPriority else { return }
+
+            cancelPendingBottomScroll()
+            pendingBottomScrollPriority = priority
+            let generation = bottomScrollGeneration
+            pendingBottomScrollTask = Task { @MainActor [weak self] in
+                await Task.yield()
+                if let delay {
+                    try? await Task<Never, Never>.sleep(for: delay)
+                }
+                guard let self,
+                      !Task.isCancelled,
+                      self.bottomScrollGeneration == generation else { return }
+                self.pendingBottomScrollTask = nil
+                self.pendingBottomScrollPriority = Int.min
+                // Native startup calls layoutIfNeeded before installing its
+                // display link. That layout can enqueue another geometry pin,
+                // so ownership must be checked again when the task executes.
+                if self.bottomScrollAnimator.isAnimating {
+                    guard interruptsActiveAnimation else { return }
+                    self.bottomScrollAnimator.cancel()
+                }
+                action()
+            }
+        }
+
+        @MainActor
+        func cancelPendingBottomScroll() {
+            bottomScrollGeneration &+= 1
+            pendingBottomScrollTask?.cancel()
+            pendingBottomScrollTask = nil
+            pendingBottomScrollPriority = Int.min
+        }
+
+        @MainActor
+        func cancelBottomScrollWork() {
+            cancelPendingBottomScroll()
+            bottomScrollAnimator.cancel()
+        }
+
+        /// Takes ownership from pending proxy work and active deceleration, then
+        /// drives the native scroll view to its live lower boundary.
+        @MainActor
+        func startNativeBottomScroll(animated: Bool) -> Bool {
+            cancelPendingBottomScroll()
             guard let scrollView else { return false }
             return bottomScrollAnimator.scrollToBottom(
                 scrollView,
                 animated: animated)
-        }
-
-        @MainActor
-        func cancelBottomScrollAnimation() {
-            bottomScrollAnimator.cancel()
         }
     }
 
@@ -158,6 +216,22 @@ struct SwiftUIMessageList: View {
     /// rest under rubber-banding / sub-pixel offsets. Matches the spirit of the
     /// inverted table's 8pt threshold but a touch looser for SwiftUI's geometry.
     private static let bottomThreshold: CGFloat = 24
+    private enum BottomScrollPriority: Int {
+        case growthPin
+        case newestMessage
+        case initialPosition
+        case explicitCommand
+    }
+
+    private static var bottomGrowthSettleDelay: Duration? {
+#if targetEnvironment(macCatalyst)
+        // Let animated content-margin changes settle instead of feeding one
+        // proxy scroll per intermediate Catalyst layout frame.
+        .milliseconds(24)
+#else
+        nil
+#endif
+    }
 
     private var newestMessageInsertionAnimation: Animation? {
         if accessibilityReduceMotion {
@@ -281,20 +355,26 @@ struct SwiftUIMessageList: View {
                 metrics.fullyVisibleMessageID = ids.first
                 refreshHistoryRequestIfNeeded()
             }
-            // Stay pinned to the newest message as the content height settles
-            // after open — a LazyVStack with image rows keeps growing as those
-            // rows materialise and decode (and on-device the image previews
-            // render later still), which would otherwise leave us parked just
-            // above the last message. Re-pin on every growth while we intend to
-            // stay glued; only a deliberate user scroll releases that intent.
+            // Stay pinned to the newest message as content settles after open.
+            // Geometry growth is a low-priority, coalesced post-layout pin; on
+            // Catalyst the short debounce absorbs intermediate composer-margin
+            // frames instead of feeding scroll mutations back into layout.
             .onScrollGeometryChange(for: CGFloat.self) { geo in
                 geo.contentSize.height
             } action: { _, _ in
-                if didInitialScroll && stickToBottom && !userInteracting {
-                    let animated = shouldAnimateBottomGrowth && !accessibilityReduceMotion
-                    if animated { animateBottomGrowthForNewestID = nil }
-                    scrollToNewest(proxy, animated: animated, initial: false)
-                }
+                guard didInitialScroll,
+                      stickToBottom,
+                      !userInteracting,
+                      !metrics.awaitingHistoryRestoreGeometry else { return }
+                let animated = shouldAnimateBottomGrowth && !accessibilityReduceMotion
+                scrollToNewest(
+                    proxy,
+                    animated: animated,
+                    initial: false,
+                    priority: animated ? .newestMessage : .growthPin,
+                    delay: animated
+                        ? nil
+                        : Self.bottomGrowthSettleDelay)
             }
             // Open pinned to the newest message. We deliberately do NOT use
             // `.defaultScrollAnchor(.bottom)`: on a ScrollView that starts empty
@@ -303,10 +383,14 @@ struct SwiftUIMessageList: View {
             // bottom anchor that exists before the final row is materialised.
             .onAppear {
                 metrics.newestMessageID = newestMessageID
-                scrollToNewest(proxy, animated: false, initial: true)
+                scrollToNewest(
+                    proxy,
+                    animated: false,
+                    initial: true,
+                    priority: .initialPosition)
             }
             .onDisappear {
-                metrics.cancelBottomScrollAnimation()
+                metrics.cancelBottomScrollWork()
             }
             .onChange(of: newestMessageID) { _, newest in
                 metrics.newestMessageID = newest
@@ -324,7 +408,8 @@ struct SwiftUIMessageList: View {
                 scrollToNewest(
                     proxy,
                     animated: animated,
-                    initial: !didInitialScroll)
+                    initial: !didInitialScroll,
+                    priority: didInitialScroll ? .newestMessage : .initialPosition)
             }
             .onChange(of: historyPageRevision) { _, _ in
                 // Nonterminal pages are completed by the content-size-aware
@@ -345,32 +430,33 @@ struct SwiftUIMessageList: View {
             }
             .onChange(of: scrollToBottomToken) { _, _ in
                 stickToBottom = true
-                // Defer one run-loop turn so the UIKit resolver and latest
-                // layout target are ready. The display-link animator takes over
-                // any active deceleration from its current offset.
                 userInteracting = false
-                DispatchQueue.main.async {
-                    let animated = !accessibilityReduceMotion
-                    if !metrics.scrollToBottom(animated: animated) {
-                        scrollToNewest(proxy, animated: animated, initial: false)
-                    }
-                }
+                scrollToNewest(
+                    proxy,
+                    animated: !accessibilityReduceMotion,
+                    initial: false,
+                    priority: .explicitCommand,
+                    interruptsActiveAnimation: true)
             }
-            // Track in-flight scrolling so content-growth re-pins never fight
-            // the current motion. Catalyst reports fast wheel and programmatic
-            // momentum as `.animating`; treating every non-idle phase as active
-            // prevents recursive scrollTo calls there. Keep iOS's narrower
-            // user-driven phase semantics unchanged.
+            // Track in-flight scrolling so content-growth pins don't fight user
+            // motion. Catalyst reports both fast-wheel and coordinated motion
+            // as `.animating`, so only the former cancels bottom-scroll work.
+            // Keep iOS's narrower user-driven phase semantics unchanged.
             .onScrollPhaseChange { previous, phase, context in
 #if targetEnvironment(macCatalyst)
-                userInteracting = phase != .idle
+                let isCoordinatedAnimation =
+                    phase == .animating && metrics.isBottomScrollAnimating
+                userInteracting = phase != .idle && !isCoordinatedAnimation
+                if phase == .animating && !isCoordinatedAnimation {
+                    metrics.cancelBottomScrollWork()
+                }
 #else
                 userInteracting = phase == .tracking
                     || phase == .interacting
                     || phase == .decelerating
 #endif
                 if phase == .tracking || phase == .interacting {
-                    metrics.cancelBottomScrollAnimation()
+                    metrics.cancelBottomScrollWork()
                 }
                 if phase == .tracking || (phase == .interacting && previous == .idle) {
                     metrics.historyLoadTrigger.beginUserScroll()
@@ -419,12 +505,17 @@ struct SwiftUIMessageList: View {
         }
     }
 
-    /// Bring the newest row into view, if there is one. `initial` marks the
-    /// first open-at-bottom jump and flips `didInitialScroll`.
+    /// Bring the newest row into view through the single bottom-scroll
+    /// coordinator. Animated requests use the native driver when available;
+    /// proxy fallback is deliberately nonanimated so the two drivers can never
+    /// own the scroll view concurrently.
     private func scrollToNewest(
         _ proxy: ScrollViewProxy,
         animated: Bool,
-        initial: Bool
+        initial: Bool,
+        priority: BottomScrollPriority,
+        delay: Duration? = nil,
+        interruptsActiveAnimation: Bool = false
     ) {
         guard let last = rows.last?.id else { return }
         if initial {
@@ -434,21 +525,20 @@ struct SwiftUIMessageList: View {
             animateBottomGrowthForNewestID = nil
             enableOlderLoadingIfReady()
         }
-        // Defer a tick so the non-lazy bottom anchor has joined the hierarchy
-        // before the reader brings it into view.
-        Task { @MainActor in
-            await Task.yield()
-            if animated {
-                // Scale the duration with the distance to the bottom so a scroll
-                // from far up doesn't whip past in a fixed-time blur — the same
-                // constant-glide policy the UIKit animator uses.
-                let duration = bottomScrollAnimationDuration(
-                    distance: Double(metrics.distanceFromBottom))
-                withAnimation(.easeInOut(duration: duration)) {
+
+        metrics.scheduleBottomScroll(
+            priority: priority.rawValue,
+            delay: delay,
+            interruptsActiveAnimation: interruptsActiveAnimation
+        ) {
+            let usedNativeAnimator = animated
+                && metrics.startNativeBottomScroll(animated: true)
+            if !usedNativeAnimator {
+                var transaction = Transaction(animation: nil)
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
-            } else {
-                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
             }
             if newestMessageID == last {
                 lastSettledNewestID = last
@@ -588,6 +678,8 @@ struct SwiftUIMessageList: View {
         after sample: ScrollSample,
         proxy: ScrollViewProxy
     ) {
+        // Viewport preservation owns the scroll view until its geometry settles.
+        metrics.cancelBottomScrollWork()
         let expectedDistanceFromTop: CGFloat
         switch viewportAnchor.kind {
         case .viewport:
@@ -615,6 +707,9 @@ struct SwiftUIMessageList: View {
                 // before this fallback ran.
                 return
             }
+            // Reassert viewport-restore ownership after the deferred turn in
+            // case another source queued bottom work while this task yielded.
+            metrics.cancelBottomScrollWork()
             var transaction = Transaction(animation: nil)
             transaction.disablesAnimations = true
             transaction.scrollPositionUpdatePreservesVelocity = true
@@ -630,7 +725,7 @@ struct SwiftUIMessageList: View {
             // `scrollTo` normally emits geometry on the next layout pass. If it
             // does not, fail closed instead of inventing a settled offset that
             // could cascade into another page request.
-            try? await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
+            try? await Task<Never, Never>.sleep(for: .milliseconds(250))
             guard metrics.awaitingHistoryRestoreGeometry,
                   metrics.historyRestoreGeneration == generation else { return }
             metrics.awaitingHistoryRestoreGeometry = false
