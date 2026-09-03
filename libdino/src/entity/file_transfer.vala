@@ -258,6 +258,8 @@ public class FileTransfer : Object {
     }
 
     private void on_update(Object o, ParamSpec sp) {
+        if (sp.name == "transferred-bytes") return;
+
         Qlite.UpdateBuilder update_builder = db.file_transfer.update().with(db.file_transfer.id, "=", id);
         switch (sp.name) {
             case "file-sharing-id":

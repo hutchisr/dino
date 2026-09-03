@@ -2769,6 +2769,7 @@ struct MessageBubble: View {
     var onAvatarNeeded: ((String) -> Void)? = nil
     var onReaction: ((String, Bool) -> Void)? = nil
     var onDownloadFile: ((Int32) -> Void)? = nil
+    var downloadProgress: FileTransferProgressState? = nil
 
     @State private var dragOffset: CGFloat = 0
     @State private var replyArmed = false
@@ -2905,8 +2906,12 @@ struct MessageBubble: View {
                         .padding(.bottom, 2)
                     }
                     if msg.isFile {
-                        FileContent(msg: msg, onImageTap: onImageTap, onVideoTap: onVideoTap,
-                                    onDownloadFile: onDownloadFile)
+                        FileContent(
+                            msg: msg,
+                            downloadProgress: downloadProgress,
+                            onImageTap: onImageTap,
+                            onVideoTap: onVideoTap,
+                            onDownloadFile: onDownloadFile)
                     } else {
                         messageBody(msg.body, actions: textActions)
                     }
@@ -3294,6 +3299,7 @@ struct CachedVideoThumbnail: View {
 
 struct FileContent: View {
     let msg: ChatMessage
+    var downloadProgress: FileTransferProgressState? = nil
     var onImageTap: ((String) -> Void)? = nil
     var onVideoTap: ((String) -> Void)? = nil
     var onDownloadFile: ((Int32) -> Void)? = nil
@@ -3350,12 +3356,16 @@ struct FileContent: View {
             // Files, etc.
             ShareLink(item: URL(fileURLWithPath: msg.path)) { fileRow }
                 .buttonStyle(.plain)
+        } else if msg.direction == "in", msg.fileState == "in_progress",
+                  let downloadProgress {
+            FileDownloadProgressRow(
+                state: downloadProgress,
+                fileName: msg.fileName.isEmpty ? "File" : msg.fileName)
         } else if isDownloadActionable {
             Button {
                 onDownloadFile?(msg.id)
             } label: {
                 fileRow
-                    .frame(minHeight: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -3388,6 +3398,7 @@ struct FileContent: View {
                 .font(.caption2).foregroundStyle(.secondary)
             }
         }
+        .frame(minHeight: 44)
     }
 
     private var isDownloadActionable: Bool {

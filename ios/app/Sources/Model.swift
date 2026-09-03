@@ -196,6 +196,7 @@ final class AppModel: ObservableObject {
     @Published private var historyPageRevisions: [Int32: Int] = [:]
     @Published private var historyPageRenderedRowsAdded: [Int32: Bool] = [:]
     private var avatarRevision = 0
+    private let fileTransferProgressStore = FileTransferProgressStore()
 
     private var booted = false
     private var applicationIsActive = false
@@ -203,6 +204,14 @@ final class AppModel: ObservableObject {
 
     var hasAccount: Bool { !accounts.isEmpty }
     var avatarRevisionToken: Int { avatarRevision }
+
+    func fileTransferProgressState(
+        for conversation: Int32,
+        item: Int32
+    ) -> FileTransferProgressState? {
+        fileTransferProgressStore.state(
+            for: FileTransferProgressKey(conversation: conversation, item: item))
+    }
 
     func messageRevision(for conversation: Int32) -> Int {
         messageRevisions[conversation] ?? 0
@@ -636,6 +645,7 @@ final class AppModel: ObservableObject {
             historyPagination = [:]
             replacingMessageHistory = []
             pendingOlderMessages = [:]
+            fileTransferProgressStore.removeAll()
             replaceNavigation(with: [])
             roster = []
             subscriptionRequests = []
@@ -903,11 +913,29 @@ final class AppModel: ObservableObject {
                     }
                 }
             }
+        case "file_progress":
+            if let event = FileTransferProgressEvent(dictionary: e),
+               let message = messages[event.conversationID]?.first(where: {
+                   $0.id == event.itemID
+               }),
+               message.isFile,
+               message.direction == "in",
+               message.fileState == "in_progress" {
+                fileTransferProgressStore.update(
+                    FileTransferProgressKey(
+                        conversation: event.conversationID,
+                        item: event.itemID
+                    ),
+                    transferredBytes: event.progress.transferredBytes,
+                    totalBytes: event.progress.totalBytes
+                )
+            }
         case "message":
             if let m = Self.decodeMessage(e), let cid = e["conversation"] as? Int {
                 let conversationId = Int32(cid)
                 let isNew = !(messages[conversationId]?.contains { $0.id == m.id } ?? false)
                 let isSynced = e["synced"] as? Bool ?? false
+                reconcileFileTransferProgress(for: m, conversation: conversationId)
                 mergeMessages([m], for: conversationId, synced: isSynced)
 #if targetEnvironment(macCatalyst)
                 if let conversation = conversations.first(where: { $0.id == conversationId }) {
@@ -937,6 +965,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func reconcileFileTransferProgress(
+        for message: ChatMessage,
+        conversation: Int32
+    ) {
+        guard message.isFile, message.direction == "in" else { return }
+        let key = FileTransferProgressKey(conversation: conversation, item: message.id)
+        if message.fileState == "in_progress" {
+            fileTransferProgressStore.begin(
+                key,
+                totalBytes: message.size >= 0 ? Int64(message.size) : nil
+            )
+        } else {
+            fileTransferProgressStore.remove(key)
+        }
+    }
+
     private func removeMucConversation(_ id: Int32, room: String, reason: String) {
         lastError = MucRemoval(
             conversationID: id,
@@ -948,6 +992,7 @@ final class AppModel: ObservableObject {
             id: { $0.id },
             name: { $0.name }
         )
+        fileTransferProgressStore.removeAll(in: id)
         messages[id] = nil
         messageRevisions[id] = nil
         messageUpdateWasSynced[id] = nil
@@ -1205,6 +1250,22 @@ final class AppModel: ObservableObject {
                     if let img = self.messages[conv.id]?.last(where: { $0.isImage && $0.fileState == "complete" && !$0.path.isEmpty }) {
                         self.viewerRequest = img.path
                     }
+                }
+            }
+            if env["DINO_AUTODOWNLOAD"] != nil {
+                let requestedItem = env["DINO_AUTODOWNLOAD_ITEM"].flatMap(Int32.init)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                    guard self.navigation.last == conv.id,
+                          let file = self.messages[conv.id]?.last(where: {
+                              $0.isFile
+                                  && $0.direction == "in"
+                                  && ($0.fileState == "not_started" || $0.fileState == "failed")
+                                  && (requestedItem == nil || $0.id == requestedItem)
+                          })
+                    else {
+                        return
+                    }
+                    self.downloadFile(conv.id, item: file.id)
                 }
             }
             if env["DINO_AUTOSENDFILE"] != nil {

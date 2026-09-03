@@ -120,11 +120,7 @@ public class FileProvider : Dino.FileProvider, Object {
 #else
         InputStream stream = yield session.send_async(get_message, file_transfer.cancellable);
 #endif
-        if (file_meta.size != -1) {
-            return new LimitInputStream(stream, file_meta.size);
-        } else {
-            return stream;
-        }
+        return new LimitInputStream(stream, file_meta.size);
     }
 
     public FileMeta get_file_meta(FileTransfer file_transfer) throws FileReceiveError {

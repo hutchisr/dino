@@ -39,6 +39,24 @@ private static bool nse_mode = false;
 private static Dino.Plugins.Omemo.Plugin? omemo_plugin = null;
 #endif
 
+private const uint FILE_PROGRESS_INTERVAL_MS = 200;
+
+private class FileObservation : Object {
+    public Dino.FileItem item;
+    public Conversation conversation;
+    public uint progress_timer;
+    public ulong state_handler;
+    public ulong transferred_handler;
+    public ulong size_handler;
+
+    public FileObservation(Dino.FileItem item, Conversation conversation) {
+        this.item = item;
+        this.conversation = conversation;
+    }
+}
+
+private static Gee.HashMap<string, FileObservation>? file_observations = null;
+
 private static void emit(string json) {
     if (event_cb != null) event_cb(json);
 }
@@ -207,6 +225,7 @@ private static void nse_finish() {
 }
 
 private static async void nse_shutdown() {
+    clear_file_observations();
     try {
         var cm = app.stream_interactor.connection_manager;
         foreach (Account account in app.db.get_accounts()) {
@@ -331,6 +350,8 @@ public void start(owned EventCb cb) {
         message("gecko: application created");
 
         var si = app.stream_interactor;
+        app.shutdown.connect(() => clear_file_observations());
+        si.account_removed.connect((account) => clear_file_observations_for_account(account));
         string? log_xmpp = Environment.get_variable("DINO_LOG_XMPP");
         if (log_xmpp != null) si.connection_manager.log_options = log_xmpp;
         si.connection_manager.connection_state_changed.connect((account, state) => {
@@ -345,14 +366,16 @@ public void start(owned EventCb cb) {
         si.connection_manager.connection_error.connect((account, error) => {
             emit(@"{\"type\":\"connection_error\",\"account\":\"$(esc(account.bare_jid.to_string()))\",\"source\":\"$(error.source)\"}");
         });
-        si.get_module(Dino.ContentItemStore.IDENTITY).new_item.connect((item, conversation) => {
+        var content_store = si.get_module(Dino.ContentItemStore.IDENTITY);
+        var file_manager = si.get_module(Dino.FileManager.IDENTITY);
+        file_manager.download_started.connect((file_transfer, conversation) => {
+            var item = file_item_for_active_transfer(file_transfer, conversation);
+            if (item != null) observe_file(item, conversation, true);
+        });
+        content_store.new_item.connect((item, conversation) => {
             emit(content_item_json("message", item, conversation));
             var fi = item as Dino.FileItem;
-            if (fi != null) {
-                fi.file_transfer.notify["state"].connect(() => {
-                    emit(content_item_json("message", fi, conversation));
-                });
-            }
+            if (fi != null) observe_file(fi, conversation, false);
             var mi = item as Dino.MessageItem;
             if (mi != null) {
                 mi.message.notify["marked"].connect(() => {
@@ -373,7 +396,8 @@ public void start(owned EventCb cb) {
         si.get_module(Dino.AvatarManager.IDENTITY).fetched_avatar.connect((jid, account) => {
             push_avatar(account, jid);
         });
-        si.get_module(Dino.ConversationManager.IDENTITY).conversation_activated.connect((conversation) => {
+        var conversation_manager = si.get_module(Dino.ConversationManager.IDENTITY);
+        conversation_manager.conversation_activated.connect((conversation) => {
             push_conversations();
         });
         // Re-emit room state when the server broadcasts a change (subject, or a
@@ -396,6 +420,7 @@ public void start(owned EventCb cb) {
                 .get_conversation(room.bare_jid, account, Conversation.Type.GROUPCHAT);
             if (conv != null) {
                 emit(@"{\"type\":\"muc_removed\",\"conversation\":$(conv.id),\"account\":\"$(esc(account.bare_jid.to_string()))\",\"room\":\"$(esc(room.bare_jid.to_string()))\",\"reason\":\"$(muc_removal_reason(code))\"}");
+                clear_file_observations_for_conversation(conv);
             }
             push_conversations();
         });
@@ -562,6 +587,133 @@ private static string content_item_json(string type, Dino.ContentItem item, Conv
     }
     return "{\"type\":\"%s\",\"conversation\":%d,\"item\":%d,\"content\":\"%s\",\"time\":%lld}".printf(
         type, conversation.id, item.id, esc(item.type_), item.time.to_unix());
+}
+
+private static Gee.HashMap<string, FileObservation> file_observation_map() {
+    if (file_observations == null) {
+        file_observations = new Gee.HashMap<string, FileObservation>();
+    }
+    return (!)file_observations;
+}
+
+private static string file_observation_key(int conversation_id, int item_id) {
+    return "%d:%d".printf(conversation_id, item_id);
+}
+
+// Build the observed item around the exact transfer instance that started.
+// Looking it up through FileTransferStorage could materialize or return a
+// different history object, whose property notifications would not describe
+// the active download.
+private static Dino.FileItem? file_item_for_active_transfer(FileTransfer file_transfer, Conversation conversation) {
+    foreach (Qlite.Row row in app.db.content_item.select()
+            .with(app.db.content_item.conversation_id, "=", conversation.id)
+            .with(app.db.content_item.content_type, "=", 2)
+            .with(app.db.content_item.foreign_id, "=", file_transfer.id)) {
+        return new Dino.FileItem(file_transfer, conversation, row[app.db.content_item.id]);
+    }
+    return null;
+}
+
+private static void emit_file_progress(FileObservation observation) {
+    FileTransfer ft = observation.item.file_transfer;
+    string total = ft.size < 0 ? "null" : ft.size.to_string();
+    emit("{\"type\":\"file_progress\",\"conversation\":%d,\"item\":%d,\"transferred_bytes\":%lld,\"total_bytes\":%s}".printf(
+        observation.conversation.id, observation.item.id, ft.transferred_bytes, total));
+}
+
+private static void stop_file_observation(string key) {
+    var observations = file_observations;
+    if (observations == null) return;
+    FileObservation? observation = observations[key];
+    if (observation == null) return;
+
+    if (observation.progress_timer != 0) {
+        Source.remove(observation.progress_timer);
+        observation.progress_timer = 0;
+    }
+    FileTransfer ft = observation.item.file_transfer;
+    if (observation.state_handler != 0) ft.disconnect(observation.state_handler);
+    if (observation.transferred_handler != 0) ft.disconnect(observation.transferred_handler);
+    if (observation.size_handler != 0) ft.disconnect(observation.size_handler);
+    observations.unset(key);
+}
+
+private static void clear_file_observations() {
+    var observations = file_observations;
+    if (observations == null) return;
+    var keys = new Gee.ArrayList<string>();
+    foreach (string key in observations.keys) keys.add(key);
+    foreach (string key in keys) stop_file_observation(key);
+}
+
+private static void clear_file_observations_for_conversation(Conversation conversation) {
+    var observations = file_observations;
+    if (observations == null) return;
+    var keys = new Gee.ArrayList<string>();
+    foreach (var entry in observations.entries) {
+        if (entry.value.conversation.id == conversation.id) keys.add(entry.key);
+    }
+    foreach (string key in keys) stop_file_observation(key);
+}
+
+private static void clear_file_observations_for_account(Account account) {
+    var observations = file_observations;
+    if (observations == null) return;
+    var keys = new Gee.ArrayList<string>();
+    foreach (var entry in observations.entries) {
+        if (entry.value.conversation.account.id == account.id) keys.add(entry.key);
+    }
+    foreach (string key in keys) stop_file_observation(key);
+}
+
+private static void schedule_file_progress(string key) {
+    FileObservation? observation = file_observation_map()[key];
+    if (observation == null || observation.progress_timer != 0) return;
+
+    observation.progress_timer = Timeout.add(FILE_PROGRESS_INTERVAL_MS, () => {
+        FileObservation? current = file_observation_map()[key];
+        if (current == null) return Source.REMOVE;
+        current.progress_timer = 0;
+        if (current.item.file_transfer.state == FileTransfer.State.IN_PROGRESS) {
+            emit_file_progress(current);
+        }
+        return Source.REMOVE;
+    });
+}
+
+// The map owns only active transfers. Idle NOT_STARTED/FAILED files have no
+// bridge handlers; FileManager.download_started re-establishes observation on
+// every automatic or manual retry before any progress can be delivered.
+private static void observe_file(Dino.FileItem item, Conversation conversation, bool emit_current_state) {
+    FileTransfer ft = item.file_transfer;
+    string key = file_observation_key(conversation.id, item.id);
+    var observations = file_observation_map();
+    if (observations.has_key(key) || ft.state != FileTransfer.State.IN_PROGRESS) return;
+
+    var observation = new FileObservation(item, conversation);
+    observations[key] = observation;
+    observation.state_handler = ft.notify["state"].connect(() => {
+        if (ft.state == FileTransfer.State.IN_PROGRESS) {
+            emit(content_item_json("message", item, conversation));
+            if (ft.direction == FileTransfer.DIRECTION_RECEIVED) {
+                emit_file_progress(observation);
+            }
+        } else {
+            emit(content_item_json("message", item, conversation));
+            stop_file_observation(key);
+        }
+    });
+
+    if (ft.direction == FileTransfer.DIRECTION_RECEIVED) {
+        observation.transferred_handler = ft.notify["transferred-bytes"].connect(() => {
+            schedule_file_progress(key);
+        });
+        observation.size_handler = ft.notify["size"].connect(() => {
+            schedule_file_progress(key);
+        });
+    }
+    if (emit_current_state) emit(content_item_json("message", item, conversation));
+    if (ft.direction == FileTransfer.DIRECTION_RECEIVED) emit_file_progress(observation);
 }
 
 // Room names normally come from disco#info after the MUC join completes;
@@ -734,17 +886,20 @@ private static void re_emit_item_delayed(int item_id) {
     });
 }
 
+private static int conversation_id_for_item(int item_id) {
+    foreach (Qlite.Row row in app.db.content_item.select().with(app.db.content_item.id, "=", item_id)) {
+        return row[app.db.content_item.conversation_id];
+    }
+    return -1;
+}
+
 // Re-emits a content item given only its id by probing the active
 // conversations (used from signals that don't carry the conversation).
 private static void re_emit_item(int item_id) {
     // ContentItemStore.get_item_by_id does not check that the item belongs
     // to the conversation it is given, so resolve the owning conversation
     // from the database instead of probing.
-    int conv_id = -1;
-    foreach (Qlite.Row row in app.db.content_item.select().with(app.db.content_item.id, "=", item_id)) {
-        conv_id = row[app.db.content_item.conversation_id];
-        break;
-    }
+    int conv_id = conversation_id_for_item(item_id);
     if (conv_id == -1) return;
     Conversation? c = conversation_by_id(conv_id);
     if (c == null) return;
@@ -1356,6 +1511,7 @@ public void request_account_details() {
 
 public void sign_out() {
     Idle.add(() => {
+        clear_file_observations();
         bool any = false;
         foreach (Account a in app.db.get_accounts()) {
             if (!a.enabled) continue;
@@ -2017,15 +2173,15 @@ public void download_file(int conversation_id, int item_id) {
     int cid = conversation_id;
     int iid = item_id;
     Idle.add(() => {
+        if (conversation_id_for_item(iid) != cid) return Source.REMOVE;
         Conversation? c = conversation_by_id(cid);
         if (c == null) return Source.REMOVE;
         var item = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).get_item_by_id(c, iid);
         var fi = item as Dino.FileItem;
-        if (fi == null) return Source.REMOVE;
-        // re-emit the item when the transfer state changes so the UI updates
-        fi.file_transfer.notify["state"].connect(() => {
-            emit(content_item_json("message", fi, c));
-        });
+        if (fi == null || fi.file_transfer.state == FileTransfer.State.IN_PROGRESS
+                || fi.file_transfer.state == FileTransfer.State.COMPLETE) {
+            return Source.REMOVE;
+        }
         app.stream_interactor.get_module(Dino.FileManager.IDENTITY).download_file.begin(fi.file_transfer);
         return Source.REMOVE;
     });

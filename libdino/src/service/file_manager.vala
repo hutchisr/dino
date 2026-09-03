@@ -13,6 +13,7 @@ public class FileManager : StreamInteractionModule, Object {
 
     public signal void upload_available(Account account);
     public signal void received_file(FileTransfer file_transfer, Conversation conversation);
+    public signal void download_started(FileTransfer file_transfer, Conversation conversation);
 
     private StreamInteractor stream_interactor;
     private Database db;
@@ -256,7 +257,7 @@ public class FileManager : StreamInteractionModule, Object {
 
             file_meta = yield file_provider.get_meta_info(file_transfer, receive_data, file_meta);
 
-            file_transfer.size = (int)file_meta.size;
+            file_transfer.size = file_meta.size;
             file_transfer.file_name = file_meta.file_name;
             file_transfer.mime_type = file_meta.mime_type;
         }
@@ -271,6 +272,10 @@ public class FileManager : StreamInteractionModule, Object {
                 warning("Don't have download data (yet)");
                 return;
             }
+            file_transfer.transferred_bytes = 0;
+            file_transfer.state = FileTransfer.State.IN_PROGRESS;
+            download_started(file_transfer, conversation);
+
             FileDecryptor? file_decryptor = null;
             foreach (FileDecryptor decryptor in file_decryptors) {
                 if (decryptor.can_decrypt_file(conversation, file_transfer, receive_data)) {
@@ -284,9 +289,6 @@ public class FileManager : StreamInteractionModule, Object {
             }
 
             FileMeta file_meta = yield get_file_meta(file_provider, file_transfer, conversation, receive_data);
-
-            // Download and decrypt file
-            file_transfer.state = FileTransfer.State.IN_PROGRESS;
 
             if (file_decryptor != null) {
                 file_meta = file_decryptor.prepare_download_file(conversation, file_transfer, receive_data, file_meta);
@@ -387,7 +389,7 @@ public class FileManager : StreamInteractionModule, Object {
         file_transfer.local_time = local_time;
         file_transfer.provider = file_provider.get_id();
         file_transfer.file_name = file_meta.file_name;
-        file_transfer.size = (int)file_meta.size;
+        file_transfer.size = file_meta.size;
         file_transfer.info = info;
 
         var encryption = file_provider.get_encryption(file_transfer, receive_data, file_meta);

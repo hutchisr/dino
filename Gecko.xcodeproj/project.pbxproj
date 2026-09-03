@@ -42,6 +42,9 @@
 		E59885895E7C47EEAA461FA8 /* MemberDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86567832A6D1414586650107 /* MemberDetailView.swift */; };
 		F0411967E7AD452192EB9EA2 /* PhotoPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8841F1B93DC4153BCB80974 /* PhotoPicker.swift */; };
 		F4F596488EF94917BA9FBF9C /* ImageViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87D35A637B324B49AA316922 /* ImageViewer.swift */; };
+		F17E00000000000000000001 /* FileTransferProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17E00000000000000000002 /* FileTransferProgress.swift */; };
+		F17E00000000000000000003 /* FileTransferProgressStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17E00000000000000000004 /* FileTransferProgressStore.swift */; };
+		F17E00000000000000000005 /* FileDownloadProgressRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17E00000000000000000006 /* FileDownloadProgressRow.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -112,6 +115,9 @@
 		D928D500119B41A89B21FCEA /* DisplayFormatters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayFormatters.swift; sourceTree = "<group>"; };
 		D92F01BFA770407E89F9FDCF /* GeckoCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeckoCore.swift; sourceTree = "<group>"; };
 		DF917E5E610B459F97F0C3BC /* GeckoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeckoApp.swift; sourceTree = "<group>"; };
+		F17E00000000000000000002 /* FileTransferProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferProgress.swift; sourceTree = "<group>"; };
+		F17E00000000000000000004 /* FileTransferProgressStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferProgressStore.swift; sourceTree = "<group>"; };
+		F17E00000000000000000006 /* FileDownloadProgressRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDownloadProgressRow.swift; sourceTree = "<group>"; };
 		EECED66A6D7B48228F265456 /* NSEFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSEFetcher.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -157,6 +163,7 @@
 				38386EE938FC4181A3DA8C74 /* ImageThumbnail.swift */,
 				A1B2C3D4E5F6478899AA0019 /* NewestMessageUpdatePolicy.swift */,
 				A1B2C3D4E5F6478899AA0026 /* MediaFileKind.swift */,
+				F17E00000000000000000002 /* FileTransferProgress.swift */,
 				A0556F003C354589BE42AF2E /* MessageFormatting.swift */,
 				A1B2C3D4E5F6478899AA0012 /* PrivacyFormatting.swift */,
 				A1B2C3D4E5F6478899AA0014 /* TypingIndicatorText.swift */,
@@ -192,6 +199,8 @@
 				5E1EC7AB0000000000000002 /* SelectableMessageText.swift */,
 				A1B2C3D4E5F6478899AA0013 /* DebugLogging.swift */,
 				D928D500119B41A89B21FCEA /* DisplayFormatters.swift */,
+				F17E00000000000000000006 /* FileDownloadProgressRow.swift */,
+				F17E00000000000000000004 /* FileTransferProgressStore.swift */,
 				DF917E5E610B459F97F0C3BC /* GeckoApp.swift */,
 				D92F01BFA770407E89F9FDCF /* GeckoCore.swift */,
 				87D35A637B324B49AA316922 /* ImageViewer.swift */,
@@ -373,6 +382,9 @@
 				6C8B8E0B889046EE97952996 /* MessageFormatting.swift in Sources */,
 				A1B2C3D4E5F6478899AA0002 /* PrivacyFormatting.swift in Sources */,
 				A1B2C3D4E5F6478899AA0004 /* TypingIndicatorText.swift in Sources */,
+				F17E00000000000000000001 /* FileTransferProgress.swift in Sources */,
+				F17E00000000000000000003 /* FileTransferProgressStore.swift in Sources */,
+				F17E00000000000000000005 /* FileDownloadProgressRow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
