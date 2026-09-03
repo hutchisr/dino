@@ -147,7 +147,13 @@ struct ChatMessage: Identifiable, Equatable {
 final class AppModel: ObservableObject {
     @Published var ready = false
     @Published var accounts: [XmppAccount] = []
-    @Published var conversations: [XmppConversation] = []
+    @Published var conversations: [XmppConversation] = [] {
+        didSet {
+            AppIconBadge.setUnreadCount(
+                unreadBadgeCount(conversations.lazy.map(\.unread))
+            )
+        }
+    }
     @Published var messages: [Int32: [ChatMessage]] = [:]
     @Published var lastError: String?
     @Published var navigation: [Int32] = [] {

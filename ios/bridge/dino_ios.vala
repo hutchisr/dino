@@ -204,12 +204,25 @@ private static string nse_message_json(Dino.MessageItem mi, Conversation c) {
 // per-message classification (incl. muted-suppression) needs the filtering
 // entitlement; until then, decrypt-live-or-generic is the honest behaviour.
 
+private static int nse_unread_total() {
+    int total = 0;
+    var chat = app.stream_interactor.get_module(Dino.ChatInteraction.IDENTITY);
+    var conversations = app.stream_interactor
+        .get_module(Dino.ConversationManager.IDENTITY).get_active_conversations();
+    foreach (Conversation conversation in conversations) {
+        int unread = chat.get_num_unread(conversation);
+        if (unread > int.MAX - total) return int.MAX;
+        total += unread;
+    }
+    return total;
+}
+
 private static void nse_finish() {
     if (nse_done) return;
     nse_done = true;
     if (nse_settle != 0) { Source.remove(nse_settle); nse_settle = 0; }
     nse_msgs.append_c(']');
-    string result = @"{\"type\":\"nse_result\",\"messages\":$(nse_msgs.str)}";
+    string result = @"{\"type\":\"nse_result\",\"unread\":$(nse_unread_total()),\"messages\":$(nse_msgs.str)}";
     // Close the XMPP session cleanly BEFORE signalling the extension is done.
     // emit() drives the NSE's contentHandler, after which iOS can suspend/kill
     // the extension at any instant. If that happens before our ack +

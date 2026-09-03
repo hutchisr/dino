@@ -2,21 +2,22 @@ import Foundation
 
 /// Thin wrapper over the libdino bridge's `dino_ios_nse_fetch`. Boots the
 /// service stack, connects the account, MAM-syncs, and calls back once with
-/// the incoming messages collected within the time budget (or on timeout).
+/// the incoming messages and authoritative unread total collected within the
+/// time budget (or on timeout).
 ///
 /// The bridge invokes our C callback on its own GLib thread; we forward the
 /// single `nse_result` line and ignore anything else.
 final class NSEFetcher {
     /// Retained for the lifetime of the call and released by the bridge's
     /// destroy-notify, mirroring GeckoCore's trampoline ownership.
-    private let completion: ([NSEMessage]) -> Void
+    private let completion: (NSEFetchResult) -> Void
     private var fired = false
 
-    private init(completion: @escaping ([NSEMessage]) -> Void) {
+    private init(completion: @escaping (NSEFetchResult) -> Void) {
         self.completion = completion
     }
 
-    static func fetch(timeoutMs: Int32, completion: @escaping ([NSEMessage]) -> Void) {
+    static func fetch(timeoutMs: Int32, completion: @escaping (NSEFetchResult) -> Void) {
         // Share the app's REAL databases (Monal-style): the extension receives,
         // decrypts, stores and ACKs the message so the server clears its
         // pending state (no re-push loop), and the app reads the stored result
@@ -58,8 +59,16 @@ final class NSEFetcher {
         }
         fired = true
         let raw = obj["messages"] as? [[String: Any]] ?? []
-        completion(raw.map(NSEMessage.init(json:)))
+        completion(NSEFetchResult(
+            messages: raw.map(NSEMessage.init(json:)),
+            unreadCount: obj["unread"] as? Int,
+        ))
     }
+}
+
+struct NSEFetchResult {
+    let messages: [NSEMessage]
+    let unreadCount: Int?
 }
 
 /// One decrypted incoming message, with the conversation's notify policy so

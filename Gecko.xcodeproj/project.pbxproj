@@ -30,6 +30,7 @@
 		A1B2C3D4E5F6478899AA0022 /* LocalNotificationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0021 /* LocalNotificationPolicy.swift */; };
 		A1B2C3D4E5F6478899AA0024 /* ConversationFocus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0023 /* ConversationFocus.swift */; };
 		A1B2C3D4E5F6478899AA0027 /* MucRemoval.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6478899AA0028 /* MucRemoval.swift */; };
+		D1A0B0010000000000000002 /* UnreadBadgeCount.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1A0B0010000000000000001 /* UnreadBadgeCount.swift */; };
 		B1872E1853A14959B41C6F76 /* AccountSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80496BD1D274570886D3D80 /* AccountSettings.swift */; };
 		B674DCCC40514D13928F9F65 /* ReactionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C1D9EA0EDF44844A6F4B60E /* ReactionSheet.swift */; };
 		B7ADDE41EBF745308582B887 /* BlockedContactsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C377EE663CA4986A7BD5314 /* BlockedContactsView.swift */; };
@@ -106,6 +107,7 @@
 		A1B2C3D4E5F6478899AA0021 /* LocalNotificationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNotificationPolicy.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6478899AA0023 /* ConversationFocus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationFocus.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6478899AA0028 /* MucRemoval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MucRemoval.swift; sourceTree = "<group>"; };
+		D1A0B0010000000000000001 /* UnreadBadgeCount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadBadgeCount.swift; sourceTree = "<group>"; };
 		B8841F1B93DC4153BCB80974 /* PhotoPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPicker.swift; sourceTree = "<group>"; };
 		BC12B7DE8DF54966B1F7BB2D /* Model.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Model.swift; sourceTree = "<group>"; };
 		BC7D857E140F487AABAAD463 /* NotificationService.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = NotificationService.xcconfig; sourceTree = "<group>"; };
@@ -167,6 +169,7 @@
 				A0556F003C354589BE42AF2E /* MessageFormatting.swift */,
 				A1B2C3D4E5F6478899AA0012 /* PrivacyFormatting.swift */,
 				A1B2C3D4E5F6478899AA0014 /* TypingIndicatorText.swift */,
+				D1A0B0010000000000000001 /* UnreadBadgeCount.swift */,
 			);
 			path = GeckoKit/Sources/GeckoKit;
 			sourceTree = "<group>";
@@ -382,6 +385,7 @@
 				6C8B8E0B889046EE97952996 /* MessageFormatting.swift in Sources */,
 				A1B2C3D4E5F6478899AA0002 /* PrivacyFormatting.swift in Sources */,
 				A1B2C3D4E5F6478899AA0004 /* TypingIndicatorText.swift in Sources */,
+				D1A0B0010000000000000002 /* UnreadBadgeCount.swift in Sources */,
 				F17E00000000000000000001 /* FileTransferProgress.swift in Sources */,
 				F17E00000000000000000003 /* FileTransferProgressStore.swift in Sources */,
 				F17E00000000000000000005 /* FileDownloadProgressRow.swift in Sources */,

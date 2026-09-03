@@ -218,7 +218,7 @@ enum CatalystWindowLifecycle {
     static func reopenIfNeeded() {
         guard let window = hiddenWindow else { return }
         hiddenWindow = nil
-        PushRegistration.clearDelivered()
+        PushRegistration.clearDeliveredNotifications()
         window.perform(NSSelectorFromString("makeKeyAndOrderFront:"), with: nil)
         visibilityHandler?(true)
     }
@@ -396,7 +396,7 @@ struct GeckoApp: App {
                 CatalystWindowSize.save()
             }
             guard phase == .active else { return }
-            PushRegistration.clearDelivered()
+            PushRegistration.clearDeliveredNotifications()
             if model.ready && model.hasAccount {
                 model.refreshAfterForeground()
             }
@@ -414,7 +414,7 @@ struct GeckoApp: App {
                 // Cancel any pending background-disconnect (quick toggle) and
                 // keep the live connection rather than churning it.
                 appDelegate.cancelBackgroundDisconnect()
-                PushRegistration.clearDelivered()
+                PushRegistration.clearDeliveredNotifications()
                 if model.ready && model.hasAccount {
                     GeckoCore.shared.appForegrounded()
                     // The notification-service extension may have stored new

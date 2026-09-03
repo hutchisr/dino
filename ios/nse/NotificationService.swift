@@ -29,8 +29,11 @@ class NotificationService: UNNotificationServiceExtension {
         // shares the real DB and connects so the message is acked and the
         // server's pending state clears (no re-push). Budget under the ~30s
         // limit so we beat serviceExtensionTimeWillExpire.
-        NSEFetcher.fetch(timeoutMs: 24_000) { messages in
-            guard let latest = messages.last else {
+        NSEFetcher.fetch(timeoutMs: 24_000) { result in
+            if let unreadCount = result.unreadCount {
+                content.badge = NSNumber(value: max(0, unreadCount))
+            }
+            guard let latest = result.messages.last else {
                 self.finish(content)
                 return
             }
@@ -40,12 +43,12 @@ class NotificationService: UNNotificationServiceExtension {
                 content.userInfo = info
             }
             if latest.isMuted {
-                // Suppress the banner entirely. With the filtering entitlement
-                // an empty UNNotificationContent silences the push; without it
-                // (un-granted device) iOS substitutes the original payload, so
-                // this degrades to the generic "New message" rather than a
-                // wrong banner.
-                self.finish(UNNotificationContent())
+                // Preserve the unread badge while suppressing the alert. With
+                // the filtering entitlement this badge-only content has no
+                // banner; without it iOS substitutes the original payload.
+                let badgeOnly = UNMutableNotificationContent()
+                badgeOnly.badge = content.badge
+                self.finish(badgeOnly)
                 return
             }
             if latest.isGroupchat {
@@ -55,8 +58,8 @@ class NotificationService: UNNotificationServiceExtension {
                 content.title = latest.sender.isEmpty ? latest.conversationName : latest.sender
                 content.body = latest.body
             }
-            if messages.count > 1 {
-                content.subtitle = "\(messages.count) new messages"
+            if result.messages.count > 1 {
+                content.subtitle = "\(result.messages.count) new messages"
             }
             self.finish(content)
         }

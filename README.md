@@ -27,7 +27,8 @@ Working end to end against real servers:
 - **Notifications** — iOS uses XEP-0357 through the bundled push proxy and an
   on-device Notification Service Extension. While the Mac Catalyst app is
   running, it posts local notifications from its live XMPP stream and applies
-  each conversation's off / mentions-only setting before delivery.
+  each conversation's off / mentions-only setting before delivery. On both
+  platforms the app icon badge shows the total unread message count.
 
 Not implemented: voice/video calls (`plugin-rtp`/`plugin-ice` need GStreamer's
 iOS binaries), OpenPGP, and ICU-based JID stringprep (a casefold fallback is

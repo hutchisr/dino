@@ -39,8 +39,10 @@ live-account interoperability was not independently re-run during that build.
 Known gaps / not done:
 
 * Push notifications work via XEP-0357 + the bundled proxy
-  (ios/push-proxy): content-free "New message" banners wake the user;
-  opening the app reconnects (fast resume path) and syncs via MAM.
+  (ios/push-proxy): content-free "New message" banners wake the user, carry an
+  initial unread badge from the server summary, and the NSE corrects the badge
+  from libdino's authoritative unread state after syncing. Opening the app
+  reconnects (fast resume path) and syncs via MAM.
   Notable pitfalls encoded in the implementation: the publish arrives as
   an iq-set (not a pubsub message event), and the push service must be a
   full jid with a fixed resource — iq-sets to a bare account jid are
@@ -161,8 +163,9 @@ works on any server and also unlocks decrypted previews.
 * **Phase 2 (done, validated on simulator):** `dino_ios_nse_fetch` boots a
   trimmed libdino in the extension (shared `boot_core`), points storage at
   the App Group container, connects, MAM-syncs, and returns each incoming
-  message with its conversation, OMEMO-decrypted body, and effective notify
-  setting; `NSEFetcher` drives it from Swift and enriches the alert.
+  message with its conversation, OMEMO-decrypted body, effective notify
+  setting, and the aggregate unread count; `NSEFetcher` drives it from Swift,
+  enriches the alert, and updates the app icon badge.
   Verified end to end: an OMEMO message to the offline account was
   connected, synced, decrypted on-device, and flagged for its muted
   conversation. Still to confirm on a real device, where the 24MB/30s
@@ -174,8 +177,9 @@ works on any server and also unlocks decrypted previews.
 * **Mac Catalyst local filtering (done):** the persistent Mac process posts
   local notifications for new live incoming items only while Gecko is not
   active. It suppresses muted conversations and non-mention MUC messages before
-  scheduling, so this path needs notification permission but no APNs or
-  filtering entitlement. It intentionally does not notify after Gecko quits.
+  scheduling and updates the Dock icon badge from the aggregate libdino unread
+  count, so this path needs notification permission but no APNs or filtering
+  entitlement. It intentionally does not notify after Gecko quits.
   Remote NSE suppression on macOS still requires Apple's same
   [`com.apple.developer.usernotifications.filtering`](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.usernotifications.filtering)
   managed entitlement plus an APS-signed Catalyst profile.
@@ -200,8 +204,8 @@ works on any server and also unlocks decrypted previews.
 
 Done beyond the basics: contact management (roster, presence,
 subscription requests), sign in/out with stable OMEMO identity, avatars,
-conversation previews/unread counts/read markers (XEP-0333), typing
-notifications (XEP-0085), file transfers (HTTP upload via libsoup,
+conversation previews/unread counts and app icon badges/read markers
+(XEP-0333), typing notifications (XEP-0085), file transfers (HTTP upload via
 OMEMO-encrypted aesgcm files, photo-library uploads that preserve animated GIF
 and WebP files, memory-bounded inline GIF/WebP playback controlled by
 tap-to-play/tap-to-pause format badges (static images still open full-screen);

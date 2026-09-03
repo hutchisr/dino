@@ -11,8 +11,8 @@ How it fits together:
 3. When the user has no active session and a message arrives, the server
    sends a pubsub publish to the bot. The publish's node is the device
    token, so the proxy is completely stateless.
-4. The proxy posts a (generic, content-free) alert to APNs; iOS shows the
-   notification and the app reconnects + syncs when opened.
+4. The proxy posts a (generic, content-free) alert and unread badge to APNs;
+   iOS shows them and the app reconnects + syncs when opened.
 
 ## Running
 
@@ -73,8 +73,9 @@ variable (Simulator runs) or the default in `PushRegistration.swift`.
 Notes:
 
 - Notifications are content-free ("New message") since XEP-0357 summaries
-  carry no message bodies and OMEMO couldn't be decrypted here anyway.
-  Real previews require a Notification Service Extension in the app that
-  briefly connects and decrypts — future work.
-- The `mutable-content` flag is already set on pushes so an NSE can be
-  added without proxy changes.
+  carry no message bodies and OMEMO couldn't be decrypted by the proxy.
+  The Notification Service Extension briefly connects, decrypts the message,
+  enriches the alert, and replaces the summary badge with libdino's
+  authoritative aggregate unread count.
+- Muted conversations and non-mention messages still send a badge-only APNs
+  payload, so notification filtering does not hide unread state.

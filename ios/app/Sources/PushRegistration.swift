@@ -123,6 +123,31 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 }
 
+@MainActor
+enum AppIconBadge {
+    private static var unreadCount = 0
+
+    static func setUnreadCount(_ count: Int) {
+        unreadCount = max(0, count)
+        apply()
+    }
+
+    static func reapplyUnreadCount() {
+        apply()
+    }
+
+    private static func apply() {
+        UNUserNotificationCenter.current().setBadgeCount(unreadCount) { error in
+            if let error {
+                geckoDebugLog(
+                    "gecko-badge: update failed: %@",
+                    error.localizedDescription
+                )
+            }
+        }
+    }
+}
+
 #if targetEnvironment(macCatalyst)
 @MainActor
 enum MacLocalNotifications {
@@ -139,7 +164,12 @@ enum MacLocalNotifications {
     static func start() {
         UNUserNotificationCenter.current().requestAuthorization(
             options: [.alert, .sound, .badge]
-        ) { _, _ in }
+        ) { granted, _ in
+            guard granted else { return }
+            DispatchQueue.main.async {
+                AppIconBadge.reapplyUnreadCount()
+            }
+        }
     }
 
     static func post(
@@ -209,6 +239,7 @@ enum PushRegistration {
             geckoDebugLog("gecko-push: notification permission granted=%d", granted ? 1 : 0)
             guard granted else { return }
             DispatchQueue.main.async {
+                AppIconBadge.reapplyUnreadCount()
                 UIApplication.shared.registerForRemoteNotifications()
             }
         }
@@ -224,11 +255,9 @@ enum PushRegistration {
         GeckoCore.shared.enablePush(proxyJid: proxyJid, node: token)
     }
 
-    /// Clears delivered banners and the badge — the app is open, so the
-    /// messages are (about to be) seen in the conversation list.
-    static func clearDelivered() {
-        let center = UNUserNotificationCenter.current()
-        center.removeAllDeliveredNotifications()
-        center.setBadgeCount(0)
+    /// Clears banners after the user returns to the app. The app icon badge is
+    /// driven separately by the authoritative unread counts from libdino.
+    static func clearDeliveredNotifications() {
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
 }

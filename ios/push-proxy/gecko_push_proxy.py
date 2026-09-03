@@ -269,30 +269,35 @@ class PushBot(slixmpp.ClientXMPP):
             log.info("bodiless publish for %s… (chat state / receipt / twin) — dropping", node[:8])
             return
 
+        badge = max(count or 1, 1)
+        show_alert = True
         rules = self.filters.get(node.lower())
         if rules and sender:
             bare = sender.split("/")[0].lower()
             if bare in rules["muted"]:
-                log.info("muted conversation %s — dropping push", bare)
-                return
+                log.info("muted conversation %s — sending badge-only push", bare)
+                show_alert = False
             if bare in rules["mention"]:
                 nick = rules["mention"][bare]
                 # Suppress only when we can see the body and the nick isn't in
                 # it. If the server sent no body we can't tell, so deliver rather
                 # than risk swallowing a real mention.
                 if last_body and nick.lower() not in last_body.lower():
-                    log.info("mention-only %s without mention — dropping push", bare)
-                    return
+                    log.info("mention-only %s without mention — sending badge-only push", bare)
+                    show_alert = False
 
-        body = "New message" if not count or count <= 1 else f"{count} new messages"
-        payload = {
-            "aps": {
+        if show_alert:
+            body = "New message" if badge <= 1 else f"{badge} new messages"
+            aps = {
                 "alert": {"title": "Gecko", "body": body},
+                "badge": badge,
                 "sound": "default",
                 "mutable-content": 1,
                 "thread-id": "gecko-messages",
             }
-        }
+        else:
+            aps = {"badge": badge}
+        payload = {"aps": aps}
         status = await self.apns.push(node.lower(), payload)
         log.info("push -> %s… (%s)", node[:8], status)
 
