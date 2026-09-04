@@ -314,9 +314,9 @@ struct GeckoApp: App {
     }
 
     private var mediaViewerScene: some Scene {
-        WindowGroup(id: MediaViewerItem.windowGroupID, for: MediaViewerItem.self) { $item in
+        WindowGroup(id: MediaViewerItem.windowGroupID) {
             Group {
-                if let item {
+                if let item = model.mediaViewerItem {
                     switch item {
                     case .image(let path):
                         ImageViewer(path: path)
@@ -327,10 +327,13 @@ struct GeckoApp: App {
                     Color.black
                 }
             }
-            .focusedSceneValue(\.mediaViewerItem, item)
+            .focusedSceneValue(\.mediaViewerItem, model.mediaViewerItem)
             .background {
                 CatalystMediaWindowConfigurator()
                     .frame(width: 0, height: 0)
+            }
+            .onDisappear {
+                model.mediaViewerWindowDidClose()
             }
         }
         .defaultSize(width: 960, height: 720)
@@ -1724,7 +1727,9 @@ struct ChatView: View {
 
     private func openMediaViewer(_ item: MediaViewerItem) {
 #if targetEnvironment(macCatalyst)
-        openWindow(id: MediaViewerItem.windowGroupID, value: item)
+        if model.presentMediaViewerWindow(item) {
+            openWindow(id: MediaViewerItem.windowGroupID)
+        }
 #else
         model.mediaViewerItem = item
 #endif

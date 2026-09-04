@@ -196,6 +196,7 @@ final class AppModel: ObservableObject {
     private var pendingOlderMessages: [Int32: [ChatMessage]] = [:]
 #if targetEnvironment(macCatalyst)
     private var groupHistoryRetry: Task<Void, Never>?
+    private var mediaViewerWindowRequested = false
 #endif
     private var messageRevisions: [Int32: Int] = [:]
     private var messageUpdateWasSynced: [Int32: Bool] = [:]
@@ -210,6 +211,23 @@ final class AppModel: ObservableObject {
 
     var hasAccount: Bool { !accounts.isEmpty }
     var avatarRevisionToken: Int { avatarRevision }
+
+#if targetEnvironment(macCatalyst)
+    /// Updates the single media window's content and reports whether its scene
+    /// still needs to be created. Repeated activations before scene delivery
+    /// therefore cannot create parallel preview windows.
+    func presentMediaViewerWindow(_ item: MediaViewerItem) -> Bool {
+        mediaViewerItem = item
+        guard !mediaViewerWindowRequested else { return false }
+        mediaViewerWindowRequested = true
+        return true
+    }
+
+    func mediaViewerWindowDidClose() {
+        mediaViewerWindowRequested = false
+        mediaViewerItem = nil
+    }
+#endif
 
     func fileTransferProgressState(
         for conversation: Int32,

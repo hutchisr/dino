@@ -148,6 +148,44 @@ struct HistoryLoadTrigger {
     }
 }
 
+/// Visible-row state reduced from the already-measured message frames. Feed
+/// rows in chronological order so the first intersecting row is the topmost
+/// visible message without installing a second SwiftUI visibility observer.
+struct MessageViewportVisibility: Equatable {
+    private(set) var topVisibleMessageID: Int32?
+    private(set) var fullyVisibleMessageID: Int32?
+    private(set) var newestMessageVisible = false
+
+    mutating func observe(
+        messageID: Int32,
+        minY: Double,
+        maxY: Double,
+        viewport: Range<Double>,
+        newestMessageID: Int32?
+    ) {
+        guard minY.isFinite,
+              maxY.isFinite,
+              viewport.lowerBound.isFinite,
+              viewport.upperBound.isFinite,
+              maxY > minY,
+              !viewport.isEmpty else { return }
+
+        let intersectsViewport = maxY > viewport.lowerBound
+            && minY < viewport.upperBound
+        if intersectsViewport, topVisibleMessageID == nil {
+            topVisibleMessageID = messageID
+        }
+        if fullyVisibleMessageID == nil,
+           minY >= viewport.lowerBound,
+           maxY <= viewport.upperBound {
+            fullyVisibleMessageID = messageID
+        }
+        if messageID == newestMessageID, intersectsViewport {
+            newestMessageVisible = true
+        }
+    }
+}
+
 /// Reduces measured geometry into the persistent intent to follow new messages.
 /// Layout growth may confirm the bottom, but only user-driven movement may clear
 /// an already-established follow intent.

@@ -28,8 +28,7 @@ struct MediaViewerCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .printItem) {
             Button("Close Media Preview") {
-                guard let item else { return }
-                dismissWindow(id: MediaViewerItem.windowGroupID, value: item)
+                dismissWindow(id: MediaViewerItem.windowGroupID)
             }
             .keyboardShortcut(.cancelAction)
             .disabled(item == nil)

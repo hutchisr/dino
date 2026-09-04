@@ -44,13 +44,13 @@ struct SwiftUIMessageList: View {
     /// happened. The first populated layout jumps to the bottom instantly; later
     /// live arrivals animate only while already pinned, while sync updates snap.
     @State private var didInitialScroll = false
-    /// Keep the initial default scroll position invisible until both geometry
-    /// and list-level target visibility confirm that the newest message is at
+    /// Keep the initial default scroll position invisible until geometry and
+    /// the already-measured row frames confirm that the newest message is at
     /// the bottom.
     @State private var initialViewportReady = false
 
-    /// Older-history paging stays disabled until list-level target visibility
-    /// confirms the initial jump has put the newest row at the measured bottom.
+    /// Older-history paging stays disabled until the row-frame sample confirms
+    /// the initial jump has put the newest row at the measured bottom.
     /// Otherwise the oldest row's first appearance at the ScrollView's default
     /// top position immediately requests page two.
     @State private var canLoadOlder = false
@@ -104,6 +104,11 @@ struct SwiftUIMessageList: View {
         private var pendingBottomScrollTask: Task<Void, Never>?
         private var pendingBottomScrollPriority = Int.min
         private var bottomScrollGeneration = 0
+        var latestScrollSample: ScrollSample?
+        private var pendingScrollSample: ScrollSample?
+        private var pendingScrollSampleAction: (@MainActor (ScrollSample) -> Void)?
+        private var pendingScrollSampleTask: Task<Void, Never>?
+        private var scrollSampleGeneration = 0
 
         var isBottomScrollAnimating: Bool {
             bottomScrollAnimator.isAnimating
@@ -162,6 +167,49 @@ struct SwiftUIMessageList: View {
         func cancelBottomScrollWork() {
             cancelPendingBottomScroll()
             bottomScrollAnimator.cancel()
+        }
+
+        /// Reduces every burst of SwiftUI geometry callbacks to its latest
+        /// post-layout sample. The observer itself never mutates SwiftUI state,
+        /// preventing layout from recursively producing another same-frame
+        /// geometry update.
+        @MainActor
+        func scheduleScrollSample(
+            _ sample: ScrollSample,
+            delay: Duration? = nil,
+            action: @escaping @MainActor (ScrollSample) -> Void
+        ) {
+            latestScrollSample = sample
+            pendingScrollSample = sample
+            pendingScrollSampleAction = action
+            guard pendingScrollSampleTask == nil else { return }
+
+            let generation = scrollSampleGeneration
+            pendingScrollSampleTask = Task { @MainActor [weak self] in
+                await Task.yield()
+                if let delay {
+                    try? await Task<Never, Never>.sleep(for: delay)
+                }
+                guard let self,
+                      !Task.isCancelled,
+                      self.scrollSampleGeneration == generation,
+                      let sample = self.pendingScrollSample,
+                      let action = self.pendingScrollSampleAction else { return }
+                self.pendingScrollSample = nil
+                self.pendingScrollSampleAction = nil
+                self.pendingScrollSampleTask = nil
+                action(sample)
+            }
+        }
+
+        @MainActor
+        func cancelPendingScrollSample() {
+            scrollSampleGeneration &+= 1
+            pendingScrollSampleTask?.cancel()
+            pendingScrollSample = nil
+            latestScrollSample = nil
+            pendingScrollSampleAction = nil
+            pendingScrollSampleTask = nil
         }
 
         /// Takes ownership from pending proxy work and active deceleration, then
@@ -233,6 +281,16 @@ struct SwiftUIMessageList: View {
 #endif
     }
 
+    private static var scrollSampleSettleDelay: Duration? {
+#if targetEnvironment(macCatalyst)
+        // Two 120 Hz display intervals let Catalyst finish row placement before
+        // state changes or scroll commands consume the sample.
+        .milliseconds(16)
+#else
+        nil
+#endif
+    }
+
     private var newestMessageInsertionAnimation: Animation? {
         if accessibilityReduceMotion {
             return nil
@@ -253,7 +311,7 @@ struct SwiftUIMessageList: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
-                    messageStack
+                    messageStack(proxy)
                         .opacity(initialViewportReady ? 1 : 0)
                         .animation(.easeOut(duration: 0.14), value: initialViewportReady)
                         .allowsHitTesting(initialViewportReady)
@@ -304,77 +362,12 @@ struct SwiftUIMessageList: View {
                     isUnderfilled: geo.contentSize.height <= geo.containerSize.height + 1,
                     historyPageRevision: historyPageRevision)
             } action: { _, sample in
-                let distanceFromBottom = sample.distanceFromBottom
-                metrics.distanceFromTop = sample.distanceFromTop
-                metrics.distanceFromBottom = distanceFromBottom
-                metrics.isUnderfilled = sample.isUnderfilled
-                metrics.contentHeight = sample.contentHeight
-                metrics.containerHeight = sample.containerHeight
-                let atBottom = distanceFromBottom <= Self.bottomThreshold
-                metrics.isAtBottom = atBottom
-                // While we intend to stay glued and the user isn't dragging,
-                // treat a gap opened purely by content growth as still-at-bottom,
-                // so the scroll-down button doesn't flash while images load —
-                // we're about to snap back to the newest message.
-                let effectiveAtBottom = atBottom || (stickToBottom && !userInteracting)
-                if isAtBottom != effectiveAtBottom { isAtBottom = effectiveAtBottom }
-                // Any confirmed bottom sample re-arms following, including the
-                // final geometry that can arrive just after deceleration turns
-                // idle. Only user-driven movement away is allowed to release it.
-                let nextStickToBottom = updatedBottomFollowIntent(
-                    current: stickToBottom,
-                    isAtBottom: atBottom,
-                    userInteracting: userInteracting)
-                if stickToBottom != nextStickToBottom {
-                    stickToBottom = nextStickToBottom
-                }
-                refreshHistoryRequestIfNeeded(
-                    measuredRevision: sample.historyPageRevision)
-                let settledViewport = completePendingHistoryViewportRestoreIfNeeded(
-                    sample)
-                enableOlderLoadingIfReady()
-                let completedPage = processCompletedHistoryPageIfNeeded(
+                metrics.scheduleScrollSample(
                     sample,
-                    proxy: proxy)
-                if canLoadOlder {
-                    requestOlderIfUnderfilled()
+                    delay: Self.scrollSampleSettleDelay
+                ) { sample in
+                    processScrollSample(sample, proxy: proxy)
                 }
-                // Do not treat the layout sample produced by the prepend as
-                // another scroll. The restored viewport's first sample also
-                // only rearms the gate; later motion from the same drag or
-                // momentum can naturally cross the next threshold.
-                if !settledViewport, !completedPage, userInteracting,
-                   metrics.historyLoadTrigger.state == .armed {
-                    requestOlderIfNeeded(distanceFromTop: sample.distanceFromTop)
-                }
-            }
-            .onScrollTargetVisibilityChange(idType: Int32.self, threshold: 0.01) { ids in
-                handleTargetVisibility(ids)
-            }
-            .onScrollTargetVisibilityChange(idType: Int32.self, threshold: 0.99) { ids in
-                metrics.fullyVisibleMessageID = ids.first
-                refreshHistoryRequestIfNeeded()
-            }
-            // Stay pinned to the newest message as content settles after open.
-            // Geometry growth is a low-priority, coalesced post-layout pin; on
-            // Catalyst the short debounce absorbs intermediate composer-margin
-            // frames instead of feeding scroll mutations back into layout.
-            .onScrollGeometryChange(for: CGFloat.self) { geo in
-                geo.contentSize.height
-            } action: { _, _ in
-                guard didInitialScroll,
-                      stickToBottom,
-                      !userInteracting,
-                      !metrics.awaitingHistoryRestoreGeometry else { return }
-                let animated = shouldAnimateBottomGrowth && !accessibilityReduceMotion
-                scrollToNewest(
-                    proxy,
-                    animated: animated,
-                    initial: false,
-                    priority: animated ? .newestMessage : .growthPin,
-                    delay: animated
-                        ? nil
-                        : Self.bottomGrowthSettleDelay)
             }
             // Open pinned to the newest message. We deliberately do NOT use
             // `.defaultScrollAnchor(.bottom)`: on a ScrollView that starts empty
@@ -390,6 +383,7 @@ struct SwiftUIMessageList: View {
                     priority: .initialPosition)
             }
             .onDisappear {
+                metrics.cancelPendingScrollSample()
                 metrics.cancelBottomScrollWork()
             }
             .onChange(of: newestMessageID) { _, newest in
@@ -473,14 +467,93 @@ struct SwiftUIMessageList: View {
         }
     }
 
-    private var messageStack: some View {
+    private func processScrollSample(
+        _ sample: ScrollSample,
+        proxy: ScrollViewProxy
+    ) {
+        let previousContentHeight = metrics.contentHeight
+        metrics.distanceFromTop = sample.distanceFromTop
+        metrics.distanceFromBottom = sample.distanceFromBottom
+        metrics.isUnderfilled = sample.isUnderfilled
+        metrics.contentHeight = sample.contentHeight
+        metrics.containerHeight = sample.containerHeight
+        updateVisibleMessageMetrics()
+
+        let atBottom = sample.distanceFromBottom <= Self.bottomThreshold
+        metrics.isAtBottom = atBottom
+        // While we intend to stay glued and the user isn't dragging, treat a
+        // gap opened purely by content growth as still-at-bottom, so the
+        // scroll-down button doesn't flash while images load.
+        let effectiveAtBottom = atBottom || (stickToBottom && !userInteracting)
+        if isAtBottom != effectiveAtBottom { isAtBottom = effectiveAtBottom }
+
+        let nextStickToBottom = updatedBottomFollowIntent(
+            current: stickToBottom,
+            isAtBottom: atBottom,
+            userInteracting: userInteracting)
+        if stickToBottom != nextStickToBottom {
+            stickToBottom = nextStickToBottom
+        }
+
+        refreshHistoryRequestIfNeeded(
+            measuredRevision: sample.historyPageRevision)
+        let settledViewport = completePendingHistoryViewportRestoreIfNeeded(sample)
+        enableOlderLoadingIfReady()
+        let completedPage = processCompletedHistoryPageIfNeeded(
+            sample,
+            proxy: proxy)
+        if canLoadOlder {
+            requestOlderIfUnderfilled()
+        }
+        // Do not treat the layout sample produced by the prepend as another
+        // scroll. The restored viewport's first sample only rearms the gate.
+        if !settledViewport, !completedPage, userInteracting,
+           metrics.historyLoadTrigger.state == .armed {
+            requestOlderIfNeeded(distanceFromTop: sample.distanceFromTop)
+        }
+
+        guard abs(sample.contentHeight - previousContentHeight) > 0.5,
+              didInitialScroll,
+              stickToBottom,
+              !userInteracting,
+              !metrics.awaitingHistoryRestoreGeometry else { return }
+        let animated = shouldAnimateBottomGrowth && !accessibilityReduceMotion
+        scrollToNewest(
+            proxy,
+            animated: animated,
+            initial: false,
+            priority: animated ? .newestMessage : .growthPin,
+            delay: animated ? nil : Self.bottomGrowthSettleDelay)
+    }
+
+    private func updateVisibleMessageMetrics() {
+        let viewportMinY = max(0, visualTopInset)
+        let viewportMaxY = max(
+            viewportMinY,
+            metrics.containerHeight - max(0, visualBottomInset))
+        var visibility = MessageViewportVisibility()
+        for message in messages {
+            guard let frame = metrics.messageFrames[message.id] else { continue }
+            visibility.observe(
+                messageID: message.id,
+                minY: Double(frame.minY),
+                maxY: Double(frame.maxY),
+                viewport: Double(viewportMinY)..<Double(viewportMaxY),
+                newestMessageID: newestMessageID)
+        }
+        metrics.topVisibleMessageID = visibility.topVisibleMessageID
+        metrics.fullyVisibleMessageID = visibility.fullyVisibleMessageID
+        metrics.newestRowVisible = visibility.newestMessageVisible
+    }
+
+    private func messageStack(_ proxy: ScrollViewProxy) -> some View {
         LazyVStack(spacing: 0) {
-            messageRows
+            messageRows(proxy)
         }
         .scrollTargetLayout()
     }
 
-    private var messageRows: some View {
+    private func messageRows(_ proxy: ScrollViewProxy) -> some View {
         ForEach(rows) { row in
             rowView(row)
                 .id(row.msg.id)
@@ -494,12 +567,17 @@ struct SwiftUIMessageList: View {
                             action: { frame in
                                 guard metrics.messageFrames[row.msg.id] != frame else { return }
                                 metrics.messageFrames[row.msg.id] = frame
-                                let viewportMessageID = metrics.fullyVisibleMessageID
-                                    ?? metrics.topVisibleMessageID
-                                if row.msg.id == viewportMessageID {
-                                    refreshHistoryRequestIfNeeded()
+                                guard let sample = metrics.latestScrollSample else { return }
+                                metrics.scheduleScrollSample(
+                                    sample,
+                                    delay: Self.scrollSampleSettleDelay
+                                ) { sample in
+                                    processScrollSample(sample, proxy: proxy)
                                 }
                             })
+                }
+                .onDisappear {
+                    metrics.messageFrames[row.msg.id] = nil
                 }
                 .transition(rowInsertionTransition)
         }
@@ -540,6 +618,9 @@ struct SwiftUIMessageList: View {
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
             }
+            if initial, !initialViewportReady {
+                initialViewportReady = true
+            }
             if newestMessageID == last {
                 lastSettledNewestID = last
                 if animateBottomGrowthForNewestID == last {
@@ -547,20 +628,6 @@ struct SwiftUIMessageList: View {
                 }
             }
         }
-    }
-
-    /// The list-level visible-id set replaces a former per-row
-    /// .onScrollVisibilityChange: one binder for the whole list instead of one
-    /// per row. On Catalyst the per-row scroll visibility binder's geometry
-    /// walk ran inside every lazy placement and could pin the main thread in
-    /// one endless AttributeGraph transaction while flick-scrolling.
-    private func handleTargetVisibility(_ ids: [Int32]) {
-        metrics.topVisibleMessageID = ids.first
-        metrics.newestRowVisible = newestMessageID.map { ids.contains($0) } ?? false
-        if metrics.newestRowVisible, enableOlderLoadingIfReady() {
-            requestOlderIfUnderfilled()
-        }
-        refreshHistoryRequestIfNeeded()
     }
 
     @discardableResult

@@ -344,4 +344,46 @@ final class HistoryLoadTriggerTests: XCTestCase {
             measuredAtBottom: false))
     }
 
+    func testViewportVisibilityUsesChronologicalFrames() {
+        var visibility = MessageViewportVisibility()
+        let frames: [(Int32, Double, Double)] = [
+            (10, 70, 130),
+            (11, 130, 190),
+            (12, 190, 250),
+        ]
+
+        for (id, minY, maxY) in frames {
+            visibility.observe(
+                messageID: id,
+                minY: minY,
+                maxY: maxY,
+                viewport: 100..<220,
+                newestMessageID: 12)
+        }
+
+        XCTAssertEqual(visibility.topVisibleMessageID, 10)
+        XCTAssertEqual(visibility.fullyVisibleMessageID, 11)
+        XCTAssertTrue(visibility.newestMessageVisible)
+    }
+
+    func testViewportVisibilityHandlesOversizedAndInvalidFrames() {
+        var visibility = MessageViewportVisibility()
+        visibility.observe(
+            messageID: 20,
+            minY: 50,
+            maxY: 250,
+            viewport: 100..<200,
+            newestMessageID: 20)
+        visibility.observe(
+            messageID: 21,
+            minY: .nan,
+            maxY: 180,
+            viewport: 100..<200,
+            newestMessageID: 21)
+
+        XCTAssertEqual(visibility.topVisibleMessageID, 20)
+        XCTAssertNil(visibility.fullyVisibleMessageID)
+        XCTAssertTrue(visibility.newestMessageVisible)
+    }
+
 }
