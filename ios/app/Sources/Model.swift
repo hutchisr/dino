@@ -184,6 +184,8 @@ final class AppModel: ObservableObject {
     @Published var pendingMucInvite: MucInvitation?
     @Published var newMessagePresented = false
     @Published var accountSettingsPresented = false
+    @Published private(set) var isUITestFixture = false
+    @Published private(set) var uiTestImageSettled = false
 
     private var pendingChatJid: String?
     private var queuedMucInvites: [MucInvitation] = []
@@ -286,6 +288,91 @@ final class AppModel: ObservableObject {
         newMessagePresented = true
     }
 
+    /// Installs an in-memory chat used by UI tests. It deliberately publishes
+    /// messages after the chat has appeared, then turns the last file row into
+    /// an image preview so tests exercise both initial reveal and height growth.
+    @discardableResult
+    func configureUITestFixtureIfRequested() -> Bool {
+#if DEBUG
+        let env = ProcessInfo.processInfo.environment
+        guard env["DINO_UI_TEST_FIXTURE"] == "chat-visibility" else { return false }
+
+        let conversation: Int32 = 9001
+        isUITestFixture = true
+        ready = true
+        accounts = [XmppAccount(id: "fixture@example.invalid", state: "connected")]
+        conversations = [
+            XmppConversation(
+                id: conversation,
+                jid: "visibility@example.invalid",
+                name: "Visibility Regression",
+                encryption: "NONE")
+        ]
+        navigation = [conversation]
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self else { return }
+            let start = Date(timeIntervalSince1970: 1_700_000_000)
+            var fixture = (0..<24).map { index in
+                ChatMessage(
+                    id: Int32(9_100 + index),
+                    content: "text",
+                    direction: index.isMultiple(of: 2) ? "in" : "out",
+                    from: index.isMultiple(of: 2)
+                        ? "visibility@example.invalid"
+                        : "fixture@example.invalid",
+                    body: "Deterministic message \(index)",
+                    time: start.addingTimeInterval(Double(index) * 60),
+                    encryption: "NONE")
+            }
+            fixture.append(
+                ChatMessage(
+                    id: 9_199,
+                    content: "file",
+                    direction: "in",
+                    from: "visibility@example.invalid",
+                    body: "",
+                    time: start.addingTimeInterval(1_500),
+                    encryption: "NONE",
+                    fileName: "fixture.png",
+                    mime: "image/png",
+                    size: 1_024,
+                    fileState: "not_started"))
+            self.messages[conversation] = fixture
+            self.messageRevisions[conversation, default: 0] += 1
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            guard let self else { return }
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: 640, height: 480))
+            let image = renderer.image { context in
+                UIColor.systemTeal.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 640, height: 480))
+            }
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("gecko-chat-visibility-fixture.png")
+            guard let data = image.pngData(), (try? data.write(to: url)) != nil,
+                  var fixture = self.messages[conversation],
+                  let index = fixture.firstIndex(where: { $0.id == 9_199 })
+            else { return }
+            fixture[index].path = url.path
+            fixture[index].fileState = "complete"
+            self.messages[conversation] = fixture
+            self.messageRevisions[conversation, default: 0] += 1
+            self.uiTestImageSettled = true
+
+            guard env["DINO_UI_TEST_RAPID_MEDIA"] != nil else { return }
+            self.viewerRequest = url.path
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.viewerRequest = url.path
+            }
+        }
+        return true
+#else
+        return false
+#endif
+    }
+
     func boot() {
         if booted { return }
         booted = true
@@ -364,6 +451,7 @@ final class AppModel: ObservableObject {
     }
 
     private func applyConversationFocus(_ actions: [ConversationFocusAction]) {
+        guard !isUITestFixture else { return }
         for action in actions {
             switch action {
             case .blur(let id):

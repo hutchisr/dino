@@ -270,7 +270,9 @@ struct GeckoApp: App {
         RootView()
             .environmentObject(model)
             .onAppear {
-                model.boot()
+                if !model.configureUITestFixtureIfRequested() {
+                    model.boot()
+                }
                 model.setApplicationActive(scenePhase == .active)
                 AppDelegate.setOpenHandler { jid in model.openChat(with: jid) }
 #if targetEnvironment(macCatalyst)
@@ -327,6 +329,7 @@ struct GeckoApp: App {
                     Color.black
                 }
             }
+            .accessibilityIdentifier("media.preview")
             .focusedSceneValue(\.mediaViewerItem, model.mediaViewerItem)
             .background {
                 CatalystMediaWindowConfigurator()
@@ -807,7 +810,9 @@ struct RootView: View {
                     } detail: {
                         if let id = model.navigation.last,
                            model.conversations.contains(where: { $0.id == id }) {
-                            ChatView(conversationId: id)
+                            ChatView(
+                                conversationId: id,
+                                talksToCore: !model.isUITestFixture)
                                 .id(id)
                         } else {
                             ContentUnavailableView(
@@ -834,6 +839,12 @@ struct RootView: View {
 #endif
             }
 
+            if model.isUITestFixture && model.uiTestImageSettled {
+                Text("Image settled")
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+                    .accessibilityIdentifier("chat.fixture.imageSettled")
+            }
         }
 #if !targetEnvironment(macCatalyst)
         .fullScreenCover(item: $model.mediaViewerItem) { item in
@@ -3181,6 +3192,7 @@ struct CachedThumbnail: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+        .accessibilityIdentifier("chat.media.\(URL(fileURLWithPath: path).lastPathComponent)")
         .task(id: path) {
             guard image == nil else { return }
             let p = path, mp = maxPixel

@@ -44,10 +44,9 @@ struct SwiftUIMessageList: View {
     /// happened. The first populated layout jumps to the bottom instantly; later
     /// live arrivals animate only while already pinned, while sync updates snap.
     @State private var didInitialScroll = false
-    /// Keep the initial default scroll position invisible until geometry and
-    /// the already-measured row frames confirm that the newest message is at
-    /// the bottom.
-    @State private var initialViewportReady = false
+    /// Keep the initial default scroll position invisible until the coordinated
+    /// programmatic bottom scroll has completed.
+    @State private var initialViewportReveal = InitialViewportReveal()
 
     /// Older-history paging stays disabled until the row-frame sample confirms
     /// the initial jump has put the newest row at the measured bottom.
@@ -312,10 +311,10 @@ struct SwiftUIMessageList: View {
             ScrollView {
                 VStack(spacing: 0) {
                     messageStack(proxy)
-                        .opacity(initialViewportReady ? 1 : 0)
-                        .animation(.easeOut(duration: 0.14), value: initialViewportReady)
-                        .allowsHitTesting(initialViewportReady)
-                        .accessibilityHidden(!initialViewportReady)
+                        .opacity(initialViewportReveal.isReady ? 1 : 0)
+                        .animation(.easeOut(duration: 0.14), value: initialViewportReveal.isReady)
+                        .allowsHitTesting(initialViewportReveal.isReady)
+                        .accessibilityHidden(!initialViewportReveal.isReady)
                         .background(alignment: .topLeading) {
                             ScrollViewResolver(metrics: metrics)
                                 .frame(width: 0, height: 0)
@@ -338,7 +337,7 @@ struct SwiftUIMessageList: View {
             .contentMargins(.top, max(0, visualScrollIndicatorTopInset), for: .scrollIndicators)
             .contentMargins(.bottom, max(0, visualScrollIndicatorBottomInset), for: .scrollIndicators)
             .overlay {
-                if !initialViewportReady, newestMessageID != nil {
+                if !initialViewportReveal.isReady, newestMessageID != nil {
                     ProgressView()
                         .controlSize(.small)
                 }
@@ -551,12 +550,14 @@ struct SwiftUIMessageList: View {
             messageRows(proxy)
         }
         .scrollTargetLayout()
+        .accessibilityIdentifier("chat.messageList")
     }
 
     private func messageRows(_ proxy: ScrollViewProxy) -> some View {
         ForEach(rows) { row in
             rowView(row)
                 .id(row.msg.id)
+                .accessibilityIdentifier("chat.message.\(row.msg.id)")
                 .background {
                     Color.clear
                         .onGeometryChange(
@@ -618,8 +619,8 @@ struct SwiftUIMessageList: View {
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
             }
-            if initial, !initialViewportReady {
-                initialViewportReady = true
+            if initial, !initialViewportReveal.isReady {
+                initialViewportReveal.initialScrollCompleted()
             }
             if newestMessageID == last {
                 lastSettledNewestID = last
@@ -636,8 +637,8 @@ struct SwiftUIMessageList: View {
               didInitialScroll,
               metrics.isAtBottom,
               metrics.newestRowVisible else { return false }
-        if !initialViewportReady {
-            initialViewportReady = true
+        if !initialViewportReveal.isReady {
+            initialViewportReveal.initialScrollCompleted()
         }
         canLoadOlder = true
         metrics.historyLoadTrigger.setCanLoadOlder(canLoadOlderHistory)
