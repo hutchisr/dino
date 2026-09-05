@@ -105,6 +105,28 @@ The app supports headless automation for testing via environment variables
 `DINO_LOG_XMPP=all` (stanza log on stderr, visible via
 `simctl launch --console-pty`).
 
+Chat UI regressions run without an account using the in-memory fixtures in
+`Model.swift`:
+
+```sh
+xcodebuild test -project Gecko.xcodeproj -scheme Gecko \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -only-testing:GeckoUITests/ChatVisibilityUITests
+```
+
+Composer tests establish a post-keyboard baseline, then check each inserted
+character and backspace across soft wraps and explicit line breaks. The image
+test measures the actual preview button, not an inherited row identifier.
+XCTest still waits for idle around input, so inspect recorded frames when
+checking transient jumps that could disappear before an assertion runs.
+
+The chat's composer clearance lives in the non-lazy bottom anchor, not a bottom
+content margin. Together with `.defaultScrollAnchor(..., for: .sizeChanges)`,
+this keeps multiline growth/deletion bottom-aligned during layout. Changing
+content margins and correcting afterward can briefly restore an estimated
+older row before snapping back. Disable resize anchoring while the user is
+scrolling or reading older messages; keep initial positioning explicit.
+
 ## Changes to the main tree
 
 All desktop-neutral (defaults unchanged; GTK Dino still builds):

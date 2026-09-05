@@ -288,14 +288,15 @@ final class AppModel: ObservableObject {
         newMessagePresented = true
     }
 
-    /// Installs an in-memory chat used by UI tests. It deliberately publishes
-    /// messages after the chat has appeared, then turns the last file row into
-    /// an image preview so tests exercise both initial reveal and height growth.
+    /// Installs delayed in-memory chat history for UI tests. The default fixture
+    /// expands its last file row into an image; the composer variant uses longer,
+    /// mixed-height text history to expose lazy-layout jumps during resizing.
     @discardableResult
     func configureUITestFixtureIfRequested() -> Bool {
 #if DEBUG
         let env = ProcessInfo.processInfo.environment
         guard env["DINO_UI_TEST_FIXTURE"] == "chat-visibility" else { return false }
+        let composerFixture = env["DINO_UI_TEST_COMPOSER"] == "1"
 
         let conversation: Int32 = 9001
         isUITestFixture = true
@@ -313,7 +314,7 @@ final class AppModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self else { return }
             let start = Date(timeIntervalSince1970: 1_700_000_000)
-            var fixture = (0..<24).map { index in
+            var fixture = (0..<(composerFixture ? 80 : 24)).map { index in
                 ChatMessage(
                     id: Int32(9_100 + index),
                     content: "text",
@@ -321,18 +322,20 @@ final class AppModel: ObservableObject {
                     from: index.isMultiple(of: 2)
                         ? "visibility@example.invalid"
                         : "fixture@example.invalid",
-                    body: "Deterministic message \(index)",
+                    body: composerFixture
+                        ? String(repeating: "Message \(index) with variable height. ", count: index % 7 + 1)
+                        : "Deterministic message \(index)",
                     time: start.addingTimeInterval(Double(index) * 60),
                     encryption: "NONE")
             }
             fixture.append(
                 ChatMessage(
                     id: 9_199,
-                    content: "file",
+                    content: composerFixture ? "text" : "file",
                     direction: "in",
                     from: "visibility@example.invalid",
-                    body: "",
-                    time: start.addingTimeInterval(1_500),
+                    body: composerFixture ? "Newest fixture message" : "",
+                    time: start.addingTimeInterval(composerFixture ? 4_800 : 1_500),
                     encryption: "NONE",
                     fileName: "fixture.png",
                     mime: "image/png",
@@ -341,6 +344,8 @@ final class AppModel: ObservableObject {
             self.messages[conversation] = fixture
             self.messageRevisions[conversation, default: 0] += 1
         }
+
+        guard !composerFixture else { return true }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             guard let self else { return }

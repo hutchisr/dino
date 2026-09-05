@@ -323,17 +323,25 @@ struct SwiftUIMessageList: View {
                         .animation(
                             newestMessageInsertionAnimation,
                             value: newestMessageID)
+                    // Clearance must resize the content, not its margins:
+                    // margin changes bypass the size-change bottom anchor.
                     Color.clear
-                        .frame(height: 0)
+                        .frame(height: max(0, visualBottomInset))
                         .id(Self.bottomAnchorID)
                 }
             }
             .coordinateSpace(.named(Self.scrollCoordinateSpace))
             .scrollDismissesKeyboard(.interactively)
-            // The chat chrome (top bar, composer) floats over the list, so inset
-            // the content (and the scroll indicators independently) to clear it.
+            // Keep the resize itself bottom-anchored. Correcting it afterward
+            // lets LazyVStack briefly restore an older estimated row when the
+            // composer loses a line, then visibly snap back to the newest row.
+            // Leave initial positioning to the explicit first-population scroll.
+            .defaultScrollAnchor(
+                stickToBottom && !userInteracting ? .bottom : nil,
+                for: .sizeChanges)
+            // Top chrome and indicators keep independent insets; bottom content
+            // clearance belongs to the non-lazy anchor above.
             .contentMargins(.top, max(0, visualTopInset), for: .scrollContent)
-            .contentMargins(.bottom, max(0, visualBottomInset), for: .scrollContent)
             .contentMargins(.top, max(0, visualScrollIndicatorTopInset), for: .scrollIndicators)
             .contentMargins(.bottom, max(0, visualScrollIndicatorBottomInset), for: .scrollIndicators)
             .overlay {
@@ -343,12 +351,9 @@ struct SwiftUIMessageList: View {
                 }
             }
             .onScrollGeometryChange(for: ScrollSample.self) { geo in
-                // Distance the content can still travel downward; ~0 means
-                // pinned to the newest message. Empirically, at the resting
-                // bottom SwiftUI gives
-                //   contentSize == contentOffset.y + containerSize + insets.top
-                // (the bottom inset is slack the content never scrolls into), so
-                // the bottom-most offset is contentSize − containerSize − top.
+                // Bottom clearance is included in contentSize. SwiftUI's
+                // container excludes the top content margin, so account for
+                // that margin when comparing its content offset.
                 let bottomOffsetY = geo.contentSize.height
                     - geo.containerSize.height - geo.contentInsets.top
                 let distanceFromTop = max(0, geo.contentOffset.y + geo.contentInsets.top)
@@ -511,10 +516,13 @@ struct SwiftUIMessageList: View {
             requestOlderIfNeeded(distanceFromTop: sample.distanceFromTop)
         }
 
+        // Resizing may already have preserved the bottom during layout. Only
+        // correct a remaining gap, rather than issuing a redundant proxy scroll.
         guard abs(sample.contentHeight - previousContentHeight) > 0.5,
               didInitialScroll,
               stickToBottom,
               !userInteracting,
+              sample.distanceFromBottom > 0.5,
               !metrics.awaitingHistoryRestoreGeometry else { return }
         let animated = shouldAnimateBottomGrowth && !accessibilityReduceMotion
         scrollToNewest(
