@@ -177,7 +177,7 @@ class PushBot(slixmpp.ClientXMPP):
             while True:
                 await asyncio.sleep(self.ping_interval)
                 try:
-                    await self["xep_0199"].ping(self.boundjid.host, timeout=self.ping_timeout)
+                    await self.plugin["xep_0199"].ping(self.boundjid.host, timeout=self.ping_timeout)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
