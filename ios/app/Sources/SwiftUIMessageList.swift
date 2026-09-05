@@ -330,6 +330,7 @@ struct SwiftUIMessageList: View {
                         .id(Self.bottomAnchorID)
                 }
             }
+            .accessibilityIdentifier("chat.messageList")
             .coordinateSpace(.named(Self.scrollCoordinateSpace))
             .scrollDismissesKeyboard(.interactively)
             // Keep the resize itself bottom-anchored. Correcting it afterward
@@ -558,7 +559,6 @@ struct SwiftUIMessageList: View {
             messageRows(proxy)
         }
         .scrollTargetLayout()
-        .accessibilityIdentifier("chat.messageList")
     }
 
     private func messageRows(_ proxy: ScrollViewProxy) -> some View {

@@ -209,6 +209,7 @@ final class AppModel: ObservableObject {
 
     private var booted = false
     private var applicationIsActive = false
+    private var uiTestClearsUnreadOnFocus = false
     private var conversationFocus = ConversationFocusState()
 
     var hasAccount: Bool { !accounts.isEmpty }
@@ -295,11 +296,34 @@ final class AppModel: ObservableObject {
     func configureUITestFixtureIfRequested() -> Bool {
 #if DEBUG
         let env = ProcessInfo.processInfo.environment
-        guard env["DINO_UI_TEST_FIXTURE"] == "chat-visibility" else { return false }
-        let composerFixture = env["DINO_UI_TEST_COMPOSER"] == "1"
+        guard let fixture = env["DINO_UI_TEST_FIXTURE"] else { return false }
+        if fixture == "account-avatar" {
+            let account = XmppAccount(id: "fixture@example.invalid", state: "connected")
+            let renderer = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64))
+            let image = renderer.image { context in
+                UIColor.systemPink.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+            }
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("gecko-account-avatar-fixture.png")
 
+            isUITestFixture = true
+            ready = true
+            accounts = [account]
+            accountAlias = "Fixture Account"
+            if let data = image.pngData(), (try? data.write(to: url)) != nil {
+                avatars[account.id] = url.path
+            }
+            return true
+        }
+        guard fixture == "chat-visibility" else { return false }
+        let composerFixture = env["DINO_UI_TEST_COMPOSER"] == "1"
+        let uploadImageFixture = env["DINO_UI_TEST_UPLOAD_IMAGE"] == "1"
+        let progressFixture = env["DINO_UI_TEST_UPLOAD_PROGRESS"] == "1" || uploadImageFixture
+        let unreadClearFixture = env["DINO_UI_TEST_UNREAD_CLEAR"] == "1"
         let conversation: Int32 = 9001
         isUITestFixture = true
+        uiTestClearsUnreadOnFocus = unreadClearFixture
         ready = true
         accounts = [XmppAccount(id: "fixture@example.invalid", state: "connected")]
         conversations = [
@@ -307,13 +331,26 @@ final class AppModel: ObservableObject {
                 id: conversation,
                 jid: "visibility@example.invalid",
                 name: "Visibility Regression",
-                encryption: "NONE")
+                encryption: "NONE",
+                unread: unreadClearFixture ? 3 : 0)
         ]
-        navigation = [conversation]
+        navigation = unreadClearFixture ? [] : [conversation]
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self else { return }
             let start = Date(timeIntervalSince1970: 1_700_000_000)
+            var uploadImagePath = ""
+            if uploadImageFixture {
+                let renderer = UIGraphicsImageRenderer(size: CGSize(width: 640, height: 480))
+                let image = renderer.image { context in
+                    UIColor.systemTeal.setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: 640, height: 480))
+                }
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("gecko-upload-image-fixture.png")
+                guard let data = image.pngData(), (try? data.write(to: url)) != nil else { return }
+                uploadImagePath = url.path
+            }
             var fixture = (0..<(composerFixture ? 80 : 24)).map { index in
                 ChatMessage(
                     id: Int32(9_100 + index),
@@ -332,20 +369,33 @@ final class AppModel: ObservableObject {
                 ChatMessage(
                     id: 9_199,
                     content: composerFixture ? "text" : "file",
-                    direction: "in",
-                    from: "visibility@example.invalid",
+                    direction: progressFixture ? "out" : "in",
+                    from: progressFixture
+                        ? "fixture@example.invalid"
+                        : "visibility@example.invalid",
                     body: composerFixture ? "Newest fixture message" : "",
                     time: start.addingTimeInterval(composerFixture ? 4_800 : 1_500),
                     encryption: "NONE",
-                    fileName: "fixture.png",
-                    mime: "image/png",
-                    size: 1_024,
-                    fileState: "not_started"))
+                    fileName: uploadImageFixture
+                        ? "upload-fixture.png"
+                        : progressFixture ? "upload-fixture.bin" : "fixture.png",
+                    mime: uploadImageFixture
+                        ? "image/png"
+                        : progressFixture ? "application/octet-stream" : "image/png",
+                    size: progressFixture ? 2_048 : 1_024,
+                    fileState: progressFixture ? "in_progress" : "not_started",
+                    path: uploadImagePath))
+            if progressFixture {
+                self.fileTransferProgressStore.update(
+                    FileTransferProgressKey(conversation: conversation, item: 9_199),
+                    transferredBytes: 1_024,
+                    totalBytes: 2_048)
+            }
             self.messages[conversation] = fixture
             self.messageRevisions[conversation, default: 0] += 1
         }
 
-        guard !composerFixture else { return true }
+        guard !composerFixture, !progressFixture else { return true }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
             guard let self else { return }
@@ -381,6 +431,7 @@ final class AppModel: ObservableObject {
     func boot() {
         if booted { return }
         booted = true
+        if configureUITestFixtureIfRequested() { return }
         GeckoCore.shared.onEvent = { [weak self] e in self?.handle(e) }
         DispatchQueue.global(qos: .userInitiated).async {
             GeckoCore.shared.start()
@@ -456,7 +507,22 @@ final class AppModel: ObservableObject {
     }
 
     private func applyConversationFocus(_ actions: [ConversationFocusAction]) {
-        guard !isUITestFixture else { return }
+        if isUITestFixture {
+            // The real bridge responds to focus by pushing the authoritative
+            // conversation list. Simulate only that response in this fixture.
+            guard uiTestClearsUnreadOnFocus else { return }
+            var updated = conversations
+            for action in actions {
+                guard case .focus(let id) = action,
+                      let index = updated.firstIndex(where: { $0.id == id })
+                else {
+                    continue
+                }
+                updated[index].unread = 0
+            }
+            conversations = updated
+            return
+        }
         for action in actions {
             switch action {
             case .blur(let id):

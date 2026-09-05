@@ -141,6 +141,14 @@ enum CatalystWindowLifecycle {
     private static var proxies: [ObjectIdentifier: CatalystWindowDelegateProxy] = [:]
     private static var applicationProxy: CatalystApplicationDelegateProxy?
     private static var hiddenWindow: NSObject?
+    private static var visibilityHandler: ((Bool) -> Void)?
+
+    static var isVisible: Bool { hiddenWindow == nil }
+
+    static func setVisibilityHandler(_ handler: @escaping (Bool) -> Void) {
+        visibilityHandler = handler
+        handler(isVisible)
+    }
 
     static func install() {
         guard let applicationClass = NSClassFromString("NSApplication") as? NSObject.Type,
@@ -178,17 +186,17 @@ enum CatalystWindowLifecycle {
 
     static func hideInsteadOfClosing(_ window: NSObject) {
         CatalystWindowSize.save()
-        MacLocalNotifications.setAppIsActive(false)
         hiddenWindow = window
+        visibilityHandler?(false)
         window.perform(NSSelectorFromString("orderOut:"), with: nil)
     }
 
     static func reopenIfNeeded() {
         guard let window = hiddenWindow else { return }
         hiddenWindow = nil
-        MacLocalNotifications.setAppIsActive(true)
-        PushRegistration.clearDelivered()
+        PushRegistration.clearDeliveredNotifications()
         window.perform(NSSelectorFromString("makeKeyAndOrderFront:"), with: nil)
+        visibilityHandler?(true)
     }
 }
 
@@ -239,14 +247,25 @@ struct GeckoApp: App {
             .environmentObject(model)
             .onAppear {
                 model.boot()
+                model.setApplicationActive(scenePhase == .active)
                 AppDelegate.setOpenHandler { jid in model.openChat(with: jid) }
 #if targetEnvironment(macCatalyst)
                 configureDesktopWindow()
+                CatalystWindowLifecycle.setVisibilityHandler { visible in
+                    setDesktopActive(
+                        visible && UIApplication.shared.applicationState == .active
+                    )
+                }
 #endif
             }
     }
 
 #if targetEnvironment(macCatalyst)
+    private func setDesktopActive(_ active: Bool) {
+        model.setApplicationActive(active)
+        MacLocalNotifications.setAppIsActive(active)
+    }
+
     private func configureDesktopWindow() {
         // SwiftUI's contentMinSize currently gives Catalyst identical minimum
         // and maximum sizes. Override only the maximum after scene creation so
@@ -279,6 +298,7 @@ struct GeckoApp: App {
                     Color.black
                 }
             }
+            .accessibilityIdentifier("media.preview")
             .background {
                 CatalystMediaWindowConfigurator()
                     .frame(width: 0, height: 0)
@@ -335,12 +355,12 @@ struct GeckoApp: App {
                 }
         }
         .onChange(of: scenePhase) { _, phase in
-            MacLocalNotifications.setAppIsActive(phase == .active)
+            setDesktopActive(phase == .active && CatalystWindowLifecycle.isVisible)
             if phase != .active {
                 CatalystWindowSize.save()
             }
             guard phase == .active else { return }
-            PushRegistration.clearDelivered()
+            PushRegistration.clearDeliveredNotifications()
             if model.ready && model.hasAccount {
                 model.refreshAfterForeground()
             }
@@ -352,12 +372,13 @@ struct GeckoApp: App {
             appContent
         }
         .onChange(of: scenePhase) { _, phase in
+            model.setApplicationActive(phase == .active)
             switch phase {
             case .active:
                 // Cancel any pending background-disconnect (quick toggle) and
                 // keep the live connection rather than churning it.
                 appDelegate.cancelBackgroundDisconnect()
-                PushRegistration.clearDelivered()
+                PushRegistration.clearDeliveredNotifications()
                 if model.ready && model.hasAccount {
                     GeckoCore.shared.appForegrounded()
                     // The notification-service extension may have stored new
@@ -386,7 +407,6 @@ private enum GeckoPreviewFixtures {
     static let conversations: [XmppConversation] = [
         XmppConversation(
             id: 1,
-            account: "rachel@example.org",
             jid: "anemone@xmpp.is",
             name: "Anemone",
             encryption: "OMEMO",
@@ -396,12 +416,10 @@ private enum GeckoPreviewFixtures {
             preview: "Sent a few image-heavy test messages",
             previewDirection: "in",
             time: Date().addingTimeInterval(-180),
-            notify: "default",
             notifyEffective: "on"
         ),
         XmppConversation(
             id: 2,
-            account: "rachel@example.org",
             jid: "gecko@conference.example.org",
             name: "Gecko Dev",
             encryption: "",
@@ -411,12 +429,10 @@ private enum GeckoPreviewFixtures {
             preview: "I will test the new composer layout",
             previewDirection: "out",
             time: Date().addingTimeInterval(-3600),
-            notify: "default",
             notifyEffective: "highlight"
         ),
         XmppConversation(
             id: 3,
-            account: "rachel@example.org",
             jid: "offline@example.org",
             name: "Offline Contact",
             encryption: "",
@@ -426,7 +442,6 @@ private enum GeckoPreviewFixtures {
             preview: "See you later",
             previewDirection: "in",
             time: Date().addingTimeInterval(-86400),
-            notify: "default",
             notifyEffective: "off"
         ),
     ]
@@ -666,14 +681,12 @@ private enum GeckoPreviewFixtures {
         model.roster = [
             RosterContact(
                 id: "anemone@xmpp.is",
-                account: "rachel@example.org",
                 name: "Anemone",
                 subscription: "both",
                 show: "online"
             ),
             RosterContact(
                 id: "offline@example.org",
-                account: "rachel@example.org",
                 name: "Offline Contact",
                 subscription: "both",
                 show: "offline"
@@ -937,11 +950,8 @@ struct ConversationListView: View {
                 jid: account.id, name: model.accountAlias, isGroup: false, size: 34,
                 avatarPath: model.avatars[account.id],
                 requestAvatar: { model.ensureAvatar(for: account.id) })
-                .padding(3)
                 .glassEffect(.regular.tint(accountStatusColor(account.state)).interactive(), in: Circle())
-                .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
-                // Include the glass ring around the avatar in the
-                // tap target, not just the opaque avatar image.
+                .clipShape(Circle())
                 .contentShape(Circle())
 #endif
         }
@@ -969,6 +979,9 @@ struct ConversationListView: View {
                     accountButton(for: account)
                 }
             }
+#if !targetEnvironment(macCatalyst)
+            .sharedBackgroundVisibility(.hidden)
+#endif
                 #if targetEnvironment(macCatalyst)
                     ToolbarItem(placement: .topBarTrailing) {
                         HStack(spacing: 0) {
@@ -1258,6 +1271,7 @@ struct ConversationRow: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Capsule().fill(Color.accentColor))
+                            .accessibilityIdentifier("conversation.unread.\(conv.id)")
                     }
                 }
             }
@@ -1485,6 +1499,7 @@ struct ChatView: View {
     @State private var composerHeight: CGFloat = 0
     @State private var keyboardOverlap: CGFloat = 0
     @State private var pendingFileSend: PendingFileSend?
+    @StateObject private var attachmentPipeline = AttachmentSelectionPipeline()
 
     private func openMediaViewer(_ item: MediaViewerItem) {
 #if targetEnvironment(macCatalyst)
@@ -1568,6 +1583,8 @@ struct ChatView: View {
                     Color.clear.preference(key: ComposerHeightKey.self, value: geo.size.height)
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("chat.composer")
     }
 
     @ViewBuilder
@@ -1716,6 +1733,10 @@ struct ChatView: View {
         PasteAwareComposerTextView(
             text: $draft,
             maxLines: 6,
+            minimumHeight: 0,
+            horizontalInset: 0,
+            verticalInset: 0,
+            verticalAlignmentOffset: 0,
             canPasteImages: editing == nil,
             onImagePaste: stagePastedImage,
             onSubmit: submitComposer
@@ -1724,6 +1745,10 @@ struct ChatView: View {
         PasteAwareComposerTextView(
             text: $draft,
             maxLines: 6,
+            minimumHeight: 0,
+            horizontalInset: 0,
+            verticalInset: 0,
+            verticalAlignmentOffset: 0,
             canPasteImages: editing == nil,
             onImagePaste: stagePastedImage
         )
@@ -1972,7 +1997,10 @@ struct ChatView: View {
                 pendingFileSend = nil
                 editing = m
                 draft = m.body
-            } : nil)
+            } : nil,
+            onCopy: {
+                UIPasteboard.general.string = m.body
+            })
     }
 
     private func messageList(
@@ -1985,8 +2013,8 @@ struct ChatView: View {
         ZStack(alignment: .bottomTrailing) {
             SwiftUIMessageList(
                 messages: chatMessages,
-                messageRevision: model.messageRevision(for: conversationId),
                 messageUpdateWasSynced: model.messageUpdateWasSynced(for: conversationId),
+                messageRevision: model.messageRevision(for: conversationId),
                 historyPageRevision: model.historyPageRevision(for: conversationId),
                 historyPageRenderedRowsAdded:
                     model.historyPageRenderedRowsAdded(for: conversationId),
@@ -2067,6 +2095,11 @@ struct ChatView: View {
             + composerMessageClearance
     }
 
+    private func updateComposerHeight(_ height: CGFloat) {
+        guard abs(composerHeight - height) > 0.5 else { return }
+        composerHeight = height
+    }
+
     private func updateKeyboardOverlap(from note: Notification) {
         guard
             let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
@@ -2140,7 +2173,7 @@ struct ChatView: View {
                         }
                         notifyOption("Off", "off")
                 } label: {
-                        Image(systemName: bellIcon)insta
+                        Image(systemName: bellIcon)
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                 }
@@ -2349,11 +2382,7 @@ struct ChatView: View {
                         .animation(.easeInOut(duration: 0.18),
                                    value: model.typingIndicatorText(for: conversationId) != nil)
                 }
-                .onPreferenceChange(ComposerHeightKey.self) { height in
-                    if abs(composerHeight - height) > 0.5 {
-                        composerHeight = height
-                    }
-                }
+                .onPreferenceChange(ComposerHeightKey.self, perform: updateComposerHeight)
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIResponder.keyboardWillChangeFrameNotification
@@ -2368,8 +2397,10 @@ struct ChatView: View {
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker(
                 allowsVideos: true,
+                pipeline: attachmentPipeline,
                 onPicked: { url in setPendingFileSend(url) },
-                onTooLarge: reportAttachmentTooLarge)
+                onTooLarge: reportAttachmentTooLarge,
+                onError: { model.lastError = $0 })
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
             if case .success(let url) = result {
@@ -2438,11 +2469,9 @@ struct ChatView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             if model.roomInfo[conversationId]?.iAmOwner == true {
-                Text("End-to-end encryption needs a private room (members-only, with member addresses visible). "
-                     + "Make it private to enable encryption, then tap the lock.")
+                Text("End-to-end encryption needs a private room (members-only, with member addresses visible). Make it private to enable encryption, then tap the lock.")
             } else {
-                Text("End-to-end encryption needs a private room (members-only, with member addresses visible). "
-                     + "Ask a room owner to make it private.")
+                Text("End-to-end encryption needs a private room (members-only, with member addresses visible). Ask a room owner to make it private.")
             }
         }
     }
@@ -2495,9 +2524,13 @@ struct MessageBubble: View {
     var onReaction: ((String, Bool) -> Void)? = nil
     var onDownloadFile: ((Int32) -> Void)? = nil
     var onImageRendered: (() -> Void)? = nil
+    var transferProgress: FileTransferProgressState? = nil
 
     @State private var dragOffset: CGFloat = 0
     @State private var replyArmed = false
+#if targetEnvironment(macCatalyst)
+    @State private var clipboardWriteGate = ClipboardWriteGate()
+#endif
 
     private let replyTriggerOffset: CGFloat = 56
     private let replyMaxOffset: CGFloat = 78
@@ -2545,6 +2578,32 @@ struct MessageBubble: View {
         }
     }
 
+#if targetEnvironment(macCatalyst)
+    private var canCopyMessage: Bool {
+        !msg.body.isEmpty
+            || (msg.fileState == "complete" && msg.isImage && !msg.path.isEmpty)
+    }
+
+    private func copyMessage() {
+        let pasteboard = UIPasteboard.general
+        var gate = clipboardWriteGate
+        let ticket = gate.begin(changeCount: pasteboard.changeCount)
+        clipboardWriteGate = gate
+
+        guard msg.fileState == "complete", msg.isImage, !msg.path.isEmpty else {
+            pasteboard.string = msg.body
+            return
+        }
+        let path = msg.path
+        Task {
+            guard let image = await ThumbnailLoader.loadViewerImageAsync(path: path, maxPixel: 4_096),
+                  clipboardWriteGate.permits(ticket, changeCount: pasteboard.changeCount)
+            else { return }
+            pasteboard.image = image
+        }
+    }
+#endif
+
     var body: some View {
         // The whole row slides right on swipe; the reply icon is anchored to the
         // bubble's leading edge (a leading-aligned background on the bubble) and
@@ -2562,9 +2621,9 @@ struct MessageBubble: View {
                         onEdit?(msg)
                     }
                 }
-                if !msg.body.isEmpty {
+                if canCopyMessage {
                     Button("Copy", systemImage: "doc.on.doc") {
-                        UIPasteboard.general.string = msg.body
+                        copyMessage()
                     }
                 }
                 Button("Reactions and More…", systemImage: "face.smiling") {
@@ -2633,7 +2692,8 @@ struct MessageBubble: View {
                     if msg.isFile {
                         FileContent(msg: msg, onImageTap: onImageTap, onVideoTap: onVideoTap,
                                     onDownloadFile: onDownloadFile,
-                                    onImageRendered: onImageRendered)
+                                    onImageRendered: onImageRendered,
+                                    transferProgress: transferProgress)
                     } else {
                         messageBody(msg.body)
                     }
@@ -2872,34 +2932,30 @@ struct FileContent: View {
     var onVideoTap: ((String) -> Void)? = nil
     var onDownloadFile: ((Int32) -> Void)? = nil
     var onImageRendered: (() -> Void)? = nil
+    var transferProgress: FileTransferProgressState? = nil
 
     private var sizeLabel: String {
         GeckoDisplayFormatters.fileSize(msg.size)
     }
 
     var body: some View {
-        if msg.fileState == "complete", msg.isImage, !msg.path.isEmpty {
-            // Downsampled + cached off the main thread (CachedThumbnail), not
-            // decoded full-res in body on every scroll frame. The viewer (on tap)
-            // still loads the full-resolution file from msg.path.
-            // CachedThumbnail reserves its final size up front (from the image
-            // header) so the row doesn't grow when the decode lands.
-            CachedThumbnail(path: msg.path)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                // Safety net: should the reserved size ever be wrong (an
-                // unreadable header), report a late height change so the chat can
-                // still re-pin. With the size reserved this normally fires once.
-                .background {
-                    GeometryReader { geo in
-                        Color.clear
-                            .onChange(of: geo.size.height, initial: true) { _, _ in
-                                onImageRendered?()
-                            }
-                    }
+        if msg.fileState == "in_progress",
+           msg.direction == "out",
+           msg.isImage,
+           !msg.path.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                imagePreview
+                if let transferProgress {
+                    FileTransferProgressRow(
+                        state: transferProgress,
+                        fileName: msg.fileName.isEmpty ? "File" : msg.fileName,
+                        operation: .upload)
+                } else {
+                    fileRow
                 }
-                .onTapGesture {
-                    onImageTap?(msg.path)
-                }
+            }
+        } else if msg.fileState == "complete", msg.isImage, !msg.path.isEmpty {
+            imagePreview
         } else if msg.fileState == "complete", msg.isVideo, !msg.path.isEmpty {
             Button {
                 onVideoTap?(msg.path)
@@ -2915,15 +2971,44 @@ struct FileContent: View {
             // Files, etc.
             ShareLink(item: URL(fileURLWithPath: msg.path)) { fileRow }
                 .buttonStyle(.plain)
+        } else if msg.fileState == "in_progress", let transferProgress {
+            FileTransferProgressRow(
+                state: transferProgress,
+                fileName: msg.fileName.isEmpty ? "File" : msg.fileName,
+                operation: msg.direction == "out" ? .upload : .download)
+        } else if msg.direction == "in",
+                  msg.fileState == "not_started" || msg.fileState == "failed" {
+            Button {
+                onDownloadFile?(msg.id)
+            } label: {
+                fileRow
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Download \(msg.fileName.isEmpty ? "File" : msg.fileName)")
         } else {
             fileRow
-                .onTapGesture {
-                    if msg.direction == "in",
-                       msg.fileState == "not_started" || msg.fileState == "failed" {
-                        onDownloadFile?(msg.id)
-                    }
-                }
         }
+    }
+
+    private var imagePreview: some View {
+        // Reserve and decode the local image exactly once whether the outgoing
+        // upload is still running or the transfer has completed.
+        CachedThumbnail(path: msg.path)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .background {
+                GeometryReader { geo in
+                    Color.clear
+                        .onChange(of: geo.size.height, initial: true) { _, _ in
+                            onImageRendered?()
+                        }
+                }
+            }
+            .onTapGesture {
+                onImageTap?(msg.path)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Open image")
+            .accessibilityAddTraits(.isButton)
     }
 
     private var fileRow: some View {

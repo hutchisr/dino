@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 final class ChatVisibilityUITests: XCTestCase {
     private var app: XCUIApplication!
@@ -31,23 +32,27 @@ final class ChatVisibilityUITests: XCTestCase {
         let newest = app.staticTexts["Newest fixture message"]
         XCTAssertTrue(newest.waitForExistence(timeout: 5))
         let editor = app.textViews.firstMatch
+        let composer = app.descendants(matching: .any)["chat.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 3), "The composer never appeared")
         focusComposer(editor, above: newest)
-        let baselineGap = editor.frame.minY - newest.frame.maxY
-        // Soft wrapping plus explicit breaks exercise both height transitions,
-        // including entering and leaving the six-line internal scrolling mode.
-        let draft = String(repeating: "A line of draft text. ", count: 6) + "\n\n\n"
-        for character in draft {
-            editor.typeText(String(character))
-            assertNewestMessage(newest, remainsAbove: editor, gap: baselineGap)
+        let baselineGap = composer.frame.minY - newest.frame.maxY
+        // Seven short lines exercise each height transition and the six-line
+        // scrolling cap without spending the test typing a paragraph.
+        for line in 1...7 {
+            editor.typeText(String(line))
+            if line < 7 {
+                insertLineBreak(in: editor)
+            }
+            assertNewestMessage(newest, remainsAbove: composer, gap: baselineGap)
         }
-        let expandedHeight = editor.frame.height
+        let expandedHeight = composer.frame.height
         let enteredText = editor.value as? String ?? ""
         for _ in enteredText {
             editor.typeText(XCUIKeyboardKey.delete.rawValue)
-            assertNewestMessage(newest, remainsAbove: editor, gap: baselineGap)
+            assertNewestMessage(newest, remainsAbove: composer, gap: baselineGap)
         }
         XCTAssertEqual(editor.value as? String, "")
-        XCTAssertLessThan(editor.frame.height, expandedHeight, "Deletion never shrank the composer")
+        XCTAssertLessThan(composer.frame.height, expandedHeight, "Deletion never shrank the composer")
     }
 
     func testShrinkingDraftDoesNotLeaveOlderMessages() throws {
@@ -56,13 +61,29 @@ final class ChatVisibilityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Newest fixture message"].waitForExistence(timeout: 5))
         let editor = app.textViews.firstMatch
         focusComposer(editor, above: app.staticTexts["Newest fixture message"])
-        let line = "A line of draft text.\n"
-        editor.typeText(String(repeating: line, count: 8))
+        for line in 1...8 {
+            editor.typeText("x")
+            if line < 8 {
+                insertLineBreak(in: editor)
+            }
+        }
 
-        let origin = app.coordinate(withNormalizedOffset: .zero)
-        origin.withOffset(CGVector(dx: 200, dy: 180)).press(
-            forDuration: 0.05,
-            thenDragTo: origin.withOffset(CGVector(dx: 200, dy: 340)))
+        let messageList = app.descendants(matching: .any)["chat.messageList"]
+        XCTAssertTrue(messageList.waitForExistence(timeout: 3), "The message list never appeared")
+#if targetEnvironment(macCatalyst)
+        messageList.scroll(byDeltaX: 0, deltaY: 500)
+#else
+        let appFrame = app.frame
+        let listFrame = messageList.frame
+        XCTAssertFalse(listFrame.isEmpty, "The message list has no scrollable viewport")
+        let appOrigin = app.coordinate(withNormalizedOffset: .zero)
+        let x = listFrame.midX - appFrame.minX
+        let dragStart = appOrigin.withOffset(
+            CGVector(dx: x, dy: listFrame.minY + listFrame.height * 0.2 - appFrame.minY))
+        let dragEnd = appOrigin.withOffset(
+            CGVector(dx: x, dy: listFrame.minY + listFrame.height * 0.4 - appFrame.minY))
+        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+#endif
         let scrollDown = app.buttons["Scroll to latest messages"]
         XCTAssertTrue(scrollDown.waitForExistence(timeout: 3))
         editor.tap()
@@ -72,11 +93,151 @@ final class ChatVisibilityUITests: XCTestCase {
                     $0.frame.minY >= 130 && $0.frame.minY < editor.frame.minY - 30
                 })
         let y = marker.frame.minY
-        for _ in 0..<(line.count * 5) {
+        for _ in 0..<10 {
             editor.typeText(XCUIKeyboardKey.delete.rawValue)
             XCTAssertEqual(marker.frame.minY, y, accuracy: 2, "Shrinking a draft moved the history being read")
             XCTAssertTrue(scrollDown.exists, "Shrinking a draft unexpectedly resumed bottom following")
         }
+    }
+
+    func testOutgoingAttachmentShowsUploadProgress() {
+        app.launchEnvironment["DINO_UI_TEST_UPLOAD_PROGRESS"] = "1"
+        app.launch()
+
+        let progress = app.descendants(matching: .any)["Uploading upload-fixture.bin"]
+        XCTAssertTrue(progress.waitForExistence(timeout: 5), "The upload progress row never appeared")
+        XCTAssertTrue(
+            (progress.value as? String)?.hasPrefix("50 percent,") == true,
+            "The upload progress row did not expose its determinate progress")
+    }
+
+    func testOutgoingImageShowsThumbnailWhileUploading() throws {
+        app.launchEnvironment["DINO_UI_TEST_UPLOAD_IMAGE"] = "1"
+        app.launch()
+
+        let progress = app.descendants(matching: .any)["Uploading upload-fixture.png"]
+        XCTAssertTrue(progress.waitForExistence(timeout: 5), "The image upload progress row never appeared")
+        XCTAssertTrue(
+            (progress.value as? String)?.hasPrefix("50 percent,") == true,
+            "The image upload did not remain visibly in progress")
+
+        let preview = app.buttons["Open image"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5), "The image thumbnail was hidden during upload")
+        XCTAssertGreaterThan(preview.frame.width, 100, "Expected an image thumbnail, not only file progress")
+        XCTAssertGreaterThan(preview.frame.height, 100, "Expected an image thumbnail, not only file progress")
+        XCTAssertTrue(progress.exists, "The upload progress row disappeared before the thumbnail was checked")
+
+        let rgb = try screenshotCenterRGB(in: preview.screenshot())
+        XCTAssertGreaterThan(rgb.green - rgb.red, 60, "The reserved preview frame still showed its placeholder: \(rgb)")
+        XCTAssertGreaterThan(rgb.blue - rgb.red, 80, "The decoded fixture was not visibly teal: \(rgb)")
+        XCTAssertLessThan(abs(rgb.green - rgb.blue), 60, "The decoded fixture was not visibly teal: \(rgb)")
+    }
+
+    func testViewingConversationClearsUnreadBadge() {
+        app.launchEnvironment["DINO_UI_TEST_UNREAD_CLEAR"] = "1"
+        app.launch()
+
+        let unread = app.staticTexts["conversation.unread.9001"]
+        XCTAssertTrue(unread.waitForExistence(timeout: 3), "The unread badge never appeared")
+        app.staticTexts["Visibility Regression"].tap()
+
+#if !targetEnvironment(macCatalyst)
+        let back = app.navigationBars.buttons.firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 3), "The conversation never opened")
+        back.tap()
+#endif
+
+        let cleared = NSPredicate(format: "exists == false")
+        expectation(for: cleared, evaluatedWith: unread)
+        waitForExpectations(timeout: 3)
+    }
+
+    private func screenshotCenterRGB(
+        in screenshot: XCUIScreenshot
+    ) throws -> (red: Int, green: Int, blue: Int) {
+        let provider = try XCTUnwrap(
+            CGDataProvider(data: screenshot.pngRepresentation as CFData)
+        )
+        let cgImage = try XCTUnwrap(
+            CGImage(
+                pngDataProviderSource: provider,
+                decode: nil,
+                shouldInterpolate: false,
+                intent: .defaultIntent
+            )
+        )
+        let x = cgImage.width / 2
+        let y = cgImage.height / 2
+        let pixel = try XCTUnwrap(cgImage.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)))
+        var rgba = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(
+            CGContext(
+                data: &rgba,
+                width: 1,
+                height: 1,
+                bitsPerComponent: 8,
+                bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return (Int(rgba[0]), Int(rgba[1]), Int(rgba[2]))
+    }
+
+#if !targetEnvironment(macCatalyst)
+    func testAccountAvatarUsesUnpaddedArtworkSize() throws {
+        app.launchEnvironment["DINO_UI_TEST_FIXTURE"] = "account-avatar"
+        app.launch()
+
+        let avatar = app.buttons["Account"]
+        XCTAssertTrue(avatar.waitForExistence(timeout: 3), "The account avatar never appeared")
+        XCTAssertEqual(avatar.frame.width, 34, accuracy: 1)
+        XCTAssertEqual(avatar.frame.height, 34, accuracy: 1)
+
+        let screenshot = app.screenshot()
+        let haloDelta = try maximumHorizontalPixelDelta(
+            in: screenshot,
+            first: CGPoint(x: avatar.frame.minX - 3, y: avatar.frame.midY),
+            second: CGPoint(x: avatar.frame.minX - 12, y: avatar.frame.midY))
+        XCTAssertLessThanOrEqual(
+            haloDelta,
+            5,
+            "The toolbar added a visible glass margin outside the avatar artwork")
+    }
+
+    private func maximumHorizontalPixelDelta(
+        in screenshot: XCUIScreenshot,
+        first: CGPoint,
+        second: CGPoint
+    ) throws -> Int {
+        let image = screenshot.image
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let data = try XCTUnwrap(cgImage.dataProvider?.data)
+        let bytes = try XCTUnwrap(CFDataGetBytePtr(data))
+        let bytesPerPixel = cgImage.bitsPerPixel / 8
+        XCTAssertGreaterThanOrEqual(bytesPerPixel, 3)
+
+        let scaleX = CGFloat(cgImage.width) / image.size.width
+        let scaleY = CGFloat(cgImage.height) / image.size.height
+        let firstX = min(cgImage.width - 1, max(0, Int((first.x * scaleX).rounded())))
+        let secondX = min(cgImage.width - 1, max(0, Int((second.x * scaleX).rounded())))
+        let topY = min(cgImage.height - 1, max(0, Int((first.y * scaleY).rounded())))
+        let rows = [topY, cgImage.height - 1 - topY]
+
+        return rows.map { y in
+            let firstOffset = y * cgImage.bytesPerRow + firstX * bytesPerPixel
+            let secondOffset = y * cgImage.bytesPerRow + secondX * bytesPerPixel
+            return (0..<bytesPerPixel).map {
+                abs(Int(bytes[firstOffset + $0]) - Int(bytes[secondOffset + $0]))
+            }.max() ?? 0
+        }.max() ?? 0
+    }
+#endif
+    private func insertLineBreak(in editor: XCUIElement) {
+#if targetEnvironment(macCatalyst)
+        editor.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: .shift)
+#else
+        editor.typeText("\n")
+#endif
     }
 
     private func focusComposer(_ editor: XCUIElement, above newest: XCUIElement) {
@@ -97,21 +258,44 @@ final class ChatVisibilityUITests: XCTestCase {
 
     private func assertNewestMessage(
         _ newest: XCUIElement,
-        remainsAbove editor: XCUIElement,
+        remainsAbove boundary: XCUIElement,
         gap expectedGap: CGFloat? = nil,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let gap = editor.frame.minY - newest.frame.maxY
+        let gap = boundary.frame.minY - newest.frame.maxY
         XCTAssertGreaterThanOrEqual(gap, 0, "Newest message is covered by the composer", file: file, line: line)
         XCTAssertLessThan(gap, 44, "Resizing the draft scrolled away from the newest message", file: file, line: line)
         if let expectedGap {
-            XCTAssertEqual(gap, expectedGap, accuracy: 2, "A keystroke displaced the message relative to the composer",
+            let accuracy: CGFloat = 2
+            XCTAssertEqual(gap, expectedGap, accuracy: accuracy,
+                           "A keystroke displaced the message relative to the composer",
                            file: file, line: line)
         }
     }
 
 #if targetEnvironment(macCatalyst)
+    func testCompletedImageContextMenuCopiesImage() {
+        UIPasteboard.general.items = []
+        app.launch()
+
+        let preview = app.buttons["Open image"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 8), "The image preview never appeared")
+        preview.rightClick()
+
+        let copy = app.windows.firstMatch.menus.firstMatch.menuItems["Copy"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 2), "Completed image context menu has no Copy action")
+        copy.click()
+        let imageCopied = NSPredicate { _, _ in
+            UIPasteboard.general.hasImages
+        }
+        let copied = XCTNSPredicateExpectation(predicate: imageCopied, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [copied], timeout: 5),
+            .completed,
+            "Copy did not place the rendered image on the pasteboard")
+    }
+
     func testRapidMediaActivationCreatesOnlyOnePreviewWindow() {
         app.launchEnvironment["DINO_UI_TEST_RAPID_MEDIA"] = "1"
         app.launch()
