@@ -616,7 +616,7 @@ private static string file_observation_key(int conversation_id, int item_id) {
 // Build the observed item around the exact transfer instance that started.
 // Looking it up through FileTransferStorage could materialize or return a
 // different history object, whose property notifications would not describe
-// the active download.
+// the active transfer.
 private static Dino.FileItem? file_item_for_active_transfer(FileTransfer file_transfer, Conversation conversation) {
     foreach (Qlite.Row row in app.db.content_item.select()
             .with(app.db.content_item.conversation_id, "=", conversation.id)
@@ -629,7 +629,12 @@ private static Dino.FileItem? file_item_for_active_transfer(FileTransfer file_tr
 
 private static void emit_file_progress(FileObservation observation) {
     FileTransfer ft = observation.item.file_transfer;
-    string total = ft.size < 0 ? "null" : ft.size.to_string();
+    int64 total_bytes = ft.size;
+    if (ft.direction == FileTransfer.DIRECTION_SENT) {
+        Dino.LimitInputStream? stream = ft.input_stream as Dino.LimitInputStream;
+        if (stream != null) total_bytes = stream.max_bytes;
+    }
+    string total = total_bytes < 0 ? "null" : total_bytes.to_string();
     emit("{\"type\":\"file_progress\",\"conversation\":%d,\"item\":%d,\"transferred_bytes\":%lld,\"total_bytes\":%s}".printf(
         observation.conversation.id, observation.item.id, ft.transferred_bytes, total));
 }
@@ -694,9 +699,9 @@ private static void schedule_file_progress(string key) {
     });
 }
 
-// The map owns only active transfers. Idle NOT_STARTED/FAILED files have no
-// bridge handlers; FileManager.download_started re-establishes observation on
-// every automatic or manual retry before any progress can be delivered.
+// The map owns only active transfers. New outgoing items establish observation
+// when published; FileManager.download_started re-establishes it for every
+// automatic or manual download retry before progress can be delivered.
 private static void observe_file(Dino.FileItem item, Conversation conversation, bool emit_current_state) {
     FileTransfer ft = item.file_transfer;
     string key = file_observation_key(conversation.id, item.id);
@@ -708,25 +713,21 @@ private static void observe_file(Dino.FileItem item, Conversation conversation, 
     observation.state_handler = ft.notify["state"].connect(() => {
         if (ft.state == FileTransfer.State.IN_PROGRESS) {
             emit(content_item_json("message", item, conversation));
-            if (ft.direction == FileTransfer.DIRECTION_RECEIVED) {
-                emit_file_progress(observation);
-            }
+            emit_file_progress(observation);
         } else {
             emit(content_item_json("message", item, conversation));
             stop_file_observation(key);
         }
     });
 
-    if (ft.direction == FileTransfer.DIRECTION_RECEIVED) {
-        observation.transferred_handler = ft.notify["transferred-bytes"].connect(() => {
-            schedule_file_progress(key);
-        });
-        observation.size_handler = ft.notify["size"].connect(() => {
-            schedule_file_progress(key);
-        });
-    }
+    observation.transferred_handler = ft.notify["transferred-bytes"].connect(() => {
+        schedule_file_progress(key);
+    });
+    observation.size_handler = ft.notify["size"].connect(() => {
+        schedule_file_progress(key);
+    });
     if (emit_current_state) emit(content_item_json("message", item, conversation));
-    if (ft.direction == FileTransfer.DIRECTION_RECEIVED) emit_file_progress(observation);
+    emit_file_progress(observation);
 }
 
 // Room names normally come from disco#info after the MUC join completes;

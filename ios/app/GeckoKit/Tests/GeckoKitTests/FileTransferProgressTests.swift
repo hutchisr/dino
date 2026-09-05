@@ -7,31 +7,34 @@ final class FileTransferProgressTests: XCTestCase {
 
         XCTAssertEqual(progress.transferredBytes, 0)
         XCTAssertEqual(progress.fractionCompleted, 0)
-        XCTAssertEqual(progress.statusText, "0%")
+        XCTAssertEqual(progress.statusText(for: .download), "0%")
     }
 
-    func testUnknownNegativeTotalIsIndeterminate() {
+    func testUnknownNegativeTotalUsesTransferOperationWording() {
         let progress = FileTransferProgress(transferredBytes: 1_024, totalBytes: -1)
 
         XCTAssertNil(progress.fractionCompleted)
         XCTAssertNil(progress.percentage)
-        XCTAssertEqual(progress.statusText, "Downloading…")
-        XCTAssertTrue(progress.accessibilityValue.hasPrefix("Downloading, "))
-        XCTAssertTrue(progress.accessibilityValue.hasSuffix(" received"))
+        XCTAssertEqual(progress.statusText(for: .download), "Downloading…")
+        XCTAssertTrue(progress.accessibilityValue(for: .download).hasPrefix("Downloading, "))
+        XCTAssertTrue(progress.accessibilityValue(for: .download).hasSuffix(" received"))
+        XCTAssertEqual(progress.statusText(for: .upload), "Uploading…")
+        XCTAssertTrue(progress.accessibilityValue(for: .upload).hasPrefix("Uploading, "))
+        XCTAssertTrue(progress.accessibilityValue(for: .upload).hasSuffix(" sent"))
     }
 
     func testMissingTotalIsIndeterminate() {
         let progress = FileTransferProgress(transferredBytes: 0, totalBytes: nil)
 
         XCTAssertNil(progress.fractionCompleted)
-        XCTAssertEqual(progress.accessibilityValue, "Downloading")
+        XCTAssertEqual(progress.accessibilityValue(for: .download), "Downloading")
     }
 
     func testZeroTotalIsIndeterminate() {
         let progress = FileTransferProgress(transferredBytes: 0, totalBytes: 0)
 
         XCTAssertNil(progress.fractionCompleted)
-        XCTAssertEqual(progress.statusText, "Downloading…")
+        XCTAssertEqual(progress.statusText(for: .download), "Downloading…")
     }
 
     func testTransferredBytesOverTotalClampToComplete() {
@@ -39,9 +42,9 @@ final class FileTransferProgressTests: XCTestCase {
 
         XCTAssertEqual(progress.fractionCompleted, 1)
         XCTAssertEqual(progress.percentage, 100)
-        XCTAssertEqual(progress.statusText, "100%")
-        XCTAssertTrue(progress.accessibilityValue.hasPrefix("100 percent, "))
-        XCTAssertTrue(progress.accessibilityValue.contains(" of "))
+        XCTAssertEqual(progress.statusText(for: .download), "100%")
+        XCTAssertTrue(progress.accessibilityValue(for: .download).hasPrefix("100 percent, "))
+        XCTAssertTrue(progress.accessibilityValue(for: .download).contains(" of "))
     }
 
     func testLargeInt64ValuesDoNotOverflow() {
@@ -108,7 +111,7 @@ final class FileTransferProgressTests: XCTestCase {
         let progress = FileTransferProgress(transferredBytes: 25, totalBytes: 100)
 
         XCTAssertEqual(progress.percentage, 25)
-        XCTAssertTrue(progress.accessibilityValue.hasPrefix("25 percent, "))
-        XCTAssertTrue(progress.accessibilityValue.contains(" of "))
+        XCTAssertTrue(progress.accessibilityValue(for: .download).hasPrefix("25 percent, "))
+        XCTAssertTrue(progress.accessibilityValue(for: .download).contains(" of "))
     }
 }

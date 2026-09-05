@@ -2785,7 +2785,7 @@ struct MessageBubble: View {
     var onAvatarNeeded: ((String) -> Void)? = nil
     var onReaction: ((String, Bool) -> Void)? = nil
     var onDownloadFile: ((Int32) -> Void)? = nil
-    var downloadProgress: FileTransferProgressState? = nil
+    var transferProgress: FileTransferProgressState? = nil
 
     @State private var dragOffset: CGFloat = 0
     @State private var replyArmed = false
@@ -2924,7 +2924,7 @@ struct MessageBubble: View {
                     if msg.isFile {
                         FileContent(
                             msg: msg,
-                            downloadProgress: downloadProgress,
+                            transferProgress: transferProgress,
                             onImageTap: onImageTap,
                             onVideoTap: onVideoTap,
                             onDownloadFile: onDownloadFile)
@@ -3316,7 +3316,7 @@ struct CachedVideoThumbnail: View {
 
 struct FileContent: View {
     let msg: ChatMessage
-    var downloadProgress: FileTransferProgressState? = nil
+    var transferProgress: FileTransferProgressState? = nil
     var onImageTap: ((String) -> Void)? = nil
     var onVideoTap: ((String) -> Void)? = nil
     var onDownloadFile: ((Int32) -> Void)? = nil
@@ -3342,22 +3342,31 @@ struct FileContent: View {
             // the viewer; animated images play and pause in place.
             // CachedThumbnail reserves its final size up front (from the image
             // header) so the row doesn't grow when the decode lands.
-            ZStack {
-                CachedThumbnail(path: msg.path, onOpen: { onImageTap?(msg.path) })
-                    .allowsHitTesting(!isUploadingImage)
-                    .accessibilityHidden(isUploadingImage)
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack {
+                    CachedThumbnail(path: msg.path, onOpen: { onImageTap?(msg.path) })
+                        .allowsHitTesting(!isUploadingImage)
+                        .accessibilityHidden(isUploadingImage)
 
-                if isUploadingImage {
-                    ProgressView()
-                        .controlSize(.regular)
-                        .tint(.white)
-                        .padding(12)
-                        .background(.black.opacity(0.5), in: Circle())
-                        .allowsHitTesting(false)
-                        .accessibilityLabel("Uploading image")
+                    if isUploadingImage, transferProgress == nil {
+                        ProgressView()
+                            .controlSize(.regular)
+                            .tint(.white)
+                            .padding(12)
+                            .background(.black.opacity(0.5), in: Circle())
+                            .allowsHitTesting(false)
+                            .accessibilityLabel("Uploading image")
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                if isUploadingImage, let transferProgress {
+                    FileTransferProgressIndicator(state: transferProgress, operation: .upload)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Uploading \(msg.fileName.isEmpty ? "image" : msg.fileName)")
+                        .accessibilityValue(transferProgress.value.accessibilityValue(for: .upload))
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 8))
         } else if msg.fileState == "complete", msg.isVideo, !msg.path.isEmpty {
             Button {
                 onVideoTap?(msg.path)
@@ -3373,11 +3382,11 @@ struct FileContent: View {
             // Files, etc.
             ShareLink(item: URL(fileURLWithPath: msg.path)) { fileRow }
                 .buttonStyle(.plain)
-        } else if msg.direction == "in", msg.fileState == "in_progress",
-                  let downloadProgress {
-            FileDownloadProgressRow(
-                state: downloadProgress,
-                fileName: msg.fileName.isEmpty ? "File" : msg.fileName)
+        } else if msg.fileState == "in_progress", let transferProgress {
+            FileTransferProgressRow(
+                state: transferProgress,
+                fileName: msg.fileName.isEmpty ? "File" : msg.fileName,
+                operation: msg.direction == "out" ? .upload : .download)
         } else if isDownloadActionable {
             Button {
                 onDownloadFile?(msg.id)

@@ -45,7 +45,7 @@
 		F4F596488EF94917BA9FBF9C /* ImageViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87D35A637B324B49AA316922 /* ImageViewer.swift */; };
 		F17E00000000000000000001 /* FileTransferProgress.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17E00000000000000000002 /* FileTransferProgress.swift */; };
 		F17E00000000000000000003 /* FileTransferProgressStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17E00000000000000000004 /* FileTransferProgressStore.swift */; };
-		F17E00000000000000000005 /* FileDownloadProgressRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17E00000000000000000006 /* FileDownloadProgressRow.swift */; };
+		F17E00000000000000000005 /* FileTransferProgressRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17E00000000000000000006 /* FileTransferProgressRow.swift */; };
 		C10000000000000000000001 /* InitialViewportReveal.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000011 /* InitialViewportReveal.swift */; };
 		C10000000000000000000002 /* ChatVisibilityUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000012 /* ChatVisibilityUITests.swift */; };
 /* End PBXBuildFile section */
@@ -128,7 +128,7 @@
 		DF917E5E610B459F97F0C3BC /* GeckoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeckoApp.swift; sourceTree = "<group>"; };
 		F17E00000000000000000002 /* FileTransferProgress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferProgress.swift; sourceTree = "<group>"; };
 		F17E00000000000000000004 /* FileTransferProgressStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferProgressStore.swift; sourceTree = "<group>"; };
-		F17E00000000000000000006 /* FileDownloadProgressRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDownloadProgressRow.swift; sourceTree = "<group>"; };
+		F17E00000000000000000006 /* FileTransferProgressRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferProgressRow.swift; sourceTree = "<group>"; };
 		EECED66A6D7B48228F265456 /* NSEFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSEFetcher.swift; sourceTree = "<group>"; };
 		C10000000000000000000011 /* InitialViewportReveal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InitialViewportReveal.swift; sourceTree = "<group>"; };
 		C10000000000000000000012 /* ChatVisibilityUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatVisibilityUITests.swift; sourceTree = "<group>"; };
@@ -223,7 +223,7 @@
 				5E1EC7AB0000000000000002 /* SelectableMessageText.swift */,
 				A1B2C3D4E5F6478899AA0013 /* DebugLogging.swift */,
 				D928D500119B41A89B21FCEA /* DisplayFormatters.swift */,
-				F17E00000000000000000006 /* FileDownloadProgressRow.swift */,
+				F17E00000000000000000006 /* FileTransferProgressRow.swift */,
 				F17E00000000000000000004 /* FileTransferProgressStore.swift */,
 				DF917E5E610B459F97F0C3BC /* GeckoApp.swift */,
 				D92F01BFA770407E89F9FDCF /* GeckoCore.swift */,
@@ -448,7 +448,7 @@
 				D1A0B0010000000000000002 /* UnreadBadgeCount.swift in Sources */,
 				F17E00000000000000000001 /* FileTransferProgress.swift in Sources */,
 				F17E00000000000000000003 /* FileTransferProgressStore.swift in Sources */,
-				F17E00000000000000000005 /* FileDownloadProgressRow.swift in Sources */,
+				F17E00000000000000000005 /* FileTransferProgressRow.swift in Sources */,
 				C10000000000000000000001 /* InitialViewportReveal.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

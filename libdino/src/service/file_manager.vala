@@ -154,7 +154,7 @@ public class FileManager : StreamInteractionModule, Object {
                 file_send_data = file_encryptor.preprocess_send_file(conversation, file_transfer, file_send_data, file_meta);
             }
 
-            // Update current download progress in the FileTransfer
+            // Publish transfer progress through the FileTransfer.
             LimitInputStream? limit_stream = file_transfer.input_stream as LimitInputStream;
             if (limit_stream == null) {
                 limit_stream = new LimitInputStream(file_transfer.input_stream, file_meta.size);

@@ -1,5 +1,10 @@
 import Foundation
 
+public enum FileTransferOperation: Equatable, Sendable {
+    case download
+    case upload
+}
+
 public struct FileTransferProgress: Equatable, Sendable {
     public let transferredBytes: Int64
     public let totalBytes: Int64?
@@ -18,14 +23,16 @@ public struct FileTransferProgress: Equatable, Sendable {
         fractionCompleted.map { Int($0 * 100) }
     }
 
-    public var statusText: String {
-        percentage.map { "\($0)%" } ?? "Downloading…"
+    public func statusText(for operation: FileTransferOperation) -> String {
+        percentage.map { "\($0)%" } ?? (operation == .upload ? "Uploading…" : "Downloading…")
     }
 
-    public var accessibilityValue: String {
+    public func accessibilityValue(for operation: FileTransferOperation) -> String {
         guard let totalBytes, totalBytes > 0, let percentage else {
-            if transferredBytes == 0 { return "Downloading" }
-            return "Downloading, \(Self.byteLabel(transferredBytes)) received"
+            let action = operation == .upload ? "Uploading" : "Downloading"
+            if transferredBytes == 0 { return action }
+            let verb = operation == .upload ? "sent" : "received"
+            return "\(action), \(Self.byteLabel(transferredBytes)) \(verb)"
         }
         let displayedTransferredBytes = min(transferredBytes, totalBytes)
         return "\(percentage) percent, \(Self.byteLabel(displayedTransferredBytes)) of \(Self.byteLabel(totalBytes))"

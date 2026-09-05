@@ -1036,7 +1036,6 @@ final class AppModel: ObservableObject {
                    $0.id == event.itemID
                }),
                message.isFile,
-               message.direction == "in",
                message.fileState == "in_progress" {
                 fileTransferProgressStore.update(
                     FileTransferProgressKey(
@@ -1086,7 +1085,7 @@ final class AppModel: ObservableObject {
         for message: ChatMessage,
         conversation: Int32
     ) {
-        guard message.isFile, message.direction == "in" else { return }
+        guard message.isFile else { return }
         let key = FileTransferProgressKey(conversation: conversation, item: message.id)
         if message.fileState == "in_progress" {
             fileTransferProgressStore.begin(

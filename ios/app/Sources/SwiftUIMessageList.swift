@@ -911,7 +911,7 @@ struct SwiftUIMessageList: View {
 
     @ViewBuilder
     private func rowView(_ row: Row) -> some View {
-        let downloadProgress = row.msg.direction == "in" && row.msg.fileState == "in_progress"
+        let transferProgress = row.msg.isFile && row.msg.fileState == "in_progress"
             ? model.fileTransferProgressState(for: conversationId, item: row.msg.id)
             : nil
         VStack(spacing: 0) {
@@ -936,7 +936,7 @@ struct SwiftUIMessageList: View {
                           onDownloadFile: { item in
                               model.downloadFile(conversationId, item: item)
                           },
-                          downloadProgress: downloadProgress)
+                          transferProgress: transferProgress)
         }
         .padding(.horizontal, ChatLayout.horizontalPadding)
         .padding(.vertical, 3)
