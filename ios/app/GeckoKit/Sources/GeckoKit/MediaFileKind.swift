@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 /// first and fall back here.
 enum MediaFileKind {
     private static let imageExtensions: Set<String> = [
-        "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp",
+        "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "svg",
     ]
 
     private static let videoExtensions: Set<String> = [
@@ -39,6 +39,10 @@ enum MediaFileKind {
 
     static func isImage(fileName: String) -> Bool {
         imageExtensions.contains(pathExtension(of: fileName))
+    }
+
+    static func isSVG(fileName: String) -> Bool {
+        pathExtension(of: fileName) == "svg"
     }
 
     static func isVideo(fileName: String) -> Bool {

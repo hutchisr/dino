@@ -13,40 +13,155 @@ enum ThumbnailLoader {
     /// decode lands and a chat pinned to the bottom stays pinned. Pure geometry,
     /// so it's exercised by the host `swift test` build.
     public static func fit(_ source: CGSize, in box: CGSize) -> CGSize {
-        guard source.width > 0, source.height > 0 else { return box }
+        guard box.width.isFinite, box.height.isFinite,
+              box.width > 0, box.height > 0 else {
+            return .zero
+        }
+        guard source.width.isFinite, source.height.isFinite,
+              source.width > 0, source.height > 0 else {
+            return box
+        }
         let scale = min(box.width / source.width, box.height / source.height)
-        return CGSize(width: max(1, (source.width * scale).rounded()),
-                      height: max(1, (source.height * scale).rounded()))
+        guard scale.isFinite, scale > 0 else { return box }
+
+        let width = (source.width * scale).rounded()
+        let height = (source.height * scale).rounded()
+        guard width.isFinite, height.isFinite else { return box }
+        return CGSize(width: min(box.width, max(1, width)),
+                      height: min(box.height, max(1, height)))
     }
 
     private static let animationFormatCache = NSCache<NSString, NSString>()
     private static let sizeCache = NSCache<NSString, SizeBox>()
 
-    /// Pixel dimensions of an image read from its header only — no full decode,
-    /// so it's cheap enough to call synchronously while a row lays out. EXIF
-    /// orientation is honoured (portrait photos store landscape pixels + a
-    /// rotate tag), so the returned size is the displayed orientation. Cached;
-    /// a `.zero` sentinel records "no dimensions" to avoid re-reading bad files.
-    /// Foundation + ImageIO only, so the host `swift test` build exercises it.
+    /// Display dimensions read without a full decode: raster image headers or
+    /// the root SVG viewport/viewBox. Cheap enough to call synchronously while
+    /// a row lays out. EXIF orientation is honoured (portrait photos store
+    /// landscape pixels + a rotate tag). Cached; a `.zero` sentinel records
+    /// "no dimensions" to avoid re-reading bad files. Foundation + ImageIO
+    /// only, so the host `swift test` build exercises it.
     public static func pixelSize(path: String) -> CGSize? {
         let k = "size:\(path)" as NSString
         if let v = sizeCache.object(forKey: k) {
             return v.size == .zero ? nil : v.size
         }
+
+        let size: CGSize?
+        if MediaFileKind.isSVG(fileName: path) {
+            size = svgPixelSize(path: path)
+        } else {
+            size = rasterPixelSize(path: path) ?? svgPixelSize(path: path)
+        }
+        sizeCache.setObject(SizeBox(size ?? .zero), forKey: k)
+        return size
+    }
+
+    private static func rasterPixelSize(path: String) -> CGSize? {
         let url = URL(fileURLWithPath: path) as CFURL
         let opt = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let src = CGImageSourceCreateWithURL(url, opt),
               let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
               let w = props[kCGImagePropertyPixelWidth] as? CGFloat,
               let h = props[kCGImagePropertyPixelHeight] as? CGFloat, w > 0, h > 0 else {
-            sizeCache.setObject(SizeBox(.zero), forKey: k)
             return nil
         }
         // Orientations 5–8 are the 90°-rotated cases: swap to get display size.
         let orientation = (props[kCGImagePropertyOrientation] as? UInt32) ?? 1
-        let size = orientation >= 5 ? CGSize(width: h, height: w) : CGSize(width: w, height: h)
-        sizeCache.setObject(SizeBox(size), forKey: k)
-        return size
+        return orientation >= 5 ? CGSize(width: h, height: w) : CGSize(width: w, height: h)
+    }
+
+    private static func svgPixelSize(path: String) -> CGSize? {
+        guard let attributes = svgRootAttributes(path: path) else { return nil }
+        if let width = svgLength(attributes["width"]),
+           let height = svgLength(attributes["height"]) {
+            return CGSize(width: width, height: height)
+        }
+        guard let viewBox = attributes["viewBox"] else { return nil }
+        let values = viewBox
+            .split { $0 == "," || $0.isWhitespace }
+            .compactMap { Double($0) }
+        guard values.count == 4,
+              values.allSatisfy(\.isFinite),
+              values[2] > 0,
+              values[3] > 0 else {
+            return nil
+        }
+        return CGSize(width: values[2], height: values[3])
+    }
+
+    static func isSVG(path: String) -> Bool {
+        MediaFileKind.isSVG(fileName: path)
+            || svgRootAttributes(path: path) != nil
+    }
+
+    static func validatedSVGText(_ data: Data) -> String? {
+        guard let source = String(data: data, encoding: .utf8),
+              source.range(of: "<!DOCTYPE", options: .caseInsensitive) == nil,
+              source.range(of: "<!ENTITY", options: .caseInsensitive) == nil else {
+            return nil
+        }
+        return source
+    }
+
+    private static func svgRootAttributes(path: String) -> [String: String]? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { handle.closeFile() }
+
+        let prefix: Data
+        do {
+            prefix = try handle.read(upToCount: 64 * 1024) ?? Data()
+        } catch {
+            return nil
+        }
+        guard !prefix.isEmpty, validatedSVGText(prefix) != nil else { return nil }
+
+        let root = SVGRootElementParser()
+        let parser = XMLParser(data: prefix)
+        parser.delegate = root
+        parser.shouldProcessNamespaces = true
+        parser.shouldResolveExternalEntities = false
+        _ = parser.parse()
+        return root.attributes
+    }
+
+    private static func svgLength(_ raw: String?) -> CGFloat? {
+        guard var value = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !value.isEmpty else {
+            return nil
+        }
+        let scale: Double
+        if value.hasSuffix("px") {
+            value.removeLast(2)
+            scale = 1
+        } else if value.hasSuffix("pt") {
+            value.removeLast(2)
+            scale = 96 / 72
+        } else if value.hasSuffix("pc") {
+            value.removeLast(2)
+            scale = 16
+        } else if value.hasSuffix("in") {
+            value.removeLast(2)
+            scale = 96
+        } else if value.hasSuffix("cm") {
+            value.removeLast(2)
+            scale = 96 / 2.54
+        } else if value.hasSuffix("mm") {
+            value.removeLast(2)
+            scale = 96 / 25.4
+        } else if value.hasSuffix("q") {
+            value.removeLast()
+            scale = 96 / 101.6
+        } else {
+            scale = 1
+        }
+        guard let number = Double(value.trimmingCharacters(in: .whitespacesAndNewlines)),
+              number.isFinite,
+              number > 0 else {
+            return nil
+        }
+        let pixels = number * scale
+        guard pixels.isFinite else { return nil }
+        return CGFloat(pixels)
     }
 
     /// Returns the display format only for a multi-frame GIF or WebP. Like
@@ -87,9 +202,27 @@ private final class SizeBox {
     init(_ size: CGSize) { self.size = size }
 }
 
+private final class SVGRootElementParser: NSObject, XMLParserDelegate {
+    private(set) var attributes: [String: String]?
+
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?,
+        attributes attributeDict: [String: String]
+    ) {
+        if elementName == "svg" {
+            attributes = attributeDict
+        }
+        parser.abortParsing()
+    }
+}
+
 #if canImport(UIKit)
 import UIKit
 import AVFoundation
+import WebKit
 
 /// Why the cache exists: a chat row's SwiftUI body re-evaluates constantly while
 /// scrolling, and decoding a full-resolution photo from disk on each pass
@@ -98,8 +231,8 @@ import AVFoundation
 /// image. Here the decode happens once, off the main thread, downsampled to the
 /// preview size, and the result is cached; subsequent renders are a cache hit.
 ///
-/// UIKit/AVFoundation-only, so excluded from the host `swift test` build (the
-/// iOS Simulator run exercises it).
+/// UIKit/AVFoundation/WebKit-only, so excluded from the host `swift test`
+/// build (the iOS Simulator run exercises it).
 extension ThumbnailLoader {
     private static let cache: NSCache<NSString, UIImage> = {
         let c = NSCache<NSString, UIImage>()
@@ -163,6 +296,9 @@ extension ThumbnailLoader {
         if let cached = cachedThumbnail(path: path, maxPixel: maxPixel) {
             return cached
         }
+        if isSVG(path: path) {
+            return await loadSVGThumbnail(path: path, maxPixel: maxPixel)
+        }
         let operation = ImageDecodeOperation(path: path, maxPixel: maxPixel)
         return await withTaskCancellationHandler {
             await operation.value(on: imageDecodeQueue)
@@ -187,12 +323,86 @@ extension ThumbnailLoader {
     /// every other source uses the same cached static thumbnail path as before.
     static func loadViewerImageAsync(path: String, maxPixel: Int) async -> UIImage? {
         if Task.isCancelled { return nil }
+        if isSVG(path: path) {
+            return await loadSVGThumbnail(path: path, maxPixel: maxPixel)
+        }
         let operation = ImageDecodeOperation(path: path, maxPixel: maxPixel, mode: .viewer)
         return await withTaskCancellationHandler {
             await operation.value(on: imageDecodeQueue)
         } onCancel: {
             operation.cancel()
         }
+    }
+
+    private static func loadSVGThumbnail(path: String, maxPixel: Int) async -> UIImage? {
+        guard maxPixel > 0, !Task.isCancelled else { return nil }
+        let k = key(path, maxPixel)
+        if let cached = cache.object(forKey: k) { return cached }
+
+        let sourceSize = pixelSize(path: path)
+            ?? CGSize(width: maxPixel, height: maxPixel)
+        let targetSize = fit(
+            sourceSize,
+            in: CGSize(width: maxPixel, height: maxPixel)
+        )
+        let html = await Task.detached(priority: .userInitiated) {
+            svgImageDocument(path: path)
+        }.value
+        guard let html, !Task.isCancelled else { return nil }
+        guard let image = await SVGSnapshotRenderer.render(
+            html: html,
+            pixelSize: targetSize
+        ), !Task.isCancelled else {
+            return nil
+        }
+        let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0
+        cache.setObject(image, forKey: k, cost: cost)
+        return image
+    }
+
+    private static func svgImageDocument(path: String) -> String? {
+        let byteLimit = 8 * 1024 * 1024
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { handle.closeFile() }
+
+        let data: Data
+        do {
+            data = try handle.read(upToCount: byteLimit + 1) ?? Data()
+        } catch {
+            return nil
+        }
+        guard !data.isEmpty,
+              data.count <= byteLimit,
+              validatedSVGText(data) != nil else {
+            return nil
+        }
+        let encoded = data.base64EncodedString()
+        return """
+            <!doctype html>
+            <html>
+            <head>
+              <meta name="viewport" content="width=device-width,initial-scale=1">
+              <meta http-equiv="Content-Security-Policy"
+                    content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
+              <style>
+                html, body {
+                  background: transparent;
+                  height: 100%;
+                  margin: 0;
+                  overflow: hidden;
+                  width: 100%;
+                }
+                img {
+                  display: block;
+                  height: 100%;
+                  object-fit: contain;
+                  width: 100%;
+                }
+              </style>
+            </head>
+            <body><img alt="" src="data:image/svg+xml;base64,\(encoded)"></body>
+            </html>
+            """
     }
 
     static func loadVideoThumbnail(path: String, maxPixel: Int) async -> UIImage? {
@@ -347,6 +557,124 @@ extension ThumbnailLoader {
             ?? (animationProperties[delayKey] as? NSNumber)?.doubleValue
             ?? defaultFrameDuration
         return duration.isFinite && duration > 0 ? duration : defaultFrameDuration
+    }
+}
+
+@MainActor
+private final class SVGSnapshotRenderer: NSObject, WKNavigationDelegate {
+    private let webView: WKWebView
+    private var continuation: CheckedContinuation<UIImage?, Never>?
+    private var timeoutTask: Task<Void, Never>?
+    private var didAllowInitialNavigation = false
+
+    private init(pixelSize: CGSize) {
+        let configuration = WKWebViewConfiguration()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.suppressesIncrementalRendering = true
+
+        webView = WKWebView(frame: .zero, configuration: configuration)
+        super.init()
+        let scale = max(webView.traitCollection.displayScale, 1)
+        webView.frame = CGRect(
+            origin: .zero,
+            size: CGSize(
+                width: max(1, pixelSize.width / scale),
+                height: max(1, pixelSize.height / scale)
+            )
+        )
+        webView.navigationDelegate = self
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
+        webView.scrollView.isScrollEnabled = false
+    }
+
+    static func render(html: String, pixelSize: CGSize) async -> UIImage? {
+        let renderer = SVGSnapshotRenderer(pixelSize: pixelSize)
+        return await renderer.render(html: html)
+    }
+
+    private func render(html: String) async -> UIImage? {
+        guard !Task.isCancelled else { return nil }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                self.continuation = continuation
+                if Task.isCancelled {
+                    finish(nil)
+                    return
+                }
+                timeoutTask = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    guard !Task.isCancelled else { return }
+                    self?.finish(nil)
+                }
+                webView.loadHTMLString(html, baseURL: nil)
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.finish(nil)
+            }
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        let url = navigationAction.request.url
+        let isInitialDocument = !didAllowInitialNavigation
+            && navigationAction.navigationType == .other
+            && (url == nil || url?.scheme == "about")
+        if isInitialDocument {
+            didAllowInitialNavigation = true
+            decisionHandler(.allow)
+        } else {
+            decisionHandler(.cancel)
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard continuation != nil else { return }
+        webView.layoutIfNeeded()
+        let configuration = WKSnapshotConfiguration()
+        configuration.rect = webView.bounds
+        configuration.snapshotWidth = NSNumber(value: Double(webView.bounds.width))
+        configuration.afterScreenUpdates = true
+        webView.takeSnapshot(with: configuration) { [weak self] image, error in
+            self?.finish(error == nil ? image : nil)
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFail navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        finish(nil)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        finish(nil)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        finish(nil)
+    }
+
+    private func finish(_ image: UIImage?) {
+        guard let continuation else { return }
+        self.continuation = nil
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        continuation.resume(returning: image)
     }
 }
 

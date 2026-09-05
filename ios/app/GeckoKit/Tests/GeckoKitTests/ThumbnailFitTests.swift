@@ -69,6 +69,26 @@ final class ThumbnailFitTests: XCTestCase {
         XCTAssertEqual(s.height, 165)          // round(30 * (220/40))
     }
 
+    func testUntrustedNonFiniteAndSubnormalSizesFallBackSafely() {
+        for source in [
+            CGSize(width: CGFloat.leastNonzeroMagnitude, height: CGFloat.leastNonzeroMagnitude),
+            CGSize(width: CGFloat.infinity, height: 100),
+            CGSize(width: CGFloat.nan, height: 100),
+        ] {
+            let fitted = ThumbnailLoader.fit(source, in: box)
+            XCTAssertEqual(fitted, box)
+            XCTAssertTrue(fitted.width.isFinite)
+            XCTAssertTrue(fitted.height.isFinite)
+        }
+    }
+
+    func testInvalidBoundingBoxReturnsZero() {
+        XCTAssertEqual(
+            ThumbnailLoader.fit(CGSize(width: 100, height: 100),
+                                in: CGSize(width: CGFloat.infinity, height: 280)),
+            .zero)
+    }
+
     func testDegenerateSizeFallsBackToBox() {
         XCTAssertEqual(ThumbnailLoader.fit(CGSize(width: 0, height: 100), in: box), box)
         XCTAssertEqual(ThumbnailLoader.fit(.zero, in: box), box)

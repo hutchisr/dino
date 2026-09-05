@@ -1384,8 +1384,25 @@ final class AppModel: ObservableObject {
                     self.downloadFile(conv.id, item: file.id)
                 }
             }
-            if env["DINO_AUTOSENDFILE"] != nil {
+            if let fileFormat = env["DINO_AUTOSENDFILE"] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                    if fileFormat.lowercased() == "svg" {
+                        let svg = """
+                            <svg xmlns="http://www.w3.org/2000/svg"
+                                 width="480" height="320" viewBox="0 0 480 320">
+                              <rect width="480" height="320" rx="36" fill="#0f766e"/>
+                              <circle cx="120" cy="160" r="72" fill="#5eead4"/>
+                              <text x="225" y="185" fill="white"
+                                    font-family="system-ui" font-size="72" font-weight="700">SVG</text>
+                            </svg>
+                            """
+                        let url = FileManager.default.temporaryDirectory
+                            .appendingPathComponent("dino-ios-test.svg")
+                        try? svg.write(to: url, atomically: true, encoding: .utf8)
+                        self.sendFile(conv.id, path: url.path)
+                        return
+                    }
+
                     let renderer = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 160))
                     let image = renderer.image { ctx in
                         UIColor.systemTeal.setFill()

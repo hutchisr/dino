@@ -8,6 +8,7 @@ struct ReactionSheet: View {
     let onReact: (String) -> Void
     let onReply: () -> Void
     let onEdit: (() -> Void)?
+    let onCopy: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
     @State private var detent: PresentationDetent = .fraction(0.45)
@@ -100,7 +101,7 @@ struct ReactionSheet: View {
                     }
                     if !msg.isFile {
                         Button {
-                            UIPasteboard.general.string = msg.body
+                            onCopy()
                             dismiss()
                         } label: {
                             Label("Copy", systemImage: "doc.on.doc")

@@ -101,6 +101,7 @@ interop before a Mac App Store submission.
 The app supports headless automation for testing via environment variables
 (set through `SIMCTL_CHILD_*`): `DINO_AUTOLOGIN=jid:password`,
 `DINO_AUTOPEER=jid` (opens a chat), `DINO_AUTOSEND=text`,
+`DINO_AUTOSENDFILE=1` (generated PNG) or `DINO_AUTOSENDFILE=svg`,
 `DINO_AUTOOMEMO=1` (enable encryption before sending), and
 `DINO_LOG_XMPP=all` (stanza log on stderr, visible via
 `simctl launch --console-pty`).
@@ -230,9 +231,11 @@ conversation previews/unread counts and app icon badges/read markers
 (XEP-0333), typing notifications (XEP-0085), file transfers (HTTP upload via
 OMEMO-encrypted aesgcm files, photo-library uploads that preserve animated GIF
 and WebP files, memory-bounded inline GIF/WebP playback controlled by
-tap-to-play/tap-to-pause format badges (static images still open full-screen);
-note: GIO MIME sniffing is extension-based
-on iOS — no shared-mime-info),
+tap-to-play/tap-to-pause format badges, and SVG previews/viewers rasterized in
+a bounded, script-disabled, nonpersistent WebKit image document. SVGs with XML
+document type or entity declarations are rejected. Static images still open
+full-screen; note: GIO MIME sniffing is extension-based on iOS — no
+shared-mime-info),
 MUC management (join/leave, mediated and direct invitations, participant list,
 per-sender avatars/nicks),
 emoji reactions (XEP-0444), message corrections (XEP-0308), replies

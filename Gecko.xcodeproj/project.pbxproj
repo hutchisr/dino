@@ -10,6 +10,7 @@
 		00BECDA74D904337B8849545 /* Model.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC12B7DE8DF54966B1F7BB2D /* Model.swift */; };
 		271BF8F58BAA41B092051CD9 /* RoomDetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B7F5BB0DF3E44EC8A5E8710 /* RoomDetailsView.swift */; };
 		3933FB16B1CB49598388D85B /* ImageThumbnail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38386EE938FC4181A3DA8C74 /* ImageThumbnail.swift */; };
+		C1A0B0A10000000000000001 /* ClipboardWriteGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A0B0A10000000000000002 /* ClipboardWriteGate.swift */; };
 		3ACEF0702F234BC595A306EB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 283D9FF3CA014F1B9E429C76 /* Assets.xcassets */; };
 		555537F240C2471387A1786F /* NotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2D7C0FD9534344FE87A8D88B /* NotificationService.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		65A181F9AA764BE488175CB1 /* NSEFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = EECED66A6D7B48228F265456 /* NSEFetcher.swift */; };
@@ -89,6 +90,7 @@
 		2D7C0FD9534344FE87A8D88B /* NotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		3611CDF8792E4032A9CA8E9F /* GeckoApp.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = GeckoApp.xcconfig; sourceTree = "<group>"; };
 		38386EE938FC4181A3DA8C74 /* ImageThumbnail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageThumbnail.swift; sourceTree = "<group>"; };
+		C1A0B0A10000000000000002 /* ClipboardWriteGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardWriteGate.swift; sourceTree = "<group>"; };
 		38C8134A3F324831958C4628 /* PushRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushRegistration.swift; sourceTree = "<group>"; };
 		45C570219B83445983AADDE0 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		54E4E5F8F02544428CAE3875 /* Gecko.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Gecko.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -174,6 +176,7 @@
 			isa = PBXGroup;
 			children = (
 				A1B2C3D4E5F6478899AA0011 /* AttachmentStaging.swift */,
+				C1A0B0A10000000000000002 /* ClipboardWriteGate.swift */,
 				A1B2C3D4E5F6478899AA0021 /* LocalNotificationPolicy.swift */,
 				A1B2C3D4E5F6478899AA0023 /* ConversationFocus.swift */,
 				A1B2C3D4E5F6478899AA0028 /* MucRemoval.swift */,
@@ -442,6 +445,7 @@
 				A1B2C3D4E5F6478899AA0027 /* MucRemoval.swift in Sources */,
 				E1060F31A33848E8A17F81BE /* ImageEncoding.swift in Sources */,
 				3933FB16B1CB49598388D85B /* ImageThumbnail.swift in Sources */,
+				C1A0B0A10000000000000001 /* ClipboardWriteGate.swift in Sources */,
 				6C8B8E0B889046EE97952996 /* MessageFormatting.swift in Sources */,
 				A1B2C3D4E5F6478899AA0002 /* PrivacyFormatting.swift in Sources */,
 				A1B2C3D4E5F6478899AA0004 /* TypingIndicatorText.swift in Sources */,

@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 final class MediaFileKindTests: XCTestCase {
     func testMatchesExtensionCaseInsensitively() {
         XCTAssertTrue(MediaFileKind.isImage(fileName: "Holiday.JPEG"))
+        XCTAssertTrue(MediaFileKind.isImage(fileName: "Logo.SVG"))
         XCTAssertTrue(MediaFileKind.isVideo(fileName: "Clip.MOV"))
     }
 

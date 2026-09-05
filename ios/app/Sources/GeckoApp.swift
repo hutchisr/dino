@@ -2,31 +2,8 @@ import SwiftUI
 import UIKit
 import PhotosUI
 
-extension MediaViewerItem: Identifiable {
-    var id: String {
-        switch self {
-        case .image(let path):
-            return "image:\(path)"
-        case .video(let path):
-            return "video:\(path)"
-        }
-    }
-}
-
 enum ChatLayout {
     static let horizontalPadding: CGFloat = 16
-}
-
-extension View {
-    /// Use the platform's standard form size for sheets on the Mac.
-    /// No-op elsewhere.
-    func macDialogSizing() -> some View {
-#if targetEnvironment(macCatalyst)
-        presentationSizing(.form)
-#else
-        self
-#endif
-    }
 }
 
 #if targetEnvironment(macCatalyst)
@@ -52,17 +29,16 @@ private enum CatalystWindowSize {
     private static let widthKey = "macWindowContentWidth"
     private static let heightKey = "macWindowContentHeight"
     private static let fallback = CGSize(width: 1_100, height: 760)
-    static let minimum = CGSize(width: 820, height: 600)
-    static let maximum = CGSize(width: 4_096, height: 4_096)
-
-    private static var runningInPreview: Bool {
-        ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
-    }
+    private static let minimum = CGSize(width: 820, height: 600)
+    private static let maximum = CGSize(width: 4_096, height: 4_096)
+        private static var runningInPreview: Bool {
+            ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
+        }
 
     static var current = restored
 
     static var restored: CGSize {
-        guard !runningInPreview else { return fallback }
+            guard !runningInPreview else { return fallback }
         let defaults = UserDefaults.standard
         let size = CGSize(
             width: defaults.double(forKey: widthKey),
@@ -92,7 +68,7 @@ private enum CatalystWindowSize {
     }
 
     static func save() {
-        guard !runningInPreview else { return }
+            guard !runningInPreview else { return }
         let defaults = UserDefaults.standard
         defaults.set(current.width, forKey: widthKey)
         defaults.set(current.height, forKey: heightKey)
@@ -139,8 +115,8 @@ private final class CatalystApplicationDelegateProxy: NSObject {
 
     @objc(applicationShouldHandleReopen:hasVisibleWindows:)
     private func applicationShouldHandleReopen(
-        _: NSObject,
-        hasVisibleWindows _: Bool
+        _ sender: NSObject,
+        hasVisibleWindows: Bool
     ) -> Bool {
         CatalystWindowLifecycle.reopenIfNeeded()
         return true
@@ -165,14 +141,6 @@ enum CatalystWindowLifecycle {
     private static var proxies: [ObjectIdentifier: CatalystWindowDelegateProxy] = [:]
     private static var applicationProxy: CatalystApplicationDelegateProxy?
     private static var hiddenWindow: NSObject?
-    private static var visibilityHandler: ((Bool) -> Void)?
-
-    static var isVisible: Bool { hiddenWindow == nil }
-
-    static func setVisibilityHandler(_ handler: @escaping (Bool) -> Void) {
-        visibilityHandler = handler
-        handler(isVisible)
-    }
 
     static func install() {
         guard let applicationClass = NSClassFromString("NSApplication") as? NSObject.Type,
@@ -210,22 +178,22 @@ enum CatalystWindowLifecycle {
 
     static func hideInsteadOfClosing(_ window: NSObject) {
         CatalystWindowSize.save()
+        MacLocalNotifications.setAppIsActive(false)
         hiddenWindow = window
-        visibilityHandler?(false)
         window.perform(NSSelectorFromString("orderOut:"), with: nil)
     }
 
     static func reopenIfNeeded() {
         guard let window = hiddenWindow else { return }
         hiddenWindow = nil
-        PushRegistration.clearDeliveredNotifications()
+        MacLocalNotifications.setAppIsActive(true)
+        PushRegistration.clearDelivered()
         window.perform(NSSelectorFromString("makeKeyAndOrderFront:"), with: nil)
-        visibilityHandler?(true)
     }
 }
 
 private struct CatalystMediaWindowConfigurator: UIViewRepresentable {
-    func makeUIView(context _: Context) -> UIView {
+    func makeUIView(context: Context) -> UIView {
         let view = UIView(frame: .zero)
         DispatchQueue.main.async {
             configure(view)
@@ -233,7 +201,7 @@ private struct CatalystMediaWindowConfigurator: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ view: UIView, context _: Context) {
+    func updateUIView(_ view: UIView, context: Context) {
         DispatchQueue.main.async {
             configure(view)
         }
@@ -244,7 +212,7 @@ private struct CatalystMediaWindowConfigurator: UIViewRepresentable {
         scene.titlebar?.titleVisibility = .hidden
         guard let restrictions = scene.sizeRestrictions else { return }
         restrictions.minimumSize = CGSize(width: 480, height: 320)
-        restrictions.maximumSize = CatalystWindowSize.maximum
+        restrictions.maximumSize = CGSize(width: 4_096, height: 4_096)
         restrictions.allowsFullScreen = true
     }
 }
@@ -270,33 +238,15 @@ struct GeckoApp: App {
         RootView()
             .environmentObject(model)
             .onAppear {
-                if !model.configureUITestFixtureIfRequested() {
-                    model.boot()
-                }
-                model.setApplicationActive(scenePhase == .active)
+                model.boot()
                 AppDelegate.setOpenHandler { jid in model.openChat(with: jid) }
 #if targetEnvironment(macCatalyst)
                 configureDesktopWindow()
-                // Fires immediately with the current visibility, which is also
-                // the only place the initial desktop activity is published.
-                CatalystWindowLifecycle.setVisibilityHandler { visible in
-                    setDesktopActive(
-                        visible && UIApplication.shared.applicationState == .active
-                    )
-                }
 #endif
             }
     }
 
 #if targetEnvironment(macCatalyst)
-    /// "The user can actually see this chat window": frontmost AND not hidden
-    /// by a window close, which on the Mac only orders the window out. Both the
-    /// unread bookkeeping and notification suppression key off this.
-    private func setDesktopActive(_ active: Bool) {
-        model.setApplicationActive(active)
-        MacLocalNotifications.setAppIsActive(active)
-    }
-
     private func configureDesktopWindow() {
         // SwiftUI's contentMinSize currently gives Catalyst identical minimum
         // and maximum sizes. Override only the maximum after scene creation so
@@ -304,8 +254,8 @@ struct GeckoApp: App {
         DispatchQueue.main.async {
             for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
                 guard let restrictions = scene.sizeRestrictions else { continue }
-                restrictions.minimumSize = CatalystWindowSize.minimum
-                restrictions.maximumSize = CatalystWindowSize.maximum
+                restrictions.minimumSize = CGSize(width: 820, height: 600)
+                restrictions.maximumSize = CGSize(width: 4_096, height: 4_096)
                 restrictions.allowsFullScreen = true
             }
             CatalystWindowLifecycle.install()
@@ -316,9 +266,9 @@ struct GeckoApp: App {
     }
 
     private var mediaViewerScene: some Scene {
-        WindowGroup(id: MediaViewerItem.windowGroupID) {
+        WindowGroup(id: MediaViewerItem.windowGroupID, for: MediaViewerItem.self) { $item in
             Group {
-                if let item = model.mediaViewerItem {
+                if let item {
                     switch item {
                     case .image(let path):
                         ImageViewer(path: path)
@@ -329,14 +279,9 @@ struct GeckoApp: App {
                     Color.black
                 }
             }
-            .accessibilityIdentifier("media.preview")
-            .focusedSceneValue(\.mediaViewerItem, model.mediaViewerItem)
             .background {
                 CatalystMediaWindowConfigurator()
                     .frame(width: 0, height: 0)
-            }
-            .onDisappear {
-                model.mediaViewerWindowDidClose()
             }
         }
         .defaultSize(width: 960, height: 720)
@@ -347,10 +292,7 @@ struct GeckoApp: App {
         let restoredSize = CatalystWindowSize.restored
         return WindowGroup {
             appContent
-                .frame(
-                    minWidth: CatalystWindowSize.minimum.width,
-                    minHeight: CatalystWindowSize.minimum.height
-                )
+                .frame(minWidth: 820, minHeight: 600)
                 .onGeometryChange(for: CGSize.self) { proxy in
                     proxy.size
                 } action: { size in
@@ -384,25 +326,21 @@ struct GeckoApp: App {
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(model.navigation.isEmpty)
             }
-
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings…") {
-                    model.accountSettingsPresented = true
+                CommandGroup(replacing: .appSettings) {
+                    Button("Settings…") {
+                        model.accountSettingsPresented = true
+                    }
+                    .keyboardShortcut(",", modifiers: .command)
+                    .disabled(!model.ready || !model.hasAccount)
                 }
-                .keyboardShortcut(",", modifiers: .command)
-                .disabled(!model.ready || !model.hasAccount)
-            }
-
-            MediaViewerCommands()
-
         }
         .onChange(of: scenePhase) { _, phase in
-            setDesktopActive(phase == .active && CatalystWindowLifecycle.isVisible)
+            MacLocalNotifications.setAppIsActive(phase == .active)
             if phase != .active {
                 CatalystWindowSize.save()
             }
             guard phase == .active else { return }
-            PushRegistration.clearDeliveredNotifications()
+            PushRegistration.clearDelivered()
             if model.ready && model.hasAccount {
                 model.refreshAfterForeground()
             }
@@ -414,13 +352,12 @@ struct GeckoApp: App {
             appContent
         }
         .onChange(of: scenePhase) { _, phase in
-            model.setApplicationActive(phase == .active)
             switch phase {
             case .active:
                 // Cancel any pending background-disconnect (quick toggle) and
                 // keep the live connection rather than churning it.
                 appDelegate.cancelBackgroundDisconnect()
-                PushRegistration.clearDeliveredNotifications()
+                PushRegistration.clearDelivered()
                 if model.ready && model.hasAccount {
                     GeckoCore.shared.appForegrounded()
                     // The notification-service extension may have stored new
@@ -449,6 +386,7 @@ private enum GeckoPreviewFixtures {
     static let conversations: [XmppConversation] = [
         XmppConversation(
             id: 1,
+            account: "rachel@example.org",
             jid: "anemone@xmpp.is",
             name: "Anemone",
             encryption: "OMEMO",
@@ -458,10 +396,12 @@ private enum GeckoPreviewFixtures {
             preview: "Sent a few image-heavy test messages",
             previewDirection: "in",
             time: Date().addingTimeInterval(-180),
+            notify: "default",
             notifyEffective: "on"
         ),
         XmppConversation(
             id: 2,
+            account: "rachel@example.org",
             jid: "gecko@conference.example.org",
             name: "Gecko Dev",
             encryption: "",
@@ -471,10 +411,12 @@ private enum GeckoPreviewFixtures {
             preview: "I will test the new composer layout",
             previewDirection: "out",
             time: Date().addingTimeInterval(-3600),
+            notify: "default",
             notifyEffective: "highlight"
         ),
         XmppConversation(
             id: 3,
+            account: "rachel@example.org",
             jid: "offline@example.org",
             name: "Offline Contact",
             encryption: "",
@@ -484,6 +426,7 @@ private enum GeckoPreviewFixtures {
             preview: "See you later",
             previewDirection: "in",
             time: Date().addingTimeInterval(-86400),
+            notify: "default",
             notifyEffective: "off"
         ),
     ]
@@ -723,12 +666,14 @@ private enum GeckoPreviewFixtures {
         model.roster = [
             RosterContact(
                 id: "anemone@xmpp.is",
+                account: "rachel@example.org",
                 name: "Anemone",
                 subscription: "both",
                 show: "online"
             ),
             RosterContact(
                 id: "offline@example.org",
+                account: "rachel@example.org",
                 name: "Offline Contact",
                 subscription: "both",
                 show: "offline"
@@ -810,9 +755,7 @@ struct RootView: View {
                     } detail: {
                         if let id = model.navigation.last,
                            model.conversations.contains(where: { $0.id == id }) {
-                            ChatView(
-                                conversationId: id,
-                                talksToCore: !model.isUITestFixture)
+                            ChatView(conversationId: id)
                                 .id(id)
                         } else {
                             ContentUnavailableView(
@@ -839,16 +782,8 @@ struct RootView: View {
 #endif
             }
 
-            if model.isUITestFixture && model.uiTestImageSettled {
-                Text("Image settled")
-                    .frame(width: 1, height: 1)
-                    .opacity(0.01)
-                    .accessibilityIdentifier("chat.fixture.imageSettled")
-            }
-        }
 #if !targetEnvironment(macCatalyst)
-        .fullScreenCover(item: $model.mediaViewerItem) { item in
-            Group {
+            if let item = model.mediaViewerItem {
                 switch item {
                 case .image(let path):
                     ImageViewer(path: path) {
@@ -860,24 +795,7 @@ struct RootView: View {
                     }
                 }
             }
-            .accessibilityAddTraits(.isModal)
-        }
 #endif
-        .alert(item: $model.pendingMucInvite) { invitation in
-            Alert(
-                title: Text(invitation.failureMessage == nil
-                    ? "Group Chat Invitation"
-                    : "Couldn’t Join Group Chat"),
-                message: Text(invitationMessage(invitation)),
-                primaryButton: .default(
-                    Text(invitation.failureMessage == nil ? "Join" : "Retry")
-                ) {
-                    model.acceptMucInvite(invitation)
-                },
-                secondaryButton: .cancel(Text("Ignore")) {
-                    model.ignoreMucInvite(invitation)
-                }
-            )
         }
         .alert("Error", isPresented: Binding(
             get: { model.lastError != nil },
@@ -887,20 +805,6 @@ struct RootView: View {
         } message: {
             Text(model.lastError ?? "")
         }
-    }
-
-    private func invitationMessage(_ invitation: MucInvitation) -> String {
-        var lines: [String] = []
-        if let failure = invitation.failureMessage {
-            lines.append(failure)
-            lines.append("")
-        }
-        lines.append("\(invitation.inviter) invited you to join \(invitation.room).")
-        if let reason = invitation.reason {
-            lines.append("Reason: \(reason)")
-        }
-        lines.append("Account: \(invitation.account)")
-        return lines.joined(separator: "\n")
     }
 }
 
@@ -947,115 +851,6 @@ struct ConversationListView: View {
     @State private var showJoinMuc = false
     @State private var mucJid = ""
     @State private var mucNick = ""
-
-    private struct ChannelSheetCancelButton: View {
-        let action: () -> Void
-
-        var body: some View {
-#if targetEnvironment(macCatalyst)
-            Button(action: action) {
-                Image(systemName: "xmark")
-                    .padding(4)
-            }
-            .accessibilityLabel("Close")
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-            .controlSize(.large)
-            .keyboardShortcut(.cancelAction)
-#else
-            Button("Cancel", role: .cancel, action: action)
-                .keyboardShortcut(.cancelAction)
-#endif
-        }
-    }
-    private struct ChannelSheetActionButton: View {
-        let title: String
-        let action: () -> Void
-
-        var body: some View {
-#if targetEnvironment(macCatalyst)
-            Button(action: action) {
-                Text(title)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 4)
-                    .contentShape(.interaction, Capsule())
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.capsule)
-            .controlSize(.large)
-#else
-            Button(title, action: action)
-#endif
-        }
-    }
-
-    private struct JoinChannelSheet: View {
-        @Binding var jid: String
-        @Binding var nick: String
-        let onJoin: () -> Void
-        @Environment(\.dismiss) private var dismiss
-
-        var body: some View {
-            NavigationStack {
-                Form {
-                    TextField("room@conference.example.org", text: $jid)
-                        .textInputAutocapitalization(.never)
-                    TextField("Nickname (optional)", text: $nick)
-                        .textInputAutocapitalization(.never)
-                }
-                .navigationTitle("Join Channel")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        ChannelSheetCancelButton {
-                            dismiss()
-                        }
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                    ToolbarItem(placement: .confirmationAction) {
-                        ChannelSheetActionButton(title: "Join") {
-                            onJoin()
-                            dismiss()
-                        }
-                        .keyboardShortcut(.defaultAction)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                }
-            }
-        }
-    }
-
-    private struct CreateChannelSheet: View {
-        let request: PendingMucCreate
-        let onCreate: () -> Void
-        @Environment(\.dismiss) private var dismiss
-
-        var body: some View {
-            NavigationStack {
-                Form {
-                    Text("\(request.jid) doesn't exist yet. Create it as a new channel?")
-                }
-                .navigationTitle("Create Channel?")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        ChannelSheetCancelButton {
-                            dismiss()
-                        }
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                    ToolbarItem(placement: .confirmationAction) {
-                        ChannelSheetActionButton(title: "Create") {
-                            onCreate()
-                            dismiss()
-                        }
-                        .keyboardShortcut(.defaultAction)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                }
-            }
-        }
-    }
 
     private struct ListContents: View {
         @EnvironmentObject var model: AppModel
@@ -1145,6 +940,8 @@ struct ConversationListView: View {
                 .padding(3)
                 .glassEffect(.regular.tint(accountStatusColor(account.state)).interactive(), in: Circle())
                 .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                // Include the glass ring around the avatar in the
+                // tap target, not just the opaque avatar image.
                 .contentShape(Circle())
 #endif
         }
@@ -1152,25 +949,14 @@ struct ConversationListView: View {
         .accessibilityLabel("Account")
     }
 
-    /// The Join channel / Account entries behind the toolbar's "More" menu.
-    @ViewBuilder
-    private var moreMenuContent: some View {
-        Button {
-            showJoinMuc = true
-        } label: {
-            Label("Join channel", systemImage: "person.2")
-        }
-        Button {
-            model.accountSettingsPresented = true
-        } label: {
-            Label("Account", systemImage: "person.crop.circle")
+    private var platformList: some View {
+        List {
+            ListContents()
         }
     }
 
     private var list: some View {
-        List {
-            ListContents()
-        }
+        platformList
         .contentMargins(.horizontal, ChatLayout.horizontalPadding, for: .scrollContent)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Int32.self) { id in
@@ -1183,51 +969,66 @@ struct ConversationListView: View {
                     accountButton(for: account)
                 }
             }
-#if !targetEnvironment(macCatalyst)
-            .sharedBackgroundVisibility(.hidden)
-#endif
-#if targetEnvironment(macCatalyst)
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 0) {
-                    Button {
-                        model.presentNewMessage()
-                    } label: {
-                        Image(systemName: "square.and.pencil")
+                #if targetEnvironment(macCatalyst)
+                    ToolbarItem(placement: .topBarTrailing) {
+                        HStack(spacing: 0) {
+                            Button {
+                                model.presentNewMessage()
+                            } label: {
+                                Image(systemName: "square.and.pencil")
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(CatalystToolbarButtonStyle())
                             .frame(width: 32, height: 32)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(CatalystToolbarButtonStyle())
-                    .frame(width: 32, height: 32)
-                    .contentShape(.interaction, Rectangle())
-                    .accessibilityLabel("New Message")
+                            .contentShape(.interaction, Rectangle())
+                            .accessibilityLabel("New Message")
 
-                    Menu {
-                        moreMenuContent
-                    } label: {
-                        Image(systemName: "ellipsis")
+                            Menu {
+                                Button {
+                                    showJoinMuc = true
+                                } label: {
+                                    Label("Join channel", systemImage: "person.2")
+                                }
+                                Button {
+                                    model.accountSettingsPresented = true
+                                } label: {
+                                    Label("Account", systemImage: "person.crop.circle")
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
+                            }
+                            .menuIndicator(.hidden)
+                            .buttonStyle(.plain)
                             .frame(width: 32, height: 32)
-                            .contentShape(Rectangle())
+                            .contentShape(.interaction, Rectangle())
+                            .accessibilityLabel("More")
+                        }
                     }
-                    .menuIndicator(.hidden)
-                    .buttonStyle(.plain)
-                    .frame(width: 32, height: 32)
-                    .contentShape(.interaction, Rectangle())
-                    .accessibilityLabel("More")
-                }
-            }
-            .sharedBackgroundVisibility(.visible)
-#else
+                    .sharedBackgroundVisibility(.visible)
+                #else
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button("New Message", systemImage: "square.and.pencil", action: model.presentNewMessage)
                     .labelStyle(.iconOnly)
                 Menu {
-                    moreMenuContent
+                    Button {
+                        showJoinMuc = true
+                    } label: {
+                        Label("Join channel", systemImage: "person.2")
+                    }
+                    Button {
+                                model.accountSettingsPresented = true
+                    } label: {
+                        Label("Account", systemImage: "person.crop.circle")
+                    }
                 } label: {
                     Label("More", systemImage: "ellipsis.circle")
                         .labelStyle(.iconOnly)
                 }
             }
-#endif
+                #endif
         }
     }
 
@@ -1236,26 +1037,40 @@ struct ConversationListView: View {
         .sheet(isPresented: $model.newMessagePresented) {
             ContactsView(isPresented: $model.newMessagePresented)
                 .environmentObject(model)
-                .macDialogSizing()
+#if targetEnvironment(macCatalyst)
+                .frame(width: 560)
+#endif
         }
         .sheet(isPresented: $model.accountSettingsPresented) {
             AccountSettingsView(isPresented: $model.accountSettingsPresented)
                 .environmentObject(model)
-                .macDialogSizing()
+#if targetEnvironment(macCatalyst)
+                .frame(width: 560)
+#endif
         }
-        .sheet(isPresented: $showJoinMuc) {
-            JoinChannelSheet(jid: $mucJid, nick: $mucNick) {
+        .alert("Join channel", isPresented: $showJoinMuc) {
+            TextField("room@conference.example.org", text: $mucJid)
+                .textInputAutocapitalization(.never)
+            TextField("Nickname (optional)", text: $mucNick)
+                .textInputAutocapitalization(.never)
+            Button("Join") {
                 model.joinMuc(jid: mucJid, nick: mucNick.isEmpty ? nil : mucNick)
                 mucJid = ""
                 mucNick = ""
             }
-            .macDialogSizing()
+            Button("Cancel", role: .cancel) {}
         }
-        .sheet(item: $model.pendingMucCreate) { pending in
-            CreateChannelSheet(request: pending) {
+        .alert("Create channel?", isPresented: Binding(
+            get: { model.pendingMucCreate != nil },
+            set: { if !$0 { model.pendingMucCreate = nil } }
+        ), presenting: model.pendingMucCreate) { pending in
+            Button("Create") {
                 model.createMuc(jid: pending.jid, nick: pending.nick)
+                model.pendingMucCreate = nil
             }
-            .macDialogSizing()
+            Button("Cancel", role: .cancel) { model.pendingMucCreate = nil }
+        } message: { pending in
+            Text("\(pending.jid) doesn't exist yet. Create it as a new channel?")
         }
     }
 }
@@ -1484,43 +1299,6 @@ struct ContactsView: View {
     @State private var newJid = ""
     @State private var newAlias = ""
     @State private var search = ""
-#if targetEnvironment(macCatalyst)
-    private struct ContactSearchField: View {
-        @Binding var text: String
-
-        var body: some View {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-
-                TextField("Search contacts", text: $text)
-                    .textFieldStyle(.plain)
-                    .autocorrectionDisabled()
-
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 18, height: 18)
-                }
-                .buttonStyle(.plain)
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
-                .opacity(text.isEmpty ? 0 : 1)
-                .allowsHitTesting(!text.isEmpty)
-                .accessibilityLabel("Clear search")
-                .accessibilityHidden(text.isEmpty)
-            }
-            .padding(.leading, 8)
-            .padding(.trailing, 4)
-            .frame(width: 170, height: 30)
-            .contentShape(RoundedRectangle(cornerRadius: 7))
-        }
-    }
-#endif
 
     private var filtered: [RosterContact] {
         if search.isEmpty { return model.roster }
@@ -1581,54 +1359,30 @@ struct ContactsView: View {
                     }
                 }
             }
-#if !targetEnvironment(macCatalyst)
             .searchable(text: $search, prompt: "Search contacts")
-#endif
             .navigationTitle("Contacts")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { model.requestBlocklist() }
             .toolbar {
-#if targetEnvironment(macCatalyst)
                 ToolbarItem(placement: .cancellationAction) {
+#if targetEnvironment(macCatalyst)
                     Button {
                         isPresented = false
                     } label: {
                         Image(systemName: "xmark")
-                            .padding(4)
                     }
                     .accessibilityLabel("Close")
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.large)
+#else
+                    Button("Close") { isPresented = false }
+#endif
                 }
-                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         showAdd = true
                     } label: {
                         Image(systemName: "plus")
-                            .padding(4)
                     }
-                    .accessibilityLabel("Add Contact")
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.large)
                 }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .primaryAction) {
-                    ContactSearchField(text: $search)
-                }
-#else
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { isPresented = false }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Add Contact", systemImage: "plus") {
-                        showAdd = true
-                    }
-                    .labelStyle(.iconOnly)
-                }
-#endif
             }
             .alert("Add contact", isPresented: $showAdd) {
                 TextField("user@example.org", text: $newJid)
@@ -1671,7 +1425,8 @@ private struct PendingFileSend {
             self.sizeLabel = ""
         }
         self.isImage = ThumbnailLoader.pixelSize(path: url.path) != nil
-        self.isVideo = MediaFileKind.isVideo(fileName: self.name)
+        let ext = (url.lastPathComponent as NSString).pathExtension.lowercased()
+        self.isVideo = ["mp4", "m4v", "mov", "qt", "3gp", "3g2"].contains(ext)
     }
 }
 
@@ -1691,10 +1446,6 @@ struct ChatView: View {
     @State private var showAttach = false
     /// Shared height for the composer's buttons and text field so they align.
     private let composerControlHeight: CGFloat = 44
-    private let composerTextHorizontalInset: CGFloat = 16
-    private let composerTextVerticalInset: CGFloat = 11
-    /// UITextView's insertion caret sits slightly above its geometric line box.
-    private let composerTextVerticalAlignmentOffset: CGFloat = 2
 #if targetEnvironment(macCatalyst)
     private let floatingButtonSize: CGFloat = 36
 #else
@@ -1734,13 +1485,10 @@ struct ChatView: View {
     @State private var composerHeight: CGFloat = 0
     @State private var keyboardOverlap: CGFloat = 0
     @State private var pendingFileSend: PendingFileSend?
-    @StateObject private var attachmentSelection = AttachmentSelectionPipeline()
 
     private func openMediaViewer(_ item: MediaViewerItem) {
 #if targetEnvironment(macCatalyst)
-        if model.presentMediaViewerWindow(item) {
-            openWindow(id: MediaViewerItem.windowGroupID)
-        }
+        openWindow(id: MediaViewerItem.windowGroupID, value: item)
 #else
         model.mediaViewerItem = item
 #endif
@@ -1771,7 +1519,6 @@ struct ChatView: View {
 
     private var hasComposerAccessory: Bool {
         editing != nil || replyingTo != nil || pendingFileSend != nil
-            || attachmentSelection.isStaging
     }
 
     private var shouldShowSendButton: Bool {
@@ -1803,18 +1550,6 @@ struct ChatView: View {
                             .font(.caption)
                             .lineLimit(1)
                             .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            if attachmentSelection.isStaging {
-                composerBanner(icon: "hourglass", cancelLabel: "Cancel attachment preparation") {
-                    attachmentSelection.cancel()
-                } label: {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Preparing attachment…")
-                            .font(.caption)
                     }
                 }
             }
@@ -1981,10 +1716,6 @@ struct ChatView: View {
         PasteAwareComposerTextView(
             text: $draft,
             maxLines: 6,
-            minimumHeight: composerControlHeight,
-            horizontalInset: composerTextHorizontalInset,
-            verticalInset: composerTextVerticalInset,
-            verticalAlignmentOffset: composerTextVerticalAlignmentOffset,
             canPasteImages: editing == nil,
             onImagePaste: stagePastedImage,
             onSubmit: submitComposer
@@ -1993,10 +1724,6 @@ struct ChatView: View {
         PasteAwareComposerTextView(
             text: $draft,
             maxLines: 6,
-            minimumHeight: composerControlHeight,
-            horizontalInset: composerTextHorizontalInset,
-            verticalInset: composerTextVerticalInset,
-            verticalAlignmentOffset: composerTextVerticalAlignmentOffset,
             canPasteImages: editing == nil,
             onImagePaste: stagePastedImage
         )
@@ -2024,8 +1751,8 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(showAttach ? "Close attachments" : "Attach")
-                .disabled(editing != nil || attachmentSelection.isStaging)
-                .opacity(editing == nil && !attachmentSelection.isStaging ? 1 : 0.45)
+                .disabled(editing != nil)
+                .opacity(editing == nil ? 1 : 0.45)
                 // The Photo/File options grow upward out of the plus button —
                 // same GlassEffectContainer, so the glass blends as they emerge
                 // — instead of a system menu popping over it. Anchored to the
@@ -2044,22 +1771,15 @@ struct ChatView: View {
                     if draft.isEmpty {
                         Text("Message")
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, composerTextHorizontalInset)
-                            .padding(
-                                .top,
-                                composerTextVerticalInset + composerTextVerticalAlignmentOffset
-                            )
-                            .padding(
-                                .bottom,
-                                composerTextVerticalInset - composerTextVerticalAlignmentOffset
-                            )
                             .allowsHitTesting(false)
                     }
                     composerTextView
                 }
-                // UIKit owns the text inset so the UITextView itself fills the
-                // capsule. SwiftUI padding here would leave an arrow-cursor strip
-                // around the editor that could not focus the text input.
+                // Vertical inset too (not just horizontal) so multi-line text
+                // stays inside the capsule instead of spilling past its
+                // rounded top/bottom edges.
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
                 .frame(maxWidth: .infinity, minHeight: composerControlHeight)
                 // RoundedRectangle, not Capsule: a wide multi-line field made
                 // a Capsule rounds its left/right ends into big semicircles
@@ -2167,16 +1887,20 @@ struct ChatView: View {
 
     private func stagePastedImage(_ image: ComposerPastedImage) {
         guard editing == nil else { return }
-        attachmentSelection.stagePastedImage(
-            image,
-            onPicked: { url in
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
-                    showAttach = false
-                }
-                setPendingFileSend(url)
-            },
-            onTooLarge: { model.lastError = AttachmentStaging.tooLargeMessage(noun: "image") },
-            onError: { model.lastError = $0 })
+        let byteCount = Int64(image.data.count)
+        guard AttachmentStaging.canStageFile(byteCount: byteCount) else {
+            model.lastError = AttachmentStaging.tooLargeMessage(noun: "image")
+            return
+        }
+
+        let url = AttachmentStaging.temporaryPastedImageURL(fileExtension: image.fileExtension)
+        do {
+            try image.data.write(to: url, options: .atomic)
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { showAttach = false }
+            setPendingFileSend(url)
+        } catch {
+            model.lastError = "Could not paste this image."
+        }
     }
 
     private func acceptAttachmentForStaging(_ url: URL) -> Bool {
@@ -2245,7 +1969,7 @@ struct ChatView: View {
             },
             onEdit: m.editable ? {
                 replyingTo = nil
-                cancelPendingFileSend()
+                pendingFileSend = nil
                 editing = m
                 draft = m.body
             } : nil)
@@ -2261,8 +1985,8 @@ struct ChatView: View {
         ZStack(alignment: .bottomTrailing) {
             SwiftUIMessageList(
                 messages: chatMessages,
-                messageUpdateWasSynced: model.messageUpdateWasSynced(for: conversationId),
                 messageRevision: model.messageRevision(for: conversationId),
+                messageUpdateWasSynced: model.messageUpdateWasSynced(for: conversationId),
                 historyPageRevision: model.historyPageRevision(for: conversationId),
                 historyPageRenderedRowsAdded:
                     model.historyPageRenderedRowsAdded(for: conversationId),
@@ -2299,7 +2023,7 @@ struct ChatView: View {
     /// Shared "begin editing this message" action for both list backends.
     private func editFromList(_ m: ChatMessage) {
         replyingTo = nil
-        cancelPendingFileSend()
+        pendingFileSend = nil
         editing = m
         draft = m.body
     }
@@ -2401,72 +2125,69 @@ struct ChatView: View {
 #endif
     }
 
-    /// Per-conversation notification setting; identical on both platforms, only
-    /// its menu chrome differs.
-    @ViewBuilder
-    private var notifyMenuContent: some View {
-        notifyOption("All messages", "on")
-        if isGroupChat {
-            notifyOption("Only when mentioned", "highlight")
-        }
-        notifyOption("Off", "off")
-    }
-
-    private func showParticipants() {
-        model.requestOccupants(conversationId)
-        showOccupants = true
-    }
-
     @ToolbarContentBuilder
     private var chatToolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             chatTitleItem
         }
 #if targetEnvironment(macCatalyst)
-        ToolbarItem(placement: .topBarTrailing) {
-            HStack(spacing: 0) {
-                Menu {
-                    notifyMenuContent
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 0) {
+                    Menu {
+                        notifyOption("All messages", "on")
+                        if isGroupChat {
+                            notifyOption("Only when mentioned", "highlight")
+                        }
+                        notifyOption("Off", "off")
                 } label: {
-                    Image(systemName: bellIcon)
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
+                        Image(systemName: bellIcon)insta
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
                 }
-                .menuIndicator(.hidden)
-                .buttonStyle(.plain)
-                .frame(width: 32, height: 32)
-                .contentShape(.interaction, Rectangle())
-                .accessibilityLabel("Notifications")
+                    .menuIndicator(.hidden)
+                    .buttonStyle(.plain)
+                    .frame(width: 32, height: 32)
+                    .contentShape(.interaction, Rectangle())
+                    .accessibilityLabel("Notifications")
 
-                if isGroupChat {
-                    Button(action: showParticipants) {
-                        Image(systemName: "person.2")
+                    if isGroupChat {
+                        Button {
+                            model.requestOccupants(conversationId)
+                            showOccupants = true
+                        } label: {
+                            Image(systemName: "person.2")
+                                .frame(width: 32, height: 32)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(CatalystToolbarButtonStyle())
+                        .frame(width: 32, height: 32)
+                        .contentShape(.interaction, Rectangle())
+                        .accessibilityLabel("Participants")
+                    }
+
+                    Button {
+                        toggleEncryption()
+                    } label: {
+                        Image(systemName: lockIcon)
+                            .foregroundStyle(lockTint)
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(CatalystToolbarButtonStyle())
                     .frame(width: 32, height: 32)
                     .contentShape(.interaction, Rectangle())
-                    .accessibilityLabel("Participants")
-                }
-
-                Button(action: toggleEncryption) {
-                    Image(systemName: lockIcon)
-                        .foregroundStyle(lockTint)
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(CatalystToolbarButtonStyle())
-                .frame(width: 32, height: 32)
-                .contentShape(.interaction, Rectangle())
-                .accessibilityLabel(lockAccessibilityLabel)
+                    .accessibilityLabel(lockAccessibilityLabel)
             }
         }
-        .sharedBackgroundVisibility(.visible)
+            .sharedBackgroundVisibility(.visible)
 #else
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
-                notifyMenuContent
+                notifyOption("All messages", "on")
+                if isGroupChat {
+                    notifyOption("Only when mentioned", "highlight")
+                }
+                notifyOption("Off", "off")
             } label: {
                 Image(systemName: bellIcon)
             }
@@ -2474,14 +2195,19 @@ struct ChatView: View {
         }
         if isGroupChat {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: showParticipants) {
+                Button {
+                    model.requestOccupants(conversationId)
+                    showOccupants = true
+                } label: {
                     Image(systemName: "person.2")
                 }
                 .accessibilityLabel("Participants")
             }
         }
         ToolbarItem(placement: .topBarTrailing) {
-            Button(action: toggleEncryption) {
+            Button {
+                toggleEncryption()
+            } label: {
                 Image(systemName: lockIcon)
                     .foregroundStyle(lockTint)
             }
@@ -2642,21 +2368,22 @@ struct ChatView: View {
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker(
                 allowsVideos: true,
-                pipeline: attachmentSelection,
                 onPicked: { url in setPendingFileSend(url) },
-                onTooLarge: reportAttachmentTooLarge,
-                onError: { model.lastError = $0 })
+                onTooLarge: reportAttachmentTooLarge)
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
-            switch result {
-            case .success(let url):
-                attachmentSelection.stageImportedFile(
-                    url,
-                    onPicked: { stagedURL in setPendingFileSend(stagedURL) },
-                    onTooLarge: reportAttachmentTooLarge,
-                    onError: { model.lastError = $0 })
-            case .failure(let error):
-                model.lastError = "Could not import this file. \(error.localizedDescription)"
+            if case .success(let url) = result {
+                let scoped = url.startAccessingSecurityScopedResource()
+                guard acceptAttachmentForStaging(url) else {
+                    if scoped { url.stopAccessingSecurityScopedResource() }
+                    return
+                }
+                let dest = AttachmentStaging.temporaryCopyURL(for: url)
+                try? FileManager.default.removeItem(at: dest)
+                if (try? FileManager.default.copyItem(at: url, to: dest)) != nil {
+                    setPendingFileSend(dest)
+                }
+                if scoped { url.stopAccessingSecurityScopedResource() }
             }
         }
         .navigationTitle(conversation?.name ?? "Chat")
@@ -2701,10 +2428,6 @@ struct ChatView: View {
             if isGroupChat { model.requestRoomInfo(conversationId) }
         }
         .onDisappear {
-            let pending = pendingFileSend
-            pendingFileSend = nil
-            cleanupTemporaryAttachment(pending)
-            attachmentSelection.cancel()
             guard talksToCore else { return }
             model.blurConversation(conversationId)
         }
@@ -2729,28 +2452,12 @@ struct ChatView: View {
 // MessageFormatting.swift — compiled into this app module by build-app.sh and
 // unit-tested via `swift test` in the GeckoKit package.
 
-@ViewBuilder
-private func messageText(_ text: AttributedString, quote: Bool = false, actions: MessageTextActions? = nil) -> some View {
-#if targetEnvironment(macCatalyst)
-    SelectableMessageText(text: text, style: quote ? .quote : .body, actions: actions)
-        .layoutPriority(1)
-#else
-    if quote {
-        Text(text)
-            .italic()
-            .foregroundStyle(.secondary)
-    } else {
-        Text(text)
-    }
-#endif
-}
-
 /// Render a message body: lines starting with `>` become a blockquote (accent
 /// bar + muted text), everything else is normal linkified text.
 @ViewBuilder
-private func messageBody(_ text: String, actions: MessageTextActions? = nil) -> some View {
+private func messageBody(_ text: String) -> some View {
     if !text.hasPrefix(">") && !text.contains("\n>") {
-        messageText(linkifiedBody(text), actions: actions).tint(.accentColor)   // common path: no quotes
+        Text(linkifiedBody(text)).tint(.accentColor)   // common path: no quotes
     } else {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(messageRuns(text).enumerated()), id: \.offset) { _, run in
@@ -2759,13 +2466,15 @@ private func messageBody(_ text: String, actions: MessageTextActions? = nil) -> 
                         RoundedRectangle(cornerRadius: 1)
                             .fill(Color.accentColor.opacity(0.5))
                             .frame(width: 3)
-                        messageText(linkifiedBody(run.text), quote: true, actions: actions)
+                        Text(linkifiedBody(run.text))
+                            .italic()
+                            .foregroundStyle(.secondary)
                             .tint(.accentColor)
                         Spacer(minLength: 0)
                     }
                     .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    messageText(linkifiedBody(run.text), actions: actions).tint(.accentColor)
+                    Text(linkifiedBody(run.text)).tint(.accentColor)
                 }
             }
         }
@@ -2785,7 +2494,7 @@ struct MessageBubble: View {
     var onAvatarNeeded: ((String) -> Void)? = nil
     var onReaction: ((String, Bool) -> Void)? = nil
     var onDownloadFile: ((Int32) -> Void)? = nil
-    var transferProgress: FileTransferProgressState? = nil
+    var onImageRendered: (() -> Void)? = nil
 
     @State private var dragOffset: CGFloat = 0
     @State private var replyArmed = false
@@ -2814,54 +2523,54 @@ struct MessageBubble: View {
                 Image(systemName: "clock.arrow.circlepath")
                 Text("Pending")
             }
-            .font(.caption2)
+            .font(.system(size: 9))
             .foregroundStyle(.orange)
         case "sending":
-            Image(systemName: "clock")
+            Image(systemName: "clock").font(.system(size: 8))
         case "sent":
-            Image(systemName: "checkmark")
+            Image(systemName: "checkmark").font(.system(size: 8))
         case "received", "acknowledged":
-            Image(systemName: "checkmark").foregroundStyle(.secondary)
+            Image(systemName: "checkmark").font(.system(size: 8)).foregroundStyle(.secondary)
         case "read":
             HStack(spacing: -3) {
                 Image(systemName: "checkmark")
                 Image(systemName: "checkmark")
             }
-            .font(.caption2)
+            .font(.system(size: 8))
             .foregroundStyle(Color.accentColor)
         case "error", "wontsend":
-            Image(systemName: "exclamationmark.circle").foregroundStyle(.red)
+            Image(systemName: "exclamationmark.circle").font(.system(size: 9)).foregroundStyle(.red)
         default:
             EmptyView()
         }
     }
-    private func copyMessage() {
-        if msg.fileState == "complete",
-           msg.isImage,
-           !msg.path.isEmpty,
-           let image = UIImage(contentsOfFile: msg.path) {
-            UIPasteboard.general.image = image
-        } else {
-            UIPasteboard.general.string = msg.body
-        }
-    }
-
-    private var textActions: MessageTextActions {
-        MessageTextActions(
-            canEdit: msg.editable,
-            reply: { onReply?(msg) },
-            edit: { onEdit?(msg) },
-            copy: { copyMessage() },
-            more: { onActions?(msg) }
-        )
-    }
 
     var body: some View {
-        // On iOS the whole row slides right on swipe; the reply icon is anchored
-        // to the bubble's leading edge and revealed from beneath it.
+        // The whole row slides right on swipe; the reply icon is anchored to the
+        // bubble's leading edge (a leading-aligned background on the bubble) and
+        // counter-offset by the drag so it holds still, getting revealed from
+        // beneath the bubble as it slides off it.
 #if targetEnvironment(macCatalyst)
         bubbleRow
             .offset(x: dragOffset)
+            .contextMenu {
+                Button("Reply", systemImage: "arrowshape.turn.up.left") {
+                    onReply?(msg)
+                }
+                if msg.editable {
+                    Button("Edit", systemImage: "pencil") {
+                        onEdit?(msg)
+                    }
+                }
+                if !msg.body.isEmpty {
+                    Button("Copy", systemImage: "doc.on.doc") {
+                        UIPasteboard.general.string = msg.body
+                    }
+                }
+                Button("Reactions and More…", systemImage: "face.smiling") {
+                    onActions?(msg)
+                }
+            }
 #else
         bubbleRow
             .offset(x: dragOffset)
@@ -2922,25 +2631,21 @@ struct MessageBubble: View {
                         .padding(.bottom, 2)
                     }
                     if msg.isFile {
-                        FileContent(
-                            msg: msg,
-                            transferProgress: transferProgress,
-                            onImageTap: onImageTap,
-                            onVideoTap: onVideoTap,
-                            onDownloadFile: onDownloadFile)
+                        FileContent(msg: msg, onImageTap: onImageTap, onVideoTap: onVideoTap,
+                                    onDownloadFile: onDownloadFile,
+                                    onImageRendered: onImageRendered)
                     } else {
-                        messageBody(msg.body, actions: textActions)
+                        messageBody(msg.body)
                     }
                     HStack(spacing: 4) {
                         if msg.encryption == "OMEMO" {
-                            Image(systemName: "lock.fill")
+                            Image(systemName: "lock.fill").font(.system(size: 8))
                         }
-                        Text(msg.time, style: .time)
+                        Text(msg.time, style: .time).font(.system(size: 9))
                         if msg.direction == "out" {
                             markIcon
                         }
                     }
-                    .font(.caption2)
                     .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 10)
@@ -2957,11 +2662,6 @@ struct MessageBubble: View {
                         .offset(x: -dragOffset)
                 }
                 .contentShape(Rectangle())
-#if targetEnvironment(macCatalyst)
-                .contextMenu {
-                    messageActionMenu(textActions)
-                }
-#else
                 .onLongPressGesture(minimumDuration: 0.35) {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     onActions?(msg)
@@ -2971,7 +2671,6 @@ struct MessageBubble: View {
                 // a reply. The whole row still slides as visual feedback (the
                 // offset lives on `bubbleRow`).
                 .gesture(replySwipeGesture)
-#endif
                 if !msg.reactions.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(msg.reactions, id: \.emoji) { r in
@@ -3036,109 +2735,26 @@ struct MessageBubble: View {
     }
 }
 
-private struct AnimatedThumbnailImage: UIViewRepresentable {
-    let image: UIImage
-    let isPlaying: Bool
-
-    func makeUIView(context _: Context) -> InlineAnimatedImageView {
-        let view = InlineAnimatedImageView()
-        view.setDisplayedImage(image)
-        view.setPlaybackEnabled(isPlaying)
-        return view
-    }
-
-    func updateUIView(_ uiView: InlineAnimatedImageView, context _: Context) {
-        uiView.setDisplayedImage(image)
-        uiView.setPlaybackEnabled(isPlaying)
-    }
-}
-
-private final class InlineAnimatedImageView: UIImageView {
-    private var displayedImage: UIImage?
-    private var playbackEnabled = false
-
-    override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
-    }
-
-    init() {
-        super.init(frame: .zero)
-        configure()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        configure()
-    }
-
-    private func configure() {
-        contentMode = .scaleAspectFit
-        clipsToBounds = true
-        isAccessibilityElement = false
-    }
-
-    func setDisplayedImage(_ image: UIImage) {
-        guard displayedImage !== image else { return }
-        displayedImage = image
-        stopAnimating()
-        animationImages = nil
-        animationDuration = 0
-        animationRepeatCount = 0
-
-        if let frames = image.images, frames.count > 1 {
-            self.image = frames.first
-            animationImages = frames
-            animationDuration = image.duration
-        } else {
-            self.image = image
-        }
-        updatePlayback()
-    }
-
-    func setPlaybackEnabled(_ enabled: Bool) {
-        playbackEnabled = enabled
-        updatePlayback()
-    }
-
-    private func updatePlayback() {
-        if playbackEnabled, window != nil, animationImages?.isEmpty == false {
-            startAnimating()
-        } else {
-            stopAnimating()
-        }
-    }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        updatePlayback()
-    }
-}
-
-/// Inline image preview backed by a downsampled, cached thumbnail. Animated GIF
-/// and WebP frames decode on the first tap, then play and pause in place on
-/// subsequent taps; static previews still open the full-screen viewer.
+/// Inline image preview backed by a downsampled, cached thumbnail. Avoids the
+/// scroll-killing pattern of decoding a full-resolution image from disk inside
+/// `body` on every re-render: the decode happens once, off the main thread, at
+/// preview size (ThumbnailLoader), and cache hits render immediately.
 struct CachedThumbnail: View {
     let path: String
-    let onOpen: () -> Void
     /// Longest-side pixel budget: ~the 280pt max preview at 3x retina.
     private let maxPixel = 840
     /// The box the preview is fit into (matches the old maxWidth/maxHeight).
     static let box = CGSize(width: 220, height: 280)
     @State private var image: UIImage?
-    @State private var isPlaying = false
-    @State private var animationRequested = false
     /// The row's final on-screen size, reserved BEFORE the image decodes (from a
     /// cheap header read of its real dimensions). Holding the row at its final
     /// height from the first layout means it never grows when the decode lands —
     /// so a chat already pinned to the bottom stays pinned, instead of being left
     /// scrolled to the new image's top with its bottom below the fold.
     private let reserved: CGSize
-    private let animatedFormat: String?
 
-    init(path: String, onOpen: @escaping () -> Void) {
+    init(path: String) {
         self.path = path
-        self.onOpen = onOpen
-        animatedFormat = ThumbnailLoader.animatedFormat(path: path)
         // Seed from cache synchronously so an already-decoded image appears with
         // no placeholder flash while scrolling back over it.
         _image = State(initialValue: ThumbnailLoader.cachedThumbnail(path: path, maxPixel: 840))
@@ -3150,90 +2766,26 @@ struct CachedThumbnail: View {
     }
 
     var body: some View {
-        Button(action: handleTap) {
-            ZStack(alignment: .bottomTrailing) {
-                Group {
-                    if let image {
-                        if image.images?.isEmpty == false {
-                            AnimatedThumbnailImage(image: image, isPlaying: isPlaying)
-                                .frame(width: reserved.width, height: reserved.height)
-                                .clipped()
-                        } else {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFit()
-                        }
-                    } else {
-                        // Neutral placeholder until the thumbnail decodes. Same reserved
-                        // frame as the loaded image, so there's no layout shift.
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(.secondarySystemBackground))
-                    }
-                }
-
-                if let animatedFormat {
-                    HStack(spacing: 3) {
-                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 8, weight: .bold))
-                            .accessibilityHidden(true)
-                        Text(animatedFormat)
-                    }
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 5)
-                    .background(.black.opacity(0.58), in: .capsule)
-                    .padding(8)
-                    .allowsHitTesting(false)
-                }
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                // Neutral placeholder until the thumbnail decodes. Same reserved
+                // frame as the loaded image, so there's no layout shift.
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(.secondarySystemBackground))
             }
-            .frame(width: reserved.width, height: reserved.height)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityIdentifier("chat.media.\(URL(fileURLWithPath: path).lastPathComponent)")
+        .frame(width: reserved.width, height: reserved.height)
         .task(id: path) {
-            guard image == nil else { return }
+            guard image == nil else { return }   // seeded from cache
             let p = path, mp = maxPixel
             let decoded = await ThumbnailLoader.loadThumbnailAsync(path: p, maxPixel: mp)
-            if !Task.isCancelled, image == nil, let decoded { image = decoded }
-        }
-        .task(id: animationRequested) {
-            guard animationRequested,
-                  animatedFormat != nil,
-                  image?.images == nil else { return }
-            let p = path, mp = maxPixel
-            let animated = await ThumbnailLoader.loadInlineAnimatedImageAsync(path: p, maxPixel: mp)
-            guard !Task.isCancelled else { return }
-            if let animated {
-                image = animated
-            } else {
-                isPlaying = false
-                animationRequested = false
-            }
-        }
-        .onDisappear {
-            isPlaying = false
+            if !Task.isCancelled, let decoded { image = decoded }
         }
     }
-
-    private var accessibilityLabel: String {
-        guard let animatedFormat else { return "Open image" }
-        return isPlaying ? "Pause animated \(animatedFormat)" : "Play animated \(animatedFormat)"
-    }
-
-    private func handleTap() {
-        guard animatedFormat != nil else {
-            onOpen()
-            return
-        }
-        isPlaying.toggle()
-        if isPlaying {
-            animationRequested = true
-        }
-    }
-
 }
 
 /// Inline video poster backed by AVFoundation's first-frame generator. The frame
@@ -3316,57 +2868,38 @@ struct CachedVideoThumbnail: View {
 
 struct FileContent: View {
     let msg: ChatMessage
-    var transferProgress: FileTransferProgressState? = nil
     var onImageTap: ((String) -> Void)? = nil
     var onVideoTap: ((String) -> Void)? = nil
     var onDownloadFile: ((Int32) -> Void)? = nil
+    var onImageRendered: (() -> Void)? = nil
 
     private var sizeLabel: String {
         GeckoDisplayFormatters.fileSize(msg.size)
     }
 
-    private var isUploadingImage: Bool {
-        msg.direction == "out" && msg.fileState == "in_progress"
-    }
-
-    private var showsImagePreview: Bool {
-        msg.isImage
-            && !msg.path.isEmpty
-            && (msg.fileState == "complete" || isUploadingImage)
-    }
-
     var body: some View {
-        if showsImagePreview {
+        if msg.fileState == "complete", msg.isImage, !msg.path.isEmpty {
             // Downsampled + cached off the main thread (CachedThumbnail), not
-            // decoded full-res in body on every scroll frame. Static images open
-            // the viewer; animated images play and pause in place.
+            // decoded full-res in body on every scroll frame. The viewer (on tap)
+            // still loads the full-resolution file from msg.path.
             // CachedThumbnail reserves its final size up front (from the image
             // header) so the row doesn't grow when the decode lands.
-            VStack(alignment: .leading, spacing: 6) {
-                ZStack {
-                    CachedThumbnail(path: msg.path, onOpen: { onImageTap?(msg.path) })
-                        .allowsHitTesting(!isUploadingImage)
-                        .accessibilityHidden(isUploadingImage)
-
-                    if isUploadingImage, transferProgress == nil {
-                        ProgressView()
-                            .controlSize(.regular)
-                            .tint(.white)
-                            .padding(12)
-                            .background(.black.opacity(0.5), in: Circle())
-                            .allowsHitTesting(false)
-                            .accessibilityLabel("Uploading image")
+            CachedThumbnail(path: msg.path)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                // Safety net: should the reserved size ever be wrong (an
+                // unreadable header), report a late height change so the chat can
+                // still re-pin. With the size reserved this normally fires once.
+                .background {
+                    GeometryReader { geo in
+                        Color.clear
+                            .onChange(of: geo.size.height, initial: true) { _, _ in
+                                onImageRendered?()
+                            }
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                if isUploadingImage, let transferProgress {
-                    FileTransferProgressIndicator(state: transferProgress, operation: .upload)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Uploading \(msg.fileName.isEmpty ? "image" : msg.fileName)")
-                        .accessibilityValue(transferProgress.value.accessibilityValue(for: .upload))
+                .onTapGesture {
+                    onImageTap?(msg.path)
                 }
-            }
         } else if msg.fileState == "complete", msg.isVideo, !msg.path.isEmpty {
             Button {
                 onVideoTap?(msg.path)
@@ -3382,23 +2915,14 @@ struct FileContent: View {
             // Files, etc.
             ShareLink(item: URL(fileURLWithPath: msg.path)) { fileRow }
                 .buttonStyle(.plain)
-        } else if msg.fileState == "in_progress", let transferProgress {
-            FileTransferProgressRow(
-                state: transferProgress,
-                fileName: msg.fileName.isEmpty ? "File" : msg.fileName,
-                operation: msg.direction == "out" ? .upload : .download)
-        } else if isDownloadActionable {
-            Button {
-                onDownloadFile?(msg.id)
-            } label: {
-                fileRow
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(downloadAccessibilityLabel)
-            .accessibilityHint("Downloads this attachment")
         } else {
             fileRow
+                .onTapGesture {
+                    if msg.direction == "in",
+                       msg.fileState == "not_started" || msg.fileState == "failed" {
+                        onDownloadFile?(msg.id)
+                    }
+                }
         }
     }
 
@@ -3424,19 +2948,6 @@ struct FileContent: View {
                 .font(.caption2).foregroundStyle(.secondary)
             }
         }
-        .frame(minHeight: 44)
-    }
-
-    private var isDownloadActionable: Bool {
-        msg.direction == "in"
-            && (msg.fileState == "not_started" || msg.fileState == "failed")
-            && onDownloadFile != nil
-    }
-
-    private var downloadAccessibilityLabel: String {
-        let action = msg.fileState == "failed" ? "Retry download" : "Download"
-        let name = msg.fileName.isEmpty ? "file" : msg.fileName
-        return "\(action) \(name)"
     }
 
     private var completeIcon: String {
