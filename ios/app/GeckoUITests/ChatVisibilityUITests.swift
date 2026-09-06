@@ -10,6 +10,69 @@ final class ChatVisibilityUITests: XCTestCase {
         app.launchEnvironment["DINO_UI_TEST_FIXTURE"] = "chat-visibility"
     }
 
+    func testAnimatedGIFPlaysAndStopsInline() throws {
+        try assertInlinePlayback(
+            encoded: """
+            R0lGODlhAgACAIEAAP8AAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQICgAAACwAAAAA
+            AgACAAAIBgABCAQQEAAh+QQIGQAAACwAAAAAAgACAIEAAP8AAAAAAAAAAAAIBgABCAQQEAA7
+            """, fileExtension: "gif")
+    }
+
+    func testAnimatedWebPPlaysAndStopsInline() throws {
+        try assertInlinePlayback(
+            encoded: """
+            UklGRoQAAABXRUJQVlA4WAoAAAACAAAAAQAAAQAAQU5JTQYAAAD/////AABBTk1GKAAAAAAAAAAA
+            AAEAAAEAAGQAAAJWUDhMDwAAAC8BQAAABxD9j/4HIqL/AQBBTk1GKAAAAAAAAAAAAAEAAAEAAPoA
+            AABWUDhMDwAAAC8BQAAABxDR//4HIqL/AQA=
+            """, fileExtension: "webp")
+    }
+
+    private func assertInlinePlayback(encoded: String, fileExtension: String) throws {
+        app.launchEnvironment["DINO_UI_TEST_IMAGE_DATA"] = encoded
+        app.launchEnvironment["DINO_UI_TEST_IMAGE_EXTENSION"] = fileExtension
+        app.launch()
+        let preview = app.buttons["chat.message.9100"]
+        let format = fileExtension.uppercased()
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertEqual(preview.label, "Play animated \(format)")
+        let frame = preview.frame
+        let still = try screenshotCenterRGB(in: preview.screenshot())
+        for _ in 0..<2 {
+            preview.tap()
+            XCTAssertEqual(preview.label, "Pause animated \(format)")
+            // Observe actual changing pixels, not just the playback button label.
+            let changesFrame = NSPredicate { [self] _, _ in
+                guard let rgb = try? screenshotCenterRGB(in: preview.screenshot()) else { return false }
+                return abs(rgb.red - still.red) + abs(rgb.blue - still.blue) > 150
+            }
+            let changing = XCTNSPredicateExpectation(predicate: changesFrame, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [changing], timeout: 5), .completed)
+            XCTAssertEqual(preview.frame, frame, "Playback must stay inside the original chat row")
+            XCTAssertFalse(app.descendants(matching: .any)["media.preview"].exists)
+            preview.tap()
+            XCTAssertEqual(preview.label, "Play animated \(format)")
+            for _ in 0..<3 {
+                let stopped = try screenshotCenterRGB(in: preview.screenshot())
+                XCTAssertLessThan(abs(stopped.red - still.red) + abs(stopped.blue - still.blue), 30)
+            }
+        }
+    }
+
+    func testSingleFrameGIFStillOpensViewer() {
+        app.launchEnvironment["DINO_UI_TEST_IMAGE_DATA"] =
+            "R0lGODdhAgACAIEAAAD/AAAAAAAAAAAAACwAAAAAAgACAAAIBgABCAQQEAA7"
+        app.launchEnvironment["DINO_UI_TEST_IMAGE_EXTENSION"] = "gif"
+        app.launch()
+        let preview = app.buttons["Open image"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        preview.tap()
+#if targetEnvironment(macCatalyst)
+        XCTAssertTrue(app.descendants(matching: .any)["media.preview"].waitForExistence(timeout: 5))
+#else
+        XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 5))
+#endif
+    }
+
 #if targetEnvironment(macCatalyst)
     func testAudioShareMenuAnchorsToClickedButton() {
         app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"

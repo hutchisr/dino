@@ -340,6 +340,27 @@ final class AppModel: ObservableObject {
         ]
         navigation = unreadClearFixture ? [] : [conversation]
 
+        if let encoded = env["DINO_UI_TEST_IMAGE_DATA"],
+           let data = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters) {
+            let ext = env["DINO_UI_TEST_IMAGE_EXTENSION"] ?? "gif"
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("gecko-image-fixture.\(ext)")
+            do {
+                try data.write(to: url)
+            } catch {
+                lastError = error.localizedDescription
+                return true
+            }
+            messages[conversation] = [
+                ChatMessage(
+                    id: 9_100, content: "file", direction: "in",
+                    from: "visibility@example.invalid", body: "", time: Date(), encryption: "NONE",
+                    fileName: url.lastPathComponent, mime: "image/\(ext)", size: data.count,
+                    fileState: "complete", path: url.path)
+            ]
+            return true
+        }
+
         if env["DINO_UI_TEST_AUDIO"] == "1" {
             // 24 seconds of mono 8 kHz PCM silence; no network or codec fixtures.
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("gecko-audio-fixture.wav")

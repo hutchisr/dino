@@ -2940,26 +2940,109 @@ struct MessageBubble: View {
     }
 }
 
-/// Inline image preview backed by a downsampled, cached thumbnail. Avoids the
-/// scroll-killing pattern of decoding a full-resolution image from disk inside
-/// `body` on every re-render: the decode happens once, off the main thread, at
-/// preview size (ThumbnailLoader), and cache hits render immediately.
+private struct AnimatedThumbnailImage: UIViewRepresentable {
+    let image: UIImage
+    let isPlaying: Bool
+
+    func makeUIView(context _: Context) -> InlineAnimatedImageView {
+        let view = InlineAnimatedImageView()
+        view.setDisplayedImage(image)
+        view.setPlaybackEnabled(isPlaying)
+        return view
+    }
+
+    func updateUIView(_ uiView: InlineAnimatedImageView, context _: Context) {
+        uiView.setDisplayedImage(image)
+        uiView.setPlaybackEnabled(isPlaying)
+    }
+}
+
+private final class InlineAnimatedImageView: UIImageView {
+    private var displayedImage: UIImage?
+    private var playbackEnabled = false
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
+    }
+
+    init() {
+        super.init(frame: .zero)
+        configure()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    private func configure() {
+        contentMode = .scaleAspectFit
+        clipsToBounds = true
+        isAccessibilityElement = false
+    }
+
+    func setDisplayedImage(_ image: UIImage) {
+        guard displayedImage !== image else { return }
+        displayedImage = image
+        stopAnimating()
+        animationImages = nil
+        animationDuration = 0
+        animationRepeatCount = 0
+
+        if let frames = image.images, frames.count > 1 {
+            self.image = frames.first
+            animationImages = frames
+            animationDuration = image.duration
+        } else {
+            self.image = image
+        }
+        updatePlayback()
+    }
+
+    func setPlaybackEnabled(_ enabled: Bool) {
+        playbackEnabled = enabled
+        updatePlayback()
+    }
+
+    private func updatePlayback() {
+        if playbackEnabled, window != nil, animationImages?.isEmpty == false {
+            startAnimating()
+        } else {
+            stopAnimating()
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        updatePlayback()
+    }
+}
+
+/// Inline image preview backed by a downsampled, cached thumbnail. Animated GIF
+/// and WebP frames decode on the first tap, then play and pause in place on
+/// subsequent taps. Static images open the full-size viewer.
 struct CachedThumbnail: View {
     let path: String
+    let onOpen: () -> Void
     /// Longest-side pixel budget: ~the 280pt max preview at 3x retina.
     private let maxPixel = 840
     /// The box the preview is fit into (matches the old maxWidth/maxHeight).
     static let box = CGSize(width: 220, height: 280)
     @State private var image: UIImage?
+    @State private var isPlaying = false
+    @State private var animationRequested = false
     /// The row's final on-screen size, reserved BEFORE the image decodes (from a
     /// cheap header read of its real dimensions). Holding the row at its final
     /// height from the first layout means it never grows when the decode lands —
     /// so a chat already pinned to the bottom stays pinned, instead of being left
     /// scrolled to the new image's top with its bottom below the fold.
     private let reserved: CGSize
+    private let animatedFormat: String?
 
-    init(path: String) {
+    init(path: String, onOpen: @escaping () -> Void) {
         self.path = path
+        self.onOpen = onOpen
+        animatedFormat = ThumbnailLoader.animatedFormat(path: path)
         // Seed from cache synchronously so an already-decoded image appears with
         // no placeholder flash while scrolling back over it.
         _image = State(initialValue: ThumbnailLoader.cachedThumbnail(path: path, maxPixel: 840))
@@ -2971,24 +3054,85 @@ struct CachedThumbnail: View {
     }
 
     var body: some View {
-        Group {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                // Neutral placeholder until the thumbnail decodes. Same reserved
-                // frame as the loaded image, so there's no layout shift.
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.secondarySystemBackground))
+        Button(action: handleTap) {
+            ZStack(alignment: .bottomTrailing) {
+                Group {
+                    if let image {
+                        if image.images?.isEmpty == false {
+                            AnimatedThumbnailImage(image: image, isPlaying: isPlaying)
+                                .frame(width: reserved.width, height: reserved.height)
+                                .clipped()
+                        } else {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                        }
+                    } else {
+                        // Match the loaded frame so decoding never shifts the row.
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(.secondarySystemBackground))
+                    }
+                }
+
+                if let animatedFormat {
+                    HStack(spacing: 3) {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 8, weight: .bold))
+                            .accessibilityHidden(true)
+                        Text(animatedFormat)
+                    }
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 5)
+                    .background(.black.opacity(0.58), in: .capsule)
+                    .padding(8)
+                    .allowsHitTesting(false)
+                }
             }
+            .frame(width: reserved.width, height: reserved.height)
+            .contentShape(Rectangle())
         }
-        .frame(width: reserved.width, height: reserved.height)
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
         .task(id: path) {
-            guard image == nil else { return }   // seeded from cache
+            guard image == nil else { return }
             let p = path, mp = maxPixel
             let decoded = await ThumbnailLoader.loadThumbnailAsync(path: p, maxPixel: mp)
-            if !Task.isCancelled, let decoded { image = decoded }
+            if !Task.isCancelled, image == nil, let decoded { image = decoded }
+        }
+        .task(id: animationRequested) {
+            guard animationRequested,
+                  animatedFormat != nil,
+                  image?.images == nil else { return }
+            let p = path, mp = maxPixel
+            let animated = await ThumbnailLoader.loadInlineAnimatedImageAsync(path: p, maxPixel: mp)
+            guard !Task.isCancelled else { return }
+            if let animated {
+                image = animated
+            } else {
+                isPlaying = false
+                animationRequested = false
+            }
+        }
+        .onDisappear {
+            isPlaying = false
+        }
+    }
+
+    private var accessibilityLabel: String {
+        guard let animatedFormat else { return "Open image" }
+        return isPlaying ? "Pause animated \(animatedFormat)" : "Play animated \(animatedFormat)"
+    }
+
+    private func handleTap() {
+        guard animatedFormat != nil else {
+            onOpen()
+            return
+        }
+        isPlaying.toggle()
+        if isPlaying {
+            animationRequested = true
         }
     }
 }
@@ -3143,7 +3287,10 @@ struct FileContent: View {
     private var imagePreview: some View {
         // Reserve and decode the local image exactly once whether the outgoing
         // upload is still running or the transfer has completed.
-        CachedThumbnail(path: msg.path)
+        CachedThumbnail(path: msg.path) {
+            onImageTap?(msg.path)
+        }
+            .id(msg.path)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .background {
                 GeometryReader { geo in
@@ -3153,12 +3300,6 @@ struct FileContent: View {
                         }
                 }
             }
-            .onTapGesture {
-                onImageTap?(msg.path)
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Open image")
-            .accessibilityAddTraits(.isButton)
     }
 
     private var fileRow: some View {
