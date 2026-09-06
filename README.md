@@ -36,6 +36,10 @@ decoders); unsupported or damaged files show an error and remain shareable.
 Starting another audio attachment pauses the previous one. Leaving the
 attachment stops playback; iOS also pauses when the app enters the background.
 
+Outgoing attachments preserve their filenames. Temporary copies live in unique
+staging directories, so selecting same-named files does not add UUID prefixes to
+the uploaded names.
+
 Not implemented: voice/video calls (`plugin-rtp`/`plugin-ice` need GStreamer's
 iOS binaries), OpenPGP, and ICU-based JID stringprep (a casefold fallback is
 used instead).

@@ -2041,9 +2041,9 @@ struct ChatView: View {
             return
         }
 
-        let url = AttachmentStaging.temporaryPastedImageURL(fileExtension: image.fileExtension)
         do {
-            try image.data.write(to: url, options: .atomic)
+            let url = try AttachmentStaging.stagePastedImageCancellable(
+                image.data, fileExtension: image.fileExtension, isCancelled: { false })
             withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { showAttach = false }
             setPendingFileSend(url)
         } catch {
@@ -2069,8 +2069,7 @@ struct ChatView: View {
     }
 
     private func cleanupTemporaryAttachment(at url: URL) {
-        guard AttachmentStaging.isInTemporaryDirectory(url) else { return }
-        try? FileManager.default.removeItem(at: url)
+        AttachmentStaging.removeTemporaryCopy(at: url)
     }
 
     private func submitComposer() {
@@ -2533,9 +2532,7 @@ struct ChatView: View {
                     if scoped { url.stopAccessingSecurityScopedResource() }
                     return
                 }
-                let dest = AttachmentStaging.temporaryCopyURL(for: url)
-                try? FileManager.default.removeItem(at: dest)
-                if (try? FileManager.default.copyItem(at: url, to: dest)) != nil {
+                if let dest = AttachmentStaging.stageCopy(of: url) {
                     setPendingFileSend(dest)
                 }
                 if scoped { url.stopAccessingSecurityScopedResource() }

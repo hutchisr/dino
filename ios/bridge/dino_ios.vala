@@ -965,7 +965,16 @@ private static bool is_temp_staging_path(string path) {
 }
 
 private static void remove_temp_staging_path(string path) {
-    if (is_temp_staging_path(path)) FileUtils.remove(path);
+    if (!is_temp_staging_path(path)) return;
+    FileUtils.remove(path);
+    string parent = Path.get_dirname(path);
+    string name = Path.get_basename(parent);
+    const string prefix = "GeckoAttachment-";
+    if (is_temp_staging_path(parent) && name.has_prefix(prefix)
+            && Uuid.string_is_valid(name.substring(prefix.length))) {
+        // Only remove an empty staging directory; never recurse into other files.
+        DirUtils.remove(parent);
+    }
 }
 
 public void add_account(string jid_str, string password) {

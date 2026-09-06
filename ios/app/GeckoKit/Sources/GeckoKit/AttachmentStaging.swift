@@ -20,6 +20,7 @@ enum AttachmentStagingError: LocalizedError, Equatable {
 
 enum AttachmentStaging {
     static let maxByteCount: Int64 = 512 * 1024 * 1024
+    private static let directoryPrefix = "GeckoAttachment-"
 
     static func stageCopyCancellable(
         of source: URL,
@@ -42,6 +43,8 @@ enum AttachmentStaging {
             preferredFilenameExtension: preferredFilenameExtension,
             in: temporaryDirectory)
         do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(), withIntermediateDirectories: false)
             try copy(
                 source,
                 to: destination,
@@ -49,7 +52,7 @@ enum AttachmentStaging {
                 isCancelled: isCancelled)
             return destination
         } catch {
-            try? FileManager.default.removeItem(at: destination)
+            removeTemporaryCopy(at: destination, temporaryDirectory: temporaryDirectory)
             throw error
         }
     }
@@ -73,14 +76,16 @@ enum AttachmentStaging {
             fileExtension: fileExtension,
             in: temporaryDirectory)
         do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(), withIntermediateDirectories: false)
             try data.write(to: destination, options: .atomic)
             try checkCancellation(isCancelled)
             return destination
         } catch is CancellationError {
-            try? FileManager.default.removeItem(at: destination)
+            removeTemporaryCopy(at: destination, temporaryDirectory: temporaryDirectory)
             throw CancellationError()
         } catch {
-            try? FileManager.default.removeItem(at: destination)
+            removeTemporaryCopy(at: destination, temporaryDirectory: temporaryDirectory)
             throw AttachmentStagingError.writeFailed
         }
     }
@@ -115,7 +120,10 @@ enum AttachmentStaging {
             let stem = (sourceName as NSString).deletingPathExtension
             name = "\(stem.isEmpty ? "File" : stem).\(fileExtension)"
         }
-        return temporaryDirectory.appendingPathComponent("\(id.uuidString)-\(name)")
+        // Keep uniqueness out of the basename: libdino uses it as the upload name.
+        return temporaryDirectory
+            .appendingPathComponent("\(directoryPrefix)\(id.uuidString)", isDirectory: true)
+            .appendingPathComponent(name)
     }
 
     /// Copies `source` into the temporary directory and returns the copy, or
@@ -131,14 +139,10 @@ enum AttachmentStaging {
         of source: URL,
         preferredFilenameExtension: String? = nil
     ) -> URL? {
-        let dest = temporaryCopyURL(
-            for: source,
-            preferredFilenameExtension: preferredFilenameExtension)
-        // A UUID-prefixed name makes a collision practically impossible, but
-        // clear the destination anyway so copyItem cannot fail on leftovers.
-        try? FileManager.default.removeItem(at: dest)
-        guard (try? FileManager.default.copyItem(at: source, to: dest)) != nil else { return nil }
-        return dest
+        try? stageCopyCancellable(
+            of: source,
+            preferredFilenameExtension: preferredFilenameExtension,
+            isCancelled: { false })
     }
 
     static func temporaryPastedImageURL(
@@ -148,7 +152,9 @@ enum AttachmentStaging {
     ) -> URL {
         let trimmedExtension = normalizedFileExtension(fileExtension)
         let name = trimmedExtension.isEmpty ? "Pasted Image" : "Pasted Image.\(trimmedExtension)"
-        return temporaryDirectory.appendingPathComponent("\(id.uuidString)-\(name)")
+        return temporaryDirectory
+            .appendingPathComponent("\(directoryPrefix)\(id.uuidString)", isDirectory: true)
+            .appendingPathComponent(name)
     }
 
     private static func normalizedFileExtension(_ fileExtension: String?) -> String {
@@ -165,6 +171,22 @@ enum AttachmentStaging {
         var tempPath = temporaryDirectory.standardizedFileURL.path
         if !tempPath.hasSuffix("/") { tempPath += "/" }
         return path.hasPrefix(tempPath)
+    }
+
+    static func removeTemporaryCopy(
+        at url: URL,
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory
+    ) {
+        guard isInTemporaryDirectory(url, temporaryDirectory: temporaryDirectory) else { return }
+        let parent = url.deletingLastPathComponent()
+        let name = parent.lastPathComponent
+        if parent.deletingLastPathComponent().standardizedFileURL == temporaryDirectory.standardizedFileURL,
+           name.hasPrefix(directoryPrefix),
+           UUID(uuidString: String(name.dropFirst(directoryPrefix.count))) != nil {
+            try? FileManager.default.removeItem(at: parent)
+        } else {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     private static func checkCancellation(_ isCancelled: () -> Bool) throws {

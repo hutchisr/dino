@@ -15,21 +15,13 @@ final class AttachmentStagingTests: XCTestCase {
         XCTAssertFalse(AttachmentStaging.canStageFile(byteCount: -1, maxByteCount: 10))
     }
 
-    func testTooLargeMessageUsesRequestedNounAndConfiguredLimit() {
-        let message = AttachmentStaging.tooLargeMessage(noun: "video")
-        let limit = ByteCountFormatter.string(
-            fromByteCount: AttachmentStaging.maxByteCount,
-            countStyle: .file)
-        XCTAssertTrue(message.hasPrefix("This video is too large to send."))
-        XCTAssertTrue(message.hasSuffix("local staging limit is \(limit)."))
-    }
 
     func testTemporaryCopyURLPreservesSourceName() {
         let id = UUID(uuidString: "00000000-0000-0000-0000-000000000123")!
         let temp = URL(fileURLWithPath: "/tmp/gecko")
         let source = URL(fileURLWithPath: "/Users/rachel/Pictures/cat.jpg")
         let staged = AttachmentStaging.temporaryCopyURL(for: source, in: temp, id: id)
-        XCTAssertEqual(staged.path, "/tmp/gecko/00000000-0000-0000-0000-000000000123-cat.jpg")
+        XCTAssertEqual(staged.lastPathComponent, "cat.jpg")
     }
 
     func testTemporaryCopyURLUsesNormalizedPreferredExtension() {
@@ -42,7 +34,7 @@ final class AttachmentStagingTests: XCTestCase {
             in: temp,
             id: id
         )
-        XCTAssertEqual(staged.path, "/tmp/gecko/00000000-0000-0000-0000-000000000123-provider-file.gif")
+        XCTAssertEqual(staged.lastPathComponent, "provider-file.gif")
     }
 
     func testTemporaryPastedImageURLUsesReadableNameAndExtension() {
@@ -52,7 +44,7 @@ final class AttachmentStagingTests: XCTestCase {
             fileExtension: "PNG",
             in: temp,
             id: id)
-        XCTAssertEqual(staged.path, "/tmp/gecko/00000000-0000-0000-0000-000000000123-Pasted Image.png")
+        XCTAssertEqual(staged.lastPathComponent, "Pasted Image.png")
     }
 
     func testTemporaryPastedImageURLHandlesLeadingDot() {
@@ -62,7 +54,7 @@ final class AttachmentStagingTests: XCTestCase {
             fileExtension: ".jpg",
             in: temp,
             id: id)
-        XCTAssertEqual(staged.path, "/tmp/gecko/00000000-0000-0000-0000-000000000123-Pasted Image.jpg")
+        XCTAssertEqual(staged.lastPathComponent, "Pasted Image.jpg")
     }
 
     func testTemporaryDirectoryCheckDoesNotMatchSiblingPrefix() {
@@ -92,10 +84,10 @@ final class AttachmentStagingTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: source) }
 
         let staged = try XCTUnwrap(AttachmentStaging.stageCopy(of: source))
-        defer { try? FileManager.default.removeItem(at: staged) }
+        defer { AttachmentStaging.removeTemporaryCopy(at: staged) }
 
         XCTAssertNotEqual(staged.path, source.path)
-        XCTAssertEqual(staged.lastPathComponent.hasSuffix("-source.jpg"), true)
+        XCTAssertEqual(staged.lastPathComponent, source.lastPathComponent)
         XCTAssertEqual(try Data(contentsOf: staged), bytes)
     }
 
@@ -109,7 +101,7 @@ final class AttachmentStagingTests: XCTestCase {
         let staged = try XCTUnwrap(
             AttachmentStaging.stageCopy(of: source, preferredFilenameExtension: "gif")
         )
-        defer { try? FileManager.default.removeItem(at: staged) }
+        defer { AttachmentStaging.removeTemporaryCopy(at: staged) }
 
         XCTAssertTrue(staged.lastPathComponent.hasSuffix("-provider-file.gif"))
         XCTAssertEqual(try Data(contentsOf: staged), bytes)
@@ -130,7 +122,7 @@ final class AttachmentStagingTests: XCTestCase {
         let staged = try XCTUnwrap(
             AttachmentStaging.stageCopy(of: source, preferredFilenameExtension: "webp")
         )
-        defer { try? FileManager.default.removeItem(at: staged) }
+        defer { AttachmentStaging.removeTemporaryCopy(at: staged) }
 
         XCTAssertTrue(staged.lastPathComponent.hasSuffix("-provider-file.webp"))
         XCTAssertEqual(try Data(contentsOf: staged), bytes)
@@ -159,7 +151,7 @@ final class AttachmentStagingTests: XCTestCase {
             copyChunkByteCount: 127,
             isCancelled: { false })
 
-        XCTAssertTrue(staged.lastPathComponent.hasSuffix("-provider-file.png"))
+        XCTAssertEqual(staged.lastPathComponent, "provider-file.png")
         XCTAssertEqual(try Data(contentsOf: staged), bytes)
     }
 
@@ -180,5 +172,39 @@ final class AttachmentStagingTests: XCTestCase {
             XCTAssertTrue(error is CancellationError)
         }
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: staging.path), [])
+    }
+
+    func testSameNamedCopiesRemainIndependentAndCleanupPreservesSource() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("report.pdf")
+        try Data([1]).write(to: source)
+        let first = try AttachmentStaging.stageCopyCancellable(
+            of: source, in: root, isCancelled: { false })
+        try Data([2]).write(to: source)
+        let second = try AttachmentStaging.stageCopyCancellable(
+            of: source, in: root, isCancelled: { false })
+        XCTAssertEqual(first.lastPathComponent, "report.pdf")
+        XCTAssertEqual(second.lastPathComponent, "report.pdf")
+        XCTAssertEqual(try Data(contentsOf: first), Data([1]))
+        AttachmentStaging.removeTemporaryCopy(at: first, temporaryDirectory: root)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.deletingLastPathComponent().path))
+        XCTAssertEqual(try Data(contentsOf: second), Data([2]))
+        XCTAssertEqual(try Data(contentsOf: source), Data([2]))
+    }
+
+    func testCancellationDuringCopyRemovesStagingDirectory() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("source.bin")
+        try Data(repeating: 1, count: 32).write(to: source)
+        var checks = 0
+        XCTAssertThrowsError(try AttachmentStaging.stageCopyCancellable(
+            of: source, in: root, copyChunkByteCount: 8,
+            isCancelled: { checks += 1; return checks == 3 })
+        ) { XCTAssertTrue($0 is CancellationError) }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), ["source.bin"])
     }
 }

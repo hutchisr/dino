@@ -205,8 +205,7 @@ final class AttachmentSelectionPipeline: ObservableObject {
 
     private func removeStaleCopy(_ url: URL) {
         stagingQueue.async {
-            guard AttachmentStaging.isInTemporaryDirectory(url) else { return }
-            try? FileManager.default.removeItem(at: url)
+            AttachmentStaging.removeTemporaryCopy(at: url)
         }
     }
 
