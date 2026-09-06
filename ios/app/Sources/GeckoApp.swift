@@ -246,6 +246,9 @@ struct GeckoApp: App {
         RootView()
             .environmentObject(model)
             .onAppear {
+#if targetEnvironment(macCatalyst)
+                AttachmentExport.removeStaleTemporaryDirectories()
+#endif
                 model.boot()
                 model.setApplicationActive(scenePhase == .active)
                 AppDelegate.setOpenHandler { jid in model.openChat(with: jid) }
@@ -1443,6 +1446,114 @@ private struct PendingFileSend {
         self.isVideo = ["mp4", "m4v", "mov", "qt", "3gp", "3g2"].contains(ext)
     }
 }
+#if targetEnvironment(macCatalyst)
+private struct AttachmentExport: Identifiable {
+    private static let temporaryDirectoryPrefix = "GeckoAttachmentExport-"
+    private static let staleDirectoryAge: TimeInterval = 24 * 60 * 60
+    private static let directoryResourceKeys: Set<URLResourceKey> = [
+        .contentModificationDateKey,
+        .isDirectoryKey,
+    ]
+
+    let sourceURL: URL
+    let temporaryDirectory: URL?
+    var id: URL { sourceURL }
+
+    static func prepare(sourceURL: URL, preferredFilename: String) -> AttachmentExport {
+        removeStaleTemporaryDirectories()
+        let fm = FileManager.default
+
+        let requestedFilename = (preferredFilename as NSString).lastPathComponent
+        let filename = String(requestedFilename.unicodeScalars.filter {
+            !CharacterSet.controlCharacters.contains($0)
+        })
+        guard !filename.isEmpty,
+              filename != ".",
+              filename != "..",
+              filename != sourceURL.lastPathComponent
+        else {
+            return AttachmentExport(sourceURL: sourceURL, temporaryDirectory: nil)
+        }
+
+        let directory = fm.temporaryDirectory
+            .appendingPathComponent("\(temporaryDirectoryPrefix)\(UUID().uuidString)", isDirectory: true)
+        let namedURL = directory.appendingPathComponent(filename, isDirectory: false)
+        do {
+            try fm.createDirectory(at: directory, withIntermediateDirectories: false)
+            try fm.linkItem(at: sourceURL, to: namedURL)
+            return AttachmentExport(sourceURL: namedURL, temporaryDirectory: directory)
+        } catch {
+            try? fm.removeItem(at: directory)
+            return AttachmentExport(sourceURL: sourceURL, temporaryDirectory: nil)
+        }
+    }
+
+    static func removeStaleTemporaryDirectories() {
+        let fm = FileManager.default
+        let cutoff = Date().addingTimeInterval(-staleDirectoryAge)
+        guard let urls = try? fm.contentsOfDirectory(
+            at: fm.temporaryDirectory,
+            includingPropertiesForKeys: Array(directoryResourceKeys),
+            options: [.skipsHiddenFiles])
+        else { return }
+
+        for url in urls where url.lastPathComponent.hasPrefix(temporaryDirectoryPrefix) {
+            guard let values = try? url.resourceValues(forKeys: directoryResourceKeys),
+                  values.isDirectory == true,
+                  let modified = values.contentModificationDate,
+                  modified < cutoff
+            else { continue }
+            try? fm.removeItem(at: url)
+        }
+    }
+
+    func cleanup() {
+        guard let temporaryDirectory else { return }
+        try? FileManager.default.removeItem(at: temporaryDirectory)
+    }
+}
+
+private struct AttachmentSavePicker: UIViewControllerRepresentable {
+    let sourceURL: URL
+    let onDismiss: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onDismiss: onDismiss)
+    }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forExporting: [sourceURL], asCopy: true)
+        picker.delegate = context.coordinator
+#if DEBUG
+        if let path = ProcessInfo.processInfo.environment["DINO_UI_TEST_EXPORT_DIRECTORY"] {
+            picker.directoryURL = URL(fileURLWithPath: path, isDirectory: true)
+        }
+#endif
+        return picker
+    }
+
+    func updateUIViewController(_: UIDocumentPickerViewController, context _: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onDismiss: () -> Void
+
+        init(onDismiss: @escaping () -> Void) {
+            self.onDismiss = onDismiss
+        }
+
+        func documentPicker(
+            _: UIDocumentPickerViewController,
+            didPickDocumentsAt _: [URL]
+        ) {
+            onDismiss()
+        }
+
+        func documentPickerWasCancelled(_: UIDocumentPickerViewController) {
+            onDismiss()
+        }
+    }
+}
+#endif
 
 struct ChatView: View {
     @EnvironmentObject var model: AppModel
@@ -1500,6 +1611,9 @@ struct ChatView: View {
     @State private var keyboardOverlap: CGFloat = 0
     @State private var pendingFileSend: PendingFileSend?
     @StateObject private var attachmentPipeline = AttachmentSelectionPipeline()
+#if targetEnvironment(macCatalyst)
+    @State private var attachmentExport: AttachmentExport?
+#endif
 
     private func openMediaViewer(_ item: MediaViewerItem) {
 #if targetEnvironment(macCatalyst)
@@ -1508,7 +1622,31 @@ struct ChatView: View {
         model.mediaViewerItem = item
 #endif
     }
+#if targetEnvironment(macCatalyst)
+    private func saveAttachment(_ msg: ChatMessage) {
+        let sourceURL = URL(fileURLWithPath: msg.path)
+        let keys: Set<URLResourceKey> = [.isReadableKey, .isRegularFileKey, .isSymbolicLinkKey]
+        guard let values = try? sourceURL.resourceValues(forKeys: keys),
+              values.isRegularFile == true,
+              values.isReadable == true,
+              values.isSymbolicLink != true
+        else {
+            model.lastError = "This attachment is no longer available."
+            return
+        }
+        attachmentExport = AttachmentExport.prepare(
+            sourceURL: sourceURL,
+            preferredFilename: msg.fileName)
+    }
+#endif
 
+    private var saveAttachmentAction: ((ChatMessage) -> Void)? {
+#if targetEnvironment(macCatalyst)
+        saveAttachment
+#else
+        nil
+#endif
+    }
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
     }
@@ -2034,6 +2172,7 @@ struct ChatView: View {
                 onReply: { m in editing = nil; replyingTo = m },
                 onImageTap: { path in openMediaViewer(.image(path)) },
                 onVideoTap: { path in openMediaViewer(.video(path)) },
+                onSaveAttachment: saveAttachmentAction,
                 onLoadOlder: { model.requestOlderMessages(conversationId) },
                 onActions: { m in actionMsg = m }
             )
@@ -2417,6 +2556,18 @@ struct ChatView: View {
                 if scoped { url.stopAccessingSecurityScopedResource() }
             }
         }
+#if targetEnvironment(macCatalyst)
+        .sheet(item: $attachmentExport) { export in
+            AttachmentSavePicker(sourceURL: export.sourceURL) {
+                export.cleanup()
+                attachmentExport = nil
+            }
+            .onDisappear {
+                export.cleanup()
+            }
+        }
+#endif
+
         .navigationTitle(conversation?.name ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarRole(.editor)
@@ -2519,6 +2670,7 @@ struct MessageBubble: View {
     var onReply: ((ChatMessage) -> Void)? = nil
     var onImageTap: ((String) -> Void)? = nil
     var onVideoTap: ((String) -> Void)? = nil
+    var onSaveAttachment: ((ChatMessage) -> Void)? = nil
     var onActions: ((ChatMessage) -> Void)? = nil
     var onAvatarNeeded: ((String) -> Void)? = nil
     var onReaction: ((String, Bool) -> Void)? = nil
@@ -2584,6 +2736,10 @@ struct MessageBubble: View {
             || (msg.fileState == "complete" && msg.isImage && !msg.path.isEmpty)
     }
 
+    private var canSaveAttachment: Bool {
+        msg.isFile && msg.fileState == "complete" && !msg.path.isEmpty
+    }
+
     private func copyMessage() {
         let pasteboard = UIPasteboard.general
         var gate = clipboardWriteGate
@@ -2624,6 +2780,11 @@ struct MessageBubble: View {
                 if canCopyMessage {
                     Button("Copy", systemImage: "doc.on.doc") {
                         copyMessage()
+                    }
+                }
+                if canSaveAttachment {
+                    Button("Save As…", systemImage: "square.and.arrow.down") {
+                        onSaveAttachment?(msg)
                     }
                 }
                 Button("Reactions and More…", systemImage: "face.smiling") {

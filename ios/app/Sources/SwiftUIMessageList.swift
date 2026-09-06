@@ -32,6 +32,7 @@ struct SwiftUIMessageList: View {
     let onReply: (ChatMessage) -> Void
     let onImageTap: (String) -> Void
     let onVideoTap: (String) -> Void
+    let onSaveAttachment: ((ChatMessage) -> Void)?
     let onLoadOlder: () -> Void
     let onActions: (ChatMessage) -> Void
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
@@ -928,7 +929,8 @@ struct SwiftUIMessageList: View {
             MessageBubble(msg: row.msg, inGroupchat: isGroupchat, showSender: row.showSender,
                           senderAvatarPath: row.senderAvatarPath,
                           onEdit: onEdit, onReply: onReply,
-                          onImageTap: onImageTap, onVideoTap: onVideoTap, onActions: onActions,
+                          onImageTap: onImageTap, onVideoTap: onVideoTap,
+                          onSaveAttachment: onSaveAttachment, onActions: onActions,
                           onAvatarNeeded: { model.ensureAvatar(for: $0) },
                           onReaction: { emoji, add in
                               model.setReaction(conversationId, item: row.msg.id, emoji: emoji, add: add)

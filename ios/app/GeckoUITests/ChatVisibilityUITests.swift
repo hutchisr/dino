@@ -275,7 +275,12 @@ final class ChatVisibilityUITests: XCTestCase {
     }
 
 #if targetEnvironment(macCatalyst)
-    func testCompletedImageContextMenuCopiesImage() {
+    func testCompletedImageContextMenuCopiesAndSavesImage() throws {
+        let exportDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GeckoSaveUITest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: exportDirectory) }
+        app.launchEnvironment["DINO_UI_TEST_EXPORT_DIRECTORY"] = exportDirectory.path
         UIPasteboard.general.items = []
         app.launch()
 
@@ -294,6 +299,33 @@ final class ChatVisibilityUITests: XCTestCase {
             XCTWaiter.wait(for: [copied], timeout: 5),
             .completed,
             "Copy did not place the rendered image on the pasteboard")
+
+        preview.rightClick()
+        let save = app.windows.firstMatch.menus.firstMatch.menuItems["Save As…"]
+        XCTAssertTrue(save.waitForExistence(timeout: 2), "Completed image context menu has no Save As action")
+        save.click()
+        let savePanel = app.sheets["save-panel"]
+        let saveButton = savePanel.buttons["Save"]
+        XCTAssertTrue(saveButton.waitForExistence(timeout: 3), "Save As did not open the system save dialog")
+        let filename = savePanel.textFields.firstMatch
+        XCTAssertTrue(filename.waitForExistence(timeout: 2), "Save dialog has no filename field")
+        XCTAssertEqual(filename.value as? String, "fixture")
+        saveButton.click()
+        XCTAssertTrue(savePanel.waitForNonExistence(timeout: 3), "Save dialog did not dismiss")
+
+        let savedURL = exportDirectory.appendingPathComponent("fixture.png")
+        let saved = NSPredicate { _, _ in
+            FileManager.default.fileExists(atPath: savedURL.path)
+        }
+        let exported = XCTNSPredicateExpectation(predicate: saved, object: nil)
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [exported], timeout: 3),
+            .completed,
+            "Save As did not export fixture.png")
+        let image = try XCTUnwrap(UIImage(contentsOfFile: savedURL.path))
+        let pixels = try XCTUnwrap(image.cgImage)
+        XCTAssertGreaterThan(pixels.width, 0)
+        XCTAssertEqual(pixels.width * 3, pixels.height * 4)
     }
 
     func testRapidMediaActivationCreatesOnlyOnePreviewWindow() {
