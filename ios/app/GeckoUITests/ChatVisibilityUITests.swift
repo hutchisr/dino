@@ -10,6 +10,127 @@ final class ChatVisibilityUITests: XCTestCase {
         app.launchEnvironment["DINO_UI_TEST_FIXTURE"] = "chat-visibility"
     }
 
+#if targetEnvironment(macCatalyst)
+    func testAudioShareMenuAnchorsToClickedButton() {
+        app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"
+        app.launch()
+        for name in ["first.wav", "second.wav"] {
+            let share = app.buttons["Share \(name)"]
+            XCTAssertTrue(share.waitForExistence(timeout: 5))
+            let anchor = share.frame
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Audio actions before sharing — \(name)"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+            share.click()
+            let menu = app.popovers.firstMatch
+            XCTAssertTrue(menu.waitForExistence(timeout: 5), "Share menu did not present")
+            XCTAssertTrue(menu.buttons["Copy"].waitForExistence(timeout: 5), "Share menu did not finish presenting")
+            let frame = menu.frame
+            XCTAssertFalse(frame.isEmpty, "Share menu has no visible frame")
+            let horizontalGap = max(0, max(frame.minX - anchor.maxX, anchor.minX - frame.maxX))
+            let verticalGap = max(0, max(frame.minY - anchor.maxY, anchor.minY - frame.maxY))
+            XCTAssertLessThanOrEqual(horizontalGap, 32, "Share menu is horizontally detached from its button")
+            XCTAssertLessThanOrEqual(verticalGap, 32, "Share menu is vertically detached from its button")
+            app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+            XCTAssertTrue(menu.waitForNonExistence(timeout: 3))
+        }
+    }
+#else
+    func testAudioShareCanBeCompletedAndReopened() {
+        app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"
+        app.launch()
+        let share = app.buttons["Share first.wav"]
+        XCTAssertTrue(share.waitForExistence(timeout: 5))
+        for _ in 0..<2 {
+            share.tap()
+            let copy = app.cells["Copy"]
+            XCTAssertTrue(copy.waitForExistence(timeout: 5), "Share sheet did not offer file actions")
+            copy.tap()
+            XCTAssertTrue(copy.waitForNonExistence(timeout: 3))
+        }
+    }
+#endif
+
+    func testAudioSwitchingPausesPreviousAttachmentAndCanReplayAfterEnd() {
+        app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"
+        app.launch()
+        let first = app.buttons["Play first.wav"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        first.tap()
+        XCTAssertTrue(app.buttons["Pause first.wav"].waitForExistence(timeout: 5))
+        let second = app.buttons["Play second.wav"]
+        second.tap()
+        XCTAssertTrue(app.buttons["Play first.wav"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Pause second.wav"].waitForExistence(timeout: 3))
+        let slider = app.sliders.matching(identifier: "Playback position").element(boundBy: 1)
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: slider)
+        waitForExpectations(timeout: 5)
+        slider.adjust(toNormalizedSliderPosition: 1)
+        XCTAssertTrue(second.waitForExistence(timeout: 5), "Seeking to the end did not stop playback")
+        second.tap()
+        XCTAssertTrue(app.buttons["Pause second.wav"].waitForExistence(timeout: 3))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Inline audio playback"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    func testBrokenAudioKeepsSharingAvailable() {
+        app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"
+        app.launch()
+        let play = app.buttons["Play broken.wav"]
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        play.tap()
+        let failure = app.staticTexts["audio.playbackError"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Share broken.wav"].exists)
+        XCTAssertTrue(play.exists, "Failed playback remained stuck on Pause")
+    }
+
+    func testAudioSaveUsesNativePickerAndPreservesFilename() throws {
+        app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"
+#if targetEnvironment(macCatalyst)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GeckoAudioSaveUITest-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        app.launchEnvironment["DINO_UI_TEST_EXPORT_DIRECTORY"] = directory.path
+#endif
+        app.launch()
+        let save = app.buttons["Save first.wav"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        let share = app.buttons["Share first.wav"]
+        XCTAssertTrue(share.exists)
+        XCTAssertLessThanOrEqual(save.frame.maxX, share.frame.minX)
+        save.tap()
+#if targetEnvironment(macCatalyst)
+        let panel = app.sheets["save-panel"]
+        XCTAssertTrue(panel.waitForExistence(timeout: 3))
+        XCTAssertEqual(panel.textFields.firstMatch.value as? String, "first")
+        panel.buttons["Save"].click()
+        XCTAssertTrue(panel.waitForNonExistence(timeout: 3))
+        let url = directory.appendingPathComponent("first.wav")
+        let exported = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in FileManager.default.fileExists(atPath: url.path) }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [exported], timeout: 3), .completed)
+        let data = try Data(contentsOf: url)
+        XCTAssertEqual(data.count, 384_044)
+        XCTAssertEqual(data.prefix(4), Data("RIFF".utf8))
+        XCTAssertTrue(data.dropFirst(44).allSatisfy { $0 == 0 }, "Export changed the PCM samples")
+#else
+        let picker = app.otherElements["Browse View (Picker)"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5), "Save did not open the native Files picker")
+        XCTAssertTrue(app.buttons["Save"].isEnabled)
+        app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].swipeDown()
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 3), "Dismissing Files did not return to the chat")
+#endif
+        let play = app.buttons["Play first.wav"]
+        XCTAssertTrue(play.waitForExistence(timeout: 3))
+        play.tap()
+        XCTAssertTrue(app.buttons["Pause first.wav"].waitForExistence(timeout: 5), "Export removed the source audio")
+    }
+
     func testDelayedMessagesRevealAndRemainVisibleAfterImageHeightChange() {
         app.launch()
 

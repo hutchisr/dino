@@ -9,6 +9,18 @@ final class MediaFileKindTests: XCTestCase {
         XCTAssertTrue(MediaFileKind.isVideo(fileName: "Clip.MOV"))
     }
 
+    func testAudioMIMEIdentifiesExtensionlessAttachment() {
+        XCTAssertTrue(MediaFileKind.isAudio(fileName: "recording", mime: "audio/mp4"))
+        XCTAssertFalse(MediaFileKind.isAudio(fileName: "recording", mime: "application/octet-stream"))
+    }
+
+    func testAudioFallsBackToSystemTypeForGenericMIME() {
+        XCTAssertTrue(MediaFileKind.isAudio(fileName: "Recording.M4A", mime: "application/octet-stream"))
+        XCTAssertTrue(MediaFileKind.isAudio(fileName: "recording.aiff", mime: ""))
+        XCTAssertFalse(MediaFileKind.isAudio(fileName: "movie.mov", mime: "video/quicktime"))
+        XCTAssertFalse(MediaFileKind.isAudio(fileName: ".mp3", mime: ""))
+    }
+
     func testPickerPrefersGIFRepresentationOverGenericImage() {
         let identifiers = [UTType.jpeg.identifier, UTType.gif.identifier]
         XCTAssertEqual(

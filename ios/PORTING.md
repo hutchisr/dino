@@ -121,6 +121,23 @@ test measures the actual preview button, not an inherited row identifier.
 XCTest still waits for idle around input, so inspect recorded frames when
 checking transient jumps that could disappear before an assertion runs.
 
+Audio attachment regressions use `DINO_UI_TEST_AUDIO=1` with the
+`chat-visibility` fixture: locally generated PCM audio plus a corrupt file,
+without an account or network access. The audio cases in
+`ChatVisibilityUITests` exercise switching, seeking to the end, replay, and
+failure UI with sharing preserved on both iOS and Catalyst. Save-button coverage
+checks the native Files picker and cancellation on iOS, and exports the audio
+under its original filename with intact PCM samples on Catalyst.
+Sharing coverage checks the popover's distance from two tapped audio buttons on
+Catalyst and completing/reopening the share sheet on iOS. Save and share use
+matching plain SwiftUI buttons with adjoining 44-point tap targets. An invisible
+UIKit view behind share supplies the popover anchor, avoiding both Catalyst's
+native button bezel and `ShareLink`'s inferred geometry inside a scrolling chat.
+For Catalyst XCTest, a fresh derived-data directory with
+`CODE_SIGN_IDENTITY="Apple Development"` and `ENABLE_HARDENED_RUNTIME=NO`
+avoids the test runner being killed before bootstrapping on the current host;
+these are test-command overrides, not release signing settings.
+
 The chat's composer clearance lives in the non-lazy bottom anchor, not a bottom
 content margin. Together with `.defaultScrollAnchor(..., for: .sizeChanges)`,
 this keeps multiline growth/deletion bottom-aligned during layout. Changing

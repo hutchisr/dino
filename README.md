@@ -30,6 +30,12 @@ Working end to end against real servers:
   each conversation's off / mentions-only setting before delivery. On both
   platforms the app icon badge shows the total unread message count.
 
+Downloaded audio attachments have inline play/pause, seeking, saving, and sharing on
+iOS and Mac Catalyst. Playback uses the system's native codecs (no bundled
+decoders); unsupported or damaged files show an error and remain shareable.
+Starting another audio attachment pauses the previous one. Leaving the
+attachment stops playback; iOS also pauses when the app enters the background.
+
 Not implemented: voice/video calls (`plugin-rtp`/`plugin-ice` need GStreamer's
 iOS binaries), OpenPGP, and ICU-based JID stringprep (a casefold fallback is
 used instead).

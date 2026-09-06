@@ -246,9 +246,7 @@ struct GeckoApp: App {
         RootView()
             .environmentObject(model)
             .onAppear {
-#if targetEnvironment(macCatalyst)
                 AttachmentExport.removeStaleTemporaryDirectories()
-#endif
                 model.boot()
                 model.setApplicationActive(scenePhase == .active)
                 AppDelegate.setOpenHandler { jid in model.openChat(with: jid) }
@@ -1446,7 +1444,6 @@ private struct PendingFileSend {
         self.isVideo = ["mp4", "m4v", "mov", "qt", "3gp", "3g2"].contains(ext)
     }
 }
-#if targetEnvironment(macCatalyst)
 private struct AttachmentExport: Identifiable {
     private static let temporaryDirectoryPrefix = "GeckoAttachmentExport-"
     private static let staleDirectoryAge: TimeInterval = 24 * 60 * 60
@@ -1553,7 +1550,6 @@ private struct AttachmentSavePicker: UIViewControllerRepresentable {
         }
     }
 }
-#endif
 
 struct ChatView: View {
     @EnvironmentObject var model: AppModel
@@ -1611,9 +1607,7 @@ struct ChatView: View {
     @State private var keyboardOverlap: CGFloat = 0
     @State private var pendingFileSend: PendingFileSend?
     @StateObject private var attachmentPipeline = AttachmentSelectionPipeline()
-#if targetEnvironment(macCatalyst)
     @State private var attachmentExport: AttachmentExport?
-#endif
 
     private func openMediaViewer(_ item: MediaViewerItem) {
 #if targetEnvironment(macCatalyst)
@@ -1622,7 +1616,6 @@ struct ChatView: View {
         model.mediaViewerItem = item
 #endif
     }
-#if targetEnvironment(macCatalyst)
     private func saveAttachment(_ msg: ChatMessage) {
         let sourceURL = URL(fileURLWithPath: msg.path)
         let keys: Set<URLResourceKey> = [.isReadableKey, .isRegularFileKey, .isSymbolicLinkKey]
@@ -1638,15 +1631,7 @@ struct ChatView: View {
             sourceURL: sourceURL,
             preferredFilename: msg.fileName)
     }
-#endif
 
-    private var saveAttachmentAction: ((ChatMessage) -> Void)? {
-#if targetEnvironment(macCatalyst)
-        saveAttachment
-#else
-        nil
-#endif
-    }
     private var conversation: XmppConversation? {
         model.conversations.first { $0.id == conversationId }
     }
@@ -2172,7 +2157,7 @@ struct ChatView: View {
                 onReply: { m in editing = nil; replyingTo = m },
                 onImageTap: { path in openMediaViewer(.image(path)) },
                 onVideoTap: { path in openMediaViewer(.video(path)) },
-                onSaveAttachment: saveAttachmentAction,
+                onSaveAttachment: saveAttachment,
                 onLoadOlder: { model.requestOlderMessages(conversationId) },
                 onActions: { m in actionMsg = m }
             )
@@ -2556,7 +2541,6 @@ struct ChatView: View {
                 if scoped { url.stopAccessingSecurityScopedResource() }
             }
         }
-#if targetEnvironment(macCatalyst)
         .sheet(item: $attachmentExport) { export in
             AttachmentSavePicker(sourceURL: export.sourceURL) {
                 export.cleanup()
@@ -2566,7 +2550,6 @@ struct ChatView: View {
                 export.cleanup()
             }
         }
-#endif
 
         .navigationTitle(conversation?.name ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
@@ -2853,6 +2836,7 @@ struct MessageBubble: View {
                     if msg.isFile {
                         FileContent(msg: msg, onImageTap: onImageTap, onVideoTap: onVideoTap,
                                     onDownloadFile: onDownloadFile,
+                                    onSaveAttachment: onSaveAttachment,
                                     onImageRendered: onImageRendered,
                                     transferProgress: transferProgress)
                     } else {
@@ -3092,6 +3076,7 @@ struct FileContent: View {
     var onImageTap: ((String) -> Void)? = nil
     var onVideoTap: ((String) -> Void)? = nil
     var onDownloadFile: ((Int32) -> Void)? = nil
+    var onSaveAttachment: ((ChatMessage) -> Void)? = nil
     var onImageRendered: (() -> Void)? = nil
     var transferProgress: FileTransferProgressState? = nil
 
@@ -3117,6 +3102,10 @@ struct FileContent: View {
             }
         } else if msg.fileState == "complete", msg.isImage, !msg.path.isEmpty {
             imagePreview
+        } else if msg.fileState == "complete", msg.isAudio, !msg.path.isEmpty {
+            AudioAttachmentView(path: msg.path, fileName: msg.fileName,
+                                onSave: onSaveAttachment.map { save in { save(msg) } })
+                .id(msg.path)
         } else if msg.fileState == "complete", msg.isVideo, !msg.path.isEmpty {
             Button {
                 onVideoTap?(msg.path)
@@ -3199,6 +3188,7 @@ struct FileContent: View {
     private var completeIcon: String {
         if msg.isImage { return "photo" }
         if msg.isVideo { return "play.rectangle.fill" }
+        if msg.isAudio { return "waveform" }
         return "doc.fill"
     }
 

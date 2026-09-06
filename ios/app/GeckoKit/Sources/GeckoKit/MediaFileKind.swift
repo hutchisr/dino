@@ -49,6 +49,13 @@ enum MediaFileKind {
         videoExtensions.contains(pathExtension(of: fileName))
     }
 
+    /// A candidate for native playback, not a promise that its codec is supported.
+    static func isAudio(fileName: String, mime: String) -> Bool {
+        if mime.lowercased().hasPrefix("audio/") { return true }
+        guard let type = UTType(filenameExtension: pathExtension(of: fileName)) else { return false }
+        return type.conforms(to: .audio)
+    }
+
     /// Empty for a name with no extension, so a bare name or a dotfile like
     /// `.gitignore` matches neither set.
     private static func pathExtension(of fileName: String) -> String {

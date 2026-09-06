@@ -141,6 +141,10 @@ struct ChatMessage: Identifiable, Equatable {
     var isVideo: Bool {
         mime.hasPrefix("video/") || MediaFileKind.isVideo(fileName: fileName)
     }
+
+    var isAudio: Bool {
+        MediaFileKind.isAudio(fileName: fileName, mime: mime)
+    }
 }
 
 @MainActor
@@ -336,6 +340,43 @@ final class AppModel: ObservableObject {
         ]
         navigation = unreadClearFixture ? [] : [conversation]
 
+        if env["DINO_UI_TEST_AUDIO"] == "1" {
+            // 24 seconds of mono 8 kHz PCM silence; no network or codec fixtures.
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("gecko-audio-fixture.wav")
+            var wav = Data()
+            func append(_ value: UInt32, bytes: Int) {
+                for offset in 0..<bytes { wav.append(UInt8(truncatingIfNeeded: value >> (offset * 8))) }
+            }
+            wav.append(contentsOf: "RIFF".utf8)
+            append(384_036, bytes: 4)
+            wav.append(contentsOf: "WAVEfmt ".utf8)
+            append(16, bytes: 4)
+            append(1, bytes: 2)
+            append(1, bytes: 2)
+            append(8_000, bytes: 4)
+            append(16_000, bytes: 4)
+            append(2, bytes: 2)
+            append(16, bytes: 2)
+            wav.append(contentsOf: "data".utf8)
+            append(384_000, bytes: 4)
+            wav.append(Data(count: 384_000))
+            let broken = url.deletingLastPathComponent().appendingPathComponent("gecko-broken-audio.wav")
+            do {
+                try wav.write(to: url)
+                try Data("not an audio file".utf8).write(to: broken)
+            } catch {
+                lastError = error.localizedDescription
+                return true
+            }
+            messages[conversation] = ["first.wav", "second.wav", "broken.wav"].enumerated().map { index, name in
+                ChatMessage(
+                    id: Int32(9_100 + index), content: "file", direction: index == 1 ? "out" : "in",
+                    from: "visibility@example.invalid", body: "", time: Date(), encryption: "NONE",
+                    fileName: name, mime: "application/octet-stream", size: wav.count,
+                    fileState: "complete", path: index == 2 ? broken.path : url.path)
+            }
+            return true
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self else { return }
             let start = Date(timeIntervalSince1970: 1_700_000_000)
