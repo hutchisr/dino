@@ -188,6 +188,17 @@ All desktop-neutral (defaults unchanged; GTK Dino still builds):
 * Vala cross-compiles cleanly: host `valac` emits C, Meson compiles it
   with the iOS clang. Watch for vala `char` being signed when doing
   byte-level work (see `esc()` in the bridge).
+* **Image upload memory**: `ImageFileMetadataProvider` reads dimensions before
+  decoding and omits the optional tiny thumbnail above 16,777,216 pixels
+  (64 MiB of RGBA pixels). The original file and its dimensions still upload;
+  no image resizing is applied. GdkPixbuf's PNG loader allocates the original
+  raster even when asked for a scaled image, so scaling alone is not a bound.
+  Metadata and hashing errors propagate to the send callback rather than
+  abandoning its async task. Swift staging drains autoreleased `FileHandle`
+  buffers per chunk; otherwise a chunked copy still retains a file's worth of
+  memory. After `build-core.sh catalyst-arm64`, run
+  `ios/build-catalyst-arm64/libdino/libdino-test -p /FileMetadata` for valid,
+  oversized, corrupt-image, and unreadable-hash regression coverage.
 
 ## Notification Service Extension (in progress)
 

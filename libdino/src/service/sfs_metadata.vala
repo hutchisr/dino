@@ -9,8 +9,8 @@ using Dino.Entities;
 
 namespace Dino {
     public interface FileMetadataProvider : Object {
-        public abstract bool supports_file(File file);
-        public abstract async void fill_metadata(File file, Xep.FileMetadataElement.FileMetadata metadata);
+        public abstract bool supports_file(File file) throws Error;
+        public abstract async void fill_metadata(File file, Xep.FileMetadataElement.FileMetadata metadata) throws Error;
     }
 
     class GenericFileMetadataProvider: Dino.FileMetadataProvider, Object {
@@ -18,7 +18,7 @@ namespace Dino {
             return true;
         }
 
-        public async void fill_metadata(File file, Xep.FileMetadataElement.FileMetadata metadata) {
+        public async void fill_metadata(File file, Xep.FileMetadataElement.FileMetadata metadata) throws Error {
             FileInfo info = file.query_info("*", FileQueryInfoFlags.NONE);
 
             metadata.name = info.get_display_name();
@@ -35,7 +35,7 @@ namespace Dino {
     }
 
     public class ImageFileMetadataProvider: Dino.FileMetadataProvider, Object {
-        public bool supports_file(File file) {
+        public bool supports_file(File file) throws Error {
             string mime_type = file.query_info("*", FileQueryInfoFlags.NONE).get_content_type();
             return Dino.Util.is_pixbuf_supported_mime_type(mime_type);
         }
@@ -43,11 +43,25 @@ namespace Dino {
         private const int[] THUMBNAIL_DIMS = { 1, 2, 3, 4, 8 };
         private const string IMAGE_TYPE = "png";
         private const string MIME_TYPE = "image/png";
+        // PNG's loader allocates the original raster even for scaled loads.
+        // Bound that optional work to 64 MiB of RGBA pixels, not compressed bytes.
+        private const int64 MAX_THUMBNAIL_PIXELS = 16 * 1024 * 1024;
 
-        public async void fill_metadata(File file, Xep.FileMetadataElement.FileMetadata metadata) {
+        public async void fill_metadata(File file, Xep.FileMetadataElement.FileMetadata metadata) throws Error {
+            string? path = file.get_path();
+            if (path == null) {
+                throw new IOError.NOT_SUPPORTED("Image metadata requires a local file");
+            }
+            int width, height;
+            unowned PixbufFormat? format = yield Pixbuf.get_file_info_async(path, null, out width, out height);
+            if (format == null || width <= 0 || height <= 0) {
+                throw new PixbufError.CORRUPT_IMAGE("Could not read image dimensions");
+            }
+            metadata.width = width;
+            metadata.height = height;
+            if ((int64) width * height > MAX_THUMBNAIL_PIXELS) return;
+
             Pixbuf pixbuf = new Pixbuf.from_stream(yield file.read_async());
-            metadata.width = pixbuf.get_width();
-            metadata.height = pixbuf.get_height();
             float ratio = (float)metadata.width / (float) metadata.height;
 
             int thumbnail_width = -1;

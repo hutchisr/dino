@@ -110,7 +110,7 @@ public static void internationalize(string gettext_package, string locales_dir) 
     Intl.bindtextdomain(gettext_package, locales_dir);
 }
 
-public static async HashMap<ChecksumType, string> compute_file_hashes(File file, Gee.List<ChecksumType> checksum_types) {
+public static async HashMap<ChecksumType, string> compute_file_hashes(File file, Gee.List<ChecksumType> checksum_types) throws Error {
     var checksums = new Checksum[checksum_types.size];
 
     for (int i = 0; i < checksum_types.size; i++) {

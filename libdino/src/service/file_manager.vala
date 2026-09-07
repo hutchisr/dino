@@ -86,15 +86,15 @@ public class FileManager : StreamInteractionModule, Object {
         file_transfer.local_time = new DateTime.now_utc();
         file_transfer.encryption = conversation.encryption;
 
-        Xep.FileMetadataElement.FileMetadata metadata = new Xep.FileMetadataElement.FileMetadata();
-        foreach (FileMetadataProvider file_metadata_provider in this.file_metadata_providers) {
-            if (file_metadata_provider.supports_file(file)) {
-                yield file_metadata_provider.fill_metadata(file, metadata);
-            }
-        }
-        file_transfer.file_metadata = metadata;
-
         try {
+            Xep.FileMetadataElement.FileMetadata metadata = new Xep.FileMetadataElement.FileMetadata();
+            foreach (FileMetadataProvider file_metadata_provider in this.file_metadata_providers) {
+                if (file_metadata_provider.supports_file(file)) {
+                    yield file_metadata_provider.fill_metadata(file, metadata);
+                }
+            }
+            file_transfer.file_metadata = metadata;
+
             file_transfer.input_stream = yield file.read_async();
 
             yield save_file(file_transfer);
@@ -108,7 +108,7 @@ public class FileManager : StreamInteractionModule, Object {
             received_file(file_transfer, conversation);
         } catch (Error e) {
             file_transfer.state = FileTransfer.State.FAILED;
-            warning("Error saving outgoing file: %s", e.message);
+            warning("Error preparing outgoing file: %s", e.message);
             return e.message;
         }
 

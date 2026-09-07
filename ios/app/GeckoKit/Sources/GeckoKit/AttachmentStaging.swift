@@ -219,11 +219,15 @@ enum AttachmentStaging {
 
             while true {
                 try checkCancellation(isCancelled)
-                guard let chunk = try input.read(upToCount: chunkByteCount),
-                      !chunk.isEmpty else {
-                    break
+                // FileHandle's bridged read buffers are autoreleased on Darwin.
+                // Drain each chunk rather than retaining an entire attachment.
+                let hasMore = try autoreleasepool {
+                    guard let chunk = try input.read(upToCount: chunkByteCount),
+                          !chunk.isEmpty else { return false }
+                    try output.write(contentsOf: chunk)
+                    return true
                 }
-                try output.write(contentsOf: chunk)
+                if !hasMore { break }
             }
             try checkCancellation(isCancelled)
         } catch is CancellationError {

@@ -96,3 +96,12 @@ dep_dino = declare_dependency(link_with: lib_dino, include_directories: include_
 
 install_data('dino.deps', install_dir: get_option('datadir') / 'vala/vapi', install_tag: 'devel') # TODO: workaround for https://github.com/mesonbuild/meson/issues/9756
 install_headers('src/dino_i18n.h')
+
+test_sources = files(
+    'tests/common.vala',
+    'tests/testcase.vala',
+    'tests/weak_map.vala',
+    'tests/file_metadata.vala',
+)
+exe_dino_test = executable('libdino-test', test_sources, c_args: c_args, dependencies: dependencies + dep_dino, install: false)
+test('Tests for libdino', exe_dino_test)
