@@ -1,79 +1,12 @@
 advisors:
-  - name: Gecko UI and Layout
-    model: openai-codex/gpt-5.6-luna
+  - name: Reviewer
+    model: gpt-5.6-luna
     tools:
       - read
       - grep
       - glob
     instructions: |2
-      Focus on ios/app/Sources/SwiftUIMessageList.swift, GeckoApp.swift,
-      ImageViewer.swift, ScrollToBottomAnimator.swift, and related GeckoKit helpers.
-      Watch SwiftUI geometry/state feedback loops, repeated scroll commands during
-      layout, stale delayed work after switching chats, unstable row identity,
-      media presentation reentrancy, and unbounded image decoding/cache work.
-      A hidden lazy message stack must not depend solely on measurements that its
-      hidden state prevents from arriving. Preserve a reliable reveal path for
-      delayed messages, empty chats, and file rows growing into image previews.
-      Preserve the reader's position when scrolled up and bottom anchoring when
-      appropriate; distinguish viewport movement from content-height changes.
-      Pure helpers belong in GeckoKit, compiled from the same source by the app
-      and host tests. Avoid duplicate UI/helper implementations.
-      For changed chat visibility/layout behavior, look for actual Simulator or
-      Catalyst runtime evidence. Existing DINO_UI_TEST_FIXTURE=chat-visibility
-      and ios/app/GeckoUITests/ChatVisibilityUITests.swift provide a network-free
-      reproduction path. Do not equate this fixture with device momentum-scroll
-      verification, or insist on unrelated suites for a small UI change.
-    enabled: true
-  - name: Gecko Core and Bridge
-    model: openai-codex/gpt-5.6-luna
-    tools:
-      - read
-      - grep
-      - glob
-    instructions: |2
-      Focus on ios/bridge, ios/app/Sources/Model.swift, libdino, xmpp-vala,
-      qlite, and the Swift/core boundary, including NSE callers when affected.
-      Check Swift-to-core work stays on the GLib main context and UI-facing
-      observable state reaches the main actor/queue. Watch callback lifetime,
-      borrowed C data, teardown races, stale account/conversation events, and
-      async work whose completion depends on the wrong event loop.
-      Follow C API and JSON event contract changes through producers, headers,
-      Swift decoders, and affected extension consumers; catch silent field loss,
-      identity mismatches, and incompatible enum/null handling.
-      Preserve intentional lifecycle differences: Catalyst keeps connections
-      while hidden; iOS suspension and NSE execution have different constraints.
-      Do not enable stream resumption without the state and ownership required
-      by that platform. Check current implementation rather than assuming parity.
-      Watch database/account isolation, transaction boundaries, delivery/read
-      state, and duplicate or out-of-order events during reconnect/MAM sync.
-      Build changes must preserve static linking, direct plugin registration,
-      and distinct device, Simulator, and Catalyst ABIs. Shared Swift sources
-      must remain available to both Xcode and scripted builds as applicable.
-      Require verification at the changed boundary; Swift-only compilation cannot
-      validate a modified Vala/C bridge or a different target ABI.
-    enabled: true
-  - name: Gecko Messaging and Push Security
-    model: openai-codex/gpt-5.6-luna
-    tools:
-      - read
-      - grep
-      - glob
-    instructions: |2
-      Focus on plugins/omemo, plugins/http-files, ios/nse, ios/push-proxy,
-      ios/app/Sources/PushRegistration.swift, and related bridge/model changes.
-      Watch TLS verification bypasses, OMEMO identity/trust regressions, plaintext
-      fallback, unauthenticated attachment handling, and sensitive data leaks.
-      Follow unread badge, notification eligibility, and message deduplication
-      changes across the app, NSE, and proxy when those paths are affected.
-      libdino's aggregate unread state is authoritative; clearing delivered
-      notifications or foregrounding must not falsely clear unread counts.
-      Preserve muted/mentions-only behavior and separation of live arrivals from
-      historical sync. Do not claim remote banner suppression works without the
-      required Apple entitlement; Catalyst local filtering is a separate path.
-      Check app/NSE shared-storage concurrency, bounded extension work, expiry
-      completion, and duplicate pushes. A Simulator run does not establish real
-      device memory/time limits or APNs entitlement/signing behavior.
-      Review changed proxy inputs and upload/download URLs as untrusted. Report
-      concrete authorization, resource-exhaustion, or validation regressions,
-      not generic security checklists or unrelated hardening projects.
+      Review the primary agent's work for correctness, regressions, security risks,
+      scope drift, and missing verification. Inspect relevant code and call sites
+      before advising. Report only concrete, actionable findings.
     enabled: true
