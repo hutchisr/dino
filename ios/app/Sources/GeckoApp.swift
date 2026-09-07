@@ -1314,6 +1314,43 @@ struct ContactsView: View {
     @State private var newJid = ""
     @State private var newAlias = ""
     @State private var search = ""
+#if targetEnvironment(macCatalyst)
+    private struct ContactSearchField: View {
+        @Binding var text: String
+
+        var body: some View {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+
+                TextField("Search contacts", text: $text)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+                .opacity(text.isEmpty ? 0 : 1)
+                .allowsHitTesting(!text.isEmpty)
+                .accessibilityLabel("Clear search")
+                .accessibilityHidden(text.isEmpty)
+            }
+            .padding(.leading, 8)
+            .padding(.trailing, 4)
+            .frame(width: 170, height: 30)
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+        }
+    }
+#endif
 
     private var filtered: [RosterContact] {
         if search.isEmpty { return model.roster }
@@ -1374,30 +1411,54 @@ struct ContactsView: View {
                     }
                 }
             }
+#if !targetEnvironment(macCatalyst)
             .searchable(text: $search, prompt: "Search contacts")
+#endif
             .navigationTitle("Contacts")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { model.requestBlocklist() }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
 #if targetEnvironment(macCatalyst)
+                ToolbarItem(placement: .cancellationAction) {
                     Button {
                         isPresented = false
                     } label: {
                         Image(systemName: "xmark")
+                            .padding(4)
                     }
                     .accessibilityLabel("Close")
-#else
-                    Button("Close") { isPresented = false }
-#endif
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         showAdd = true
                     } label: {
                         Image(systemName: "plus")
+                            .padding(4)
                     }
+                    .accessibilityLabel("Add Contact")
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.large)
                 }
+                .sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .primaryAction) {
+                    ContactSearchField(text: $search)
+                }
+#else
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { isPresented = false }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Add Contact", systemImage: "plus") {
+                        showAdd = true
+                    }
+                    .labelStyle(.iconOnly)
+                }
+#endif
             }
             .alert("Add contact", isPresented: $showAdd) {
                 TextField("user@example.org", text: $newJid)
