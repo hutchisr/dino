@@ -145,6 +145,14 @@ content margins and correcting afterward can briefly restore an estimated
 older row before snapping back. Disable resize anchoring while the user is
 scrolling or reading older messages; keep initial positioning explicit.
 
+Row visibility and history anchors are measured from passive UIKit row
+backgrounds during coalesced post-layout scroll work. Keep per-row SwiftUI
+`onGeometryChange`/scroll-visibility observers out of the lazy stack: Catalyst
+can loop in AttributeGraph row placement and coordinate-space resolution before
+observer actions run, so deferring those actions alone does not prevent a hang.
+The native probes are weakly registered and do not publish geometry into
+SwiftUI state during layout.
+
 ## Changes to the main tree
 
 All desktop-neutral (defaults unchanged; GTK Dino still builds):

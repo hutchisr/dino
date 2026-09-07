@@ -74,6 +74,36 @@ final class ChatVisibilityUITests: XCTestCase {
     }
 
 #if targetEnvironment(macCatalyst)
+    func testRepeatedHistoryScrollingRemainsResponsive() {
+        app.launchEnvironment["DINO_UI_TEST_COMPOSER"] = "1"
+        app.launch()
+        let newest = app.staticTexts["Newest fixture message"]
+        XCTAssertTrue(newest.waitForExistence(timeout: 5))
+        let messageList = app.descendants(matching: .any)["chat.messageList"]
+        let scrollDown = app.buttons["Scroll to latest messages"]
+        for distance in [500.0, 1_500, 3_000, 750, 2_000, 4_000] {
+            messageList.scroll(byDeltaX: 0, deltaY: distance)
+            XCTAssertTrue(scrollDown.waitForExistence(timeout: 3))
+            messageList.scroll(byDeltaX: 0, deltaY: -distance * 2)
+            let returnedToNewest = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in
+                    guard newest.exists, newest.isHittable else { return false }
+                    let gap = self.app.textViews.firstMatch.frame.minY - newest.frame.maxY
+                    return gap.isFinite && gap >= 0 && gap < 44
+                }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [returnedToNewest], timeout: 5), .completed)
+            assertNewestMessage(newest, remainsAbove: app.textViews.firstMatch)
+        }
+        let editor = app.textViews.firstMatch
+        editor.click()
+        editor.typeText("Still responsive")
+        XCTAssertEqual(editor.value as? String, "Still responsive")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Responsive chat after repeated history scrolling"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testAudioShareMenuAnchorsToClickedButton() {
         app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"
         app.launch()

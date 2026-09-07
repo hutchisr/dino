@@ -80,6 +80,10 @@ struct SwiftUIMessageList: View {
     /// instead of a fixed time that whips past from far up).
     @State private var metrics = ScrollMetrics()
 
+    private struct MessageView {
+        weak var view: UIView?
+    }
+
     /// Mutable scroll metrics kept OUT of `@State`-tracked value storage so
     /// per-frame writes don't re-render the list.
     private final class ScrollMetrics {
@@ -91,7 +95,7 @@ struct SwiftUIMessageList: View {
         var topVisibleMessageID: Int32?
         var fullyVisibleMessageID: Int32?
         var newestRowVisible = false
-        var messageFrames: [Int32: CGRect] = [:]
+        var messageViews: [Int32: MessageView] = [:]
         var containerHeight: CGFloat = 0
         var newestMessageID: Int32?
         var awaitingHistoryRestoreGeometry = false
@@ -112,6 +116,18 @@ struct SwiftUIMessageList: View {
 
         var isBottomScrollAnimating: Bool {
             bottomScrollAnimator.isAnimating
+        }
+
+        /// Read UIKit's committed frames only from the deferred scroll sample.
+        /// Per-row SwiftUI geometry transforms can keep Catalyst's lazy layout
+        /// updating forever before any geometry action or main-actor task runs.
+        @MainActor
+        func messageFrame(_ id: Int32) -> CGRect? {
+            guard let view = messageViews[id]?.view,
+                  view.window != nil,
+                  let scrollView else { return nil }
+            return view.convert(view.bounds, to: scrollView)
+                .offsetBy(dx: -scrollView.bounds.minX, dy: -scrollView.bounds.minY)
         }
 
         /// Coalesces bottom-scroll requests onto one post-layout task. A higher
@@ -257,7 +273,6 @@ struct SwiftUIMessageList: View {
         let refreshViewportAnchor: Bool
     }
 
-    private static let scrollCoordinateSpace = "SwiftUIMessageList.scroll"
     private static let bottomAnchorID = "SwiftUIMessageList.bottom"
 
     /// Slack (points) for the at-bottom test so the button doesn't flicker at
@@ -332,7 +347,6 @@ struct SwiftUIMessageList: View {
                 }
             }
             .accessibilityIdentifier("chat.messageList")
-            .coordinateSpace(.named(Self.scrollCoordinateSpace))
             .scrollDismissesKeyboard(.interactively)
             // Keep the resize itself bottom-anchored. Correcting it afterward
             // lets LazyVStack briefly restore an older estimated row when the
@@ -542,7 +556,7 @@ struct SwiftUIMessageList: View {
             metrics.containerHeight - max(0, visualBottomInset))
         var visibility = MessageViewportVisibility()
         for message in messages {
-            guard let frame = metrics.messageFrames[message.id] else { continue }
+            guard let frame = metrics.messageFrame(message.id) else { continue }
             visibility.observe(
                 messageID: message.id,
                 minY: Double(frame.minY),
@@ -559,7 +573,6 @@ struct SwiftUIMessageList: View {
         LazyVStack(spacing: 0) {
             messageRows(proxy)
         }
-        .scrollTargetLayout()
     }
 
     private func messageRows(_ proxy: ScrollViewProxy) -> some View {
@@ -568,26 +581,15 @@ struct SwiftUIMessageList: View {
                 .id(row.msg.id)
                 .accessibilityIdentifier("chat.message.\(row.msg.id)")
                 .background {
-                    Color.clear
-                        .onGeometryChange(
-                            for: CGRect.self,
-                            of: { proxy in
-                                proxy.frame(in: .named(Self.scrollCoordinateSpace))
-                            },
-                            action: { frame in
-                                guard metrics.messageFrames[row.msg.id] != frame else { return }
-                                metrics.messageFrames[row.msg.id] = frame
-                                guard let sample = metrics.latestScrollSample else { return }
-                                metrics.scheduleScrollSample(
-                                    sample,
-                                    delay: Self.scrollSampleSettleDelay
-                                ) { sample in
-                                    processScrollSample(sample, proxy: proxy)
-                                }
-                            })
-                }
-                .onDisappear {
-                    metrics.messageFrames[row.msg.id] = nil
+                    MessageFrameResolver(metrics: metrics, messageID: row.msg.id) {
+                        guard let sample = metrics.latestScrollSample else { return }
+                        metrics.scheduleScrollSample(
+                            sample,
+                            delay: Self.scrollSampleSettleDelay
+                        ) { sample in
+                            processScrollSample(sample, proxy: proxy)
+                        }
+                    }
                 }
                 .transition(rowInsertionTransition)
         }
@@ -864,7 +866,7 @@ struct SwiftUIMessageList: View {
     private func currentHistoryViewportAnchor() -> HistoryViewportAnchor? {
         let messageID = metrics.fullyVisibleMessageID ?? metrics.topVisibleMessageID
         if let messageID,
-           let frame = metrics.messageFrames[messageID] {
+           let frame = metrics.messageFrame(messageID) {
             let viewportMinY = max(0, visualTopInset)
             let viewportHeight = max(
                 0,
@@ -1031,6 +1033,60 @@ struct SwiftUIMessageList: View {
             key = nextKey
             cachedRows = output
             return output
+        }
+    }
+
+    /// A passive native background replaces per-row AttributeGraph observers.
+    /// It only queues the existing post-layout sample; measuring never feeds
+    /// scroll-relative geometry back into lazy row placement.
+    private struct MessageFrameResolver: UIViewRepresentable {
+        let metrics: ScrollMetrics
+        let messageID: Int32
+        let onLayout: () -> Void
+
+        func makeUIView(context _: Context) -> MessageFrameProbe {
+            let view = MessageFrameProbe(metrics: metrics, messageID: messageID)
+            metrics.messageViews[messageID] = .init(view: view)
+            return view
+        }
+
+        func updateUIView(_ view: MessageFrameProbe, context _: Context) {
+            view.onLayout = onLayout
+        }
+
+        static func dismantleUIView(_ view: MessageFrameProbe, coordinator _: ()) {
+            if view.metrics.messageViews[view.messageID]?.view === view {
+                view.metrics.messageViews[view.messageID] = nil
+            }
+            view.onLayout = nil
+        }
+    }
+
+    private final class MessageFrameProbe: UIView {
+        let metrics: ScrollMetrics
+        let messageID: Int32
+        var onLayout: (() -> Void)?
+
+        init(metrics: ScrollMetrics, messageID: Int32) {
+            self.metrics = metrics
+            self.messageID = messageID
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) is unavailable")
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            if window != nil { onLayout?() }
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window != nil { onLayout?() }
         }
     }
 
