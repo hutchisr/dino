@@ -133,10 +133,46 @@ Catalyst and completing/reopening the share sheet on iOS. Save and share use
 matching plain SwiftUI buttons with adjoining 44-point tap targets. An invisible
 UIKit view behind share supplies the popover anchor, avoiding both Catalyst's
 native button bezel and `ShareLink`'s inferred geometry inside a scrolling chat.
-For Catalyst XCTest, a fresh derived-data directory with
-`CODE_SIGN_IDENTITY="Apple Development"` and `ENABLE_HARDENED_RUNTIME=NO`
-avoids the test runner being killed before bootstrapping on the current host;
-these are test-command overrides, not release signing settings.
+
+Run the complete Catalyst UI suite (including the shared media/scroll tests and
+`CatalystInteractionUITests`) on an unlocked Mac desktop:
+
+```sh
+xcodebuild test -project Gecko.xcodeproj -scheme Gecko \
+  -destination 'platform=macOS,variant=Mac Catalyst,arch=arm64' \
+  -derivedDataPath /tmp/GeckoCatalystUITests \
+  -resultBundlePath /tmp/GeckoCatalystUITests.xcresult \
+  -parallel-testing-enabled NO \
+  CODE_SIGN_IDENTITY="Apple Development" DEVELOPMENT_TEAM=998J34UYP5 \
+  ENABLE_HARDENED_RUNTIME=NO
+```
+
+Choose unused output paths for a fresh run. A local Apple Development identity
+and team are required; the team override restores the value cleared by the
+normal ad-hoc Catalyst app configuration. The identity/hardened-runtime
+overrides avoid the test runner being killed before bootstrapping on the current
+host. These are test-command overrides, not release signing settings. Keep UI
+runners serial: the keyboard, Dock, clipboard, and native dialogs are shared.
+
+The desktop-only interaction tests reuse the account-free `chat-visibility`
+fixture. They cover main-window close/Dock reopen and app hide/activation with
+draft preservation, composer autofocus and Return versus Shift-Return,
+Command-N Contacts and cancellation, Command-comma Settings and Escape,
+text Copy/Reply cancellation, and repeated secondary-media-window closure.
+Composer submission checks local draft/focus behavior, not XMPP delivery.
+Native window counts use direct application children because Catalyst also
+exposes nested UIKit accessibility windows. Reopening the closed main window
+uses the newly launched test app's Dock icon; `XCUIApplication.activate()` alone
+does not deliver the native reopen event.
+
+Catalyst Contacts uses a native `UISearchTextField` so clearing updates both the
+visible editor and the search binding. Its regression in `ChatVisibilityUITests`
+checks two clear cycles with screenshot OCR of the restored placeholder, then
+checks that subsequent typing starts empty; an empty accessibility value alone
+can miss stale rendered text. The GIF/WebP tests likewise inspect actual pixels:
+screenshots are sampled directly within a deadline instead of a predicate
+waiter. This removes the waiter that interrupted an in-flight accessibility
+snapshot during verification; screenshot/decode errors still fail the test.
 
 The chat's composer clearance lives in the non-lazy bottom anchor, not a bottom
 content margin. Together with `.defaultScrollAnchor(..., for: .sizeChanges)`,

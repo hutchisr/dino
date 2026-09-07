@@ -1307,6 +1307,56 @@ struct SubscriptionRequestRow: View {
     }
 }
 
+#if targetEnvironment(macCatalyst)
+private struct ContactSearchField: UIViewRepresentable {
+    @Binding var text: String
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> UISearchTextField {
+        let field = UISearchTextField()
+        field.placeholder = "Search contacts"
+        field.accessibilityLabel = "Search contacts"
+        field.autocorrectionType = .no
+        field.autocapitalizationType = .none
+        field.clearButtonMode = .always
+        field.delegate = context.coordinator
+        field.addTarget(context.coordinator, action: #selector(Coordinator.textChanged(_:)), for: .editingChanged)
+        return field
+    }
+
+    func updateUIView(_ uiView: UISearchTextField, context: Context) {
+        context.coordinator.parent = self
+        if uiView.text != text {
+            uiView.text = text
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UISearchTextField, context: Context) -> CGSize? {
+        CGSize(width: 170, height: 30)
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: ContactSearchField
+
+        init(_ parent: ContactSearchField) {
+            self.parent = parent
+        }
+
+        @objc func textChanged(_ field: UITextField) {
+            parent.text = field.text ?? ""
+        }
+
+        func textFieldShouldClear(_ textField: UITextField) -> Bool {
+            parent.text = ""
+            return true
+        }
+    }
+}
+#endif
+
 struct ContactsView: View {
     @EnvironmentObject var model: AppModel
     @Binding var isPresented: Bool
@@ -1314,43 +1364,6 @@ struct ContactsView: View {
     @State private var newJid = ""
     @State private var newAlias = ""
     @State private var search = ""
-#if targetEnvironment(macCatalyst)
-    private struct ContactSearchField: View {
-        @Binding var text: String
-
-        var body: some View {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-
-                TextField("Search contacts", text: $text)
-                    .textFieldStyle(.plain)
-                    .autocorrectionDisabled()
-
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 18, height: 18)
-                }
-                .buttonStyle(.plain)
-                .frame(width: 22, height: 22)
-                .contentShape(Rectangle())
-                .opacity(text.isEmpty ? 0 : 1)
-                .allowsHitTesting(!text.isEmpty)
-                .accessibilityLabel("Clear search")
-                .accessibilityHidden(text.isEmpty)
-            }
-            .padding(.leading, 8)
-            .padding(.trailing, 4)
-            .frame(width: 170, height: 30)
-            .contentShape(RoundedRectangle(cornerRadius: 7))
-        }
-    }
-#endif
 
     private var filtered: [RosterContact] {
         if search.isEmpty { return model.roster }

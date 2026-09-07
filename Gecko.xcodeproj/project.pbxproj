@@ -49,6 +49,7 @@
 		F17E00000000000000000005 /* FileTransferProgressRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17E00000000000000000006 /* FileTransferProgressRow.swift */; };
 		C10000000000000000000001 /* InitialViewportReveal.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000011 /* InitialViewportReveal.swift */; };
 		C10000000000000000000002 /* ChatVisibilityUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000012 /* ChatVisibilityUITests.swift */; };
+		C20000000000000000000001 /* CatalystInteractionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* CatalystInteractionUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -134,6 +135,7 @@
 		EECED66A6D7B48228F265456 /* NSEFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NSEFetcher.swift; sourceTree = "<group>"; };
 		C10000000000000000000011 /* InitialViewportReveal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InitialViewportReveal.swift; sourceTree = "<group>"; };
 		C10000000000000000000012 /* ChatVisibilityUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatVisibilityUITests.swift; sourceTree = "<group>"; };
+		C20000000000000000000002 /* CatalystInteractionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalystInteractionUITests.swift; sourceTree = "<group>"; };
 		C10000000000000000000013 /* GeckoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GeckoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -246,6 +248,7 @@
 			isa = PBXGroup;
 			children = (
 				C10000000000000000000012 /* ChatVisibilityUITests.swift */,
+				C20000000000000000000002 /* CatalystInteractionUITests.swift */,
 			);
 			path = GeckoUITests;
 			sourceTree = "<group>";
@@ -462,6 +465,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C10000000000000000000002 /* ChatVisibilityUITests.swift in Sources */,
+				C20000000000000000000001 /* CatalystInteractionUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

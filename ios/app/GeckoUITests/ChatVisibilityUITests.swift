@@ -1,5 +1,8 @@
 import XCTest
 import UIKit
+#if targetEnvironment(macCatalyst)
+import Vision
+#endif
 
 final class ChatVisibilityUITests: XCTestCase {
     private var app: XCUIApplication!
@@ -40,13 +43,15 @@ final class ChatVisibilityUITests: XCTestCase {
         for _ in 0..<2 {
             preview.tap()
             XCTAssertEqual(preview.label, "Pause animated \(format)")
-            // Observe actual changing pixels, not just the playback button label.
-            let changesFrame = NSPredicate { [self] _, _ in
-                guard let rgb = try? screenshotCenterRGB(in: preview.screenshot()) else { return false }
-                return abs(rgb.red - still.red) + abs(rgb.blue - still.blue) > 150
-            }
-            let changing = XCTNSPredicateExpectation(predicate: changesFrame, object: nil)
-            XCTAssertEqual(XCTWaiter.wait(for: [changing], timeout: 5), .completed)
+            // Sample actual pixels directly: a predicate wait polls too slowly
+            // for this short loop and can interrupt an in-flight AX screenshot.
+            let deadline = Date().addingTimeInterval(5)
+            var changedFrame = false
+            repeat {
+                let rgb = try screenshotCenterRGB(in: preview.screenshot())
+                changedFrame = abs(rgb.red - still.red) + abs(rgb.blue - still.blue) > 150
+            } while !changedFrame && Date() < deadline
+            XCTAssertTrue(changedFrame, "Animated \(format) never displayed a different frame")
             XCTAssertEqual(preview.frame, frame, "Playback must stay inside the original chat row")
             XCTAssertFalse(app.descendants(matching: .any)["media.preview"].exists)
             preview.tap()
@@ -74,6 +79,43 @@ final class ChatVisibilityUITests: XCTestCase {
     }
 
 #if targetEnvironment(macCatalyst)
+    func testContactsSearchClearRestoresVisiblePlaceholder() throws {
+        app.launchEnvironment["DINO_UI_TEST_COMPOSER"] = "1"
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts["Newest fixture message"].waitForExistence(timeout: 5))
+        app.typeKey("n", modifierFlags: .command)
+        let search = app.textFields["Search contacts"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        let placeholderText = search.label
+        search.click()
+
+        for query in ["person@example.invalid", "another contact"] {
+            search.typeText(query)
+            XCTAssertEqual(search.value as? String, query)
+            let clear = search.buttons["Clear text"]
+            XCTAssertTrue(clear.waitForExistence(timeout: 2))
+            clear.click()
+
+            // The editor can report an empty AX value while stale glyphs remain
+            // on screen. Read the rendered placeholder, not just that value.
+            let screenshot = search.screenshot()
+            let attachment = XCTAttachment(screenshot: screenshot)
+            attachment.name = "Contacts search after clearing"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.recognitionLanguages = ["en-US"]
+            request.usesLanguageCorrection = false
+            try VNImageRequestHandler(data: screenshot.pngRepresentation).perform([request])
+            let renderedText = request.results?.compactMap { $0.topCandidates(1).first?.string } ?? []
+            XCTAssertTrue(renderedText.contains { $0.contains(placeholderText) }, "Rendered text: \(renderedText)")
+        }
+        search.typeText("fresh query")
+        XCTAssertEqual(search.value as? String, "fresh query")
+    }
+
     func testRepeatedHistoryScrollingRemainsResponsive() {
         app.launchEnvironment["DINO_UI_TEST_COMPOSER"] = "1"
         app.launch()
