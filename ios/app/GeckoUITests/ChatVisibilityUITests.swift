@@ -408,6 +408,33 @@ final class ChatVisibilityUITests: XCTestCase {
         waitForExpectations(timeout: 3)
     }
 
+    func testNotificationRouteBeforeReadyClearsUnreadBadge() {
+        app.launchEnvironment["DINO_UI_TEST_UNREAD_CLEAR"] = "1"
+        app.launchEnvironment["DINO_UI_TEST_DELAYED_ROUTE"] = "1"
+        app.launchEnvironment["DINO_UI_TEST_OPEN_JID"] = "visibility@example.invalid"
+        app.launchEnvironment["DINO_UI_TEST_COMPOSER"] = "1"
+        app.launch()
+
+        let unread = app.staticTexts["conversation.unread.9001"]
+        XCTAssertTrue(
+            unread.waitForExistence(timeout: 3),
+            "The delayed authoritative snapshot never exposed its unread badge")
+
+        XCTAssertTrue(
+            app.staticTexts["Newest fixture message"].waitForExistence(timeout: 5),
+            "The pending notification route never opened its conversation")
+
+#if !targetEnvironment(macCatalyst)
+        let back = app.navigationBars.buttons.firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 3), "The conversation did not expose back navigation")
+        back.tap()
+#endif
+
+        let cleared = NSPredicate(format: "exists == false")
+        expectation(for: cleared, evaluatedWith: unread)
+        waitForExpectations(timeout: 3)
+    }
+
     private func screenshotCenterRGB(
         in screenshot: XCUIScreenshot
     ) throws -> (red: Int, green: Int, blue: Int) {

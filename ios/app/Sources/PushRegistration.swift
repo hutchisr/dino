@@ -30,6 +30,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // Must be set before launch finishes to receive notification responses.
         UNUserNotificationCenter.current().delegate = self
+#if DEBUG
+        let env = ProcessInfo.processInfo.environment
+        if env["DINO_UI_TEST_FIXTURE"] != nil,
+           let jid = env["DINO_UI_TEST_OPEN_JID"],
+           !jid.isEmpty {
+            Self.pendingOpenJid = jid
+        }
+#endif
 #if targetEnvironment(macCatalyst)
         let searchBar = UISearchBar.appearance()
         let searchContentOffset = UIOffset(horizontal: 0, vertical: 3)

@@ -191,7 +191,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var isUITestFixture = false
     @Published private(set) var uiTestImageSettled = false
 
-    private var pendingChatJid: String?
+    private var directChatRoute = DirectChatRouteState()
     private var queuedMucInvites: [MucInvitation] = []
     private var acceptingMucInvite: MucInvitation?
     private var autoMucInviteFailure: (conversation: Int32, invitee: String)?
@@ -214,6 +214,7 @@ final class AppModel: ObservableObject {
     private var booted = false
     private var applicationIsActive = false
     private var uiTestClearsUnreadOnFocus = false
+    private var uiTestDelaysDirectRouteAction = false
     private var conversationFocus = ConversationFocusState()
 
     var hasAccount: Bool { !accounts.isEmpty }
@@ -325,20 +326,32 @@ final class AppModel: ObservableObject {
         let uploadImageFixture = env["DINO_UI_TEST_UPLOAD_IMAGE"] == "1"
         let progressFixture = env["DINO_UI_TEST_UPLOAD_PROGRESS"] == "1" || uploadImageFixture
         let unreadClearFixture = env["DINO_UI_TEST_UNREAD_CLEAR"] == "1"
+        let delayedRouteFixture = env["DINO_UI_TEST_DELAYED_ROUTE"] == "1"
         let conversation: Int32 = 9001
         isUITestFixture = true
         uiTestClearsUnreadOnFocus = unreadClearFixture
-        ready = true
+        uiTestDelaysDirectRouteAction = delayedRouteFixture
+        ready = !delayedRouteFixture
         accounts = [XmppAccount(id: "fixture@example.invalid", state: "connected")]
-        conversations = [
+        let conversationSnapshot = [
             XmppConversation(
                 id: conversation,
                 jid: "visibility@example.invalid",
                 name: "Visibility Regression",
                 encryption: "NONE",
-                unread: unreadClearFixture ? 3 : 0)
+                unread: unreadClearFixture ? 3 : 0),
         ]
-        navigation = unreadClearFixture ? [] : [conversation]
+        if delayedRouteFixture {
+            navigation = []
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                guard let self else { return }
+                self.ready = true
+                self.updateConversations(conversationSnapshot)
+            }
+        } else {
+            updateConversations(conversationSnapshot)
+            navigation = unreadClearFixture ? [] : [conversation]
+        }
 
         if let encoded = env["DINO_UI_TEST_IMAGE_DATA"],
            let data = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters) {
@@ -582,7 +595,7 @@ final class AppModel: ObservableObject {
                 }
                 updated[index].unread = 0
             }
-            conversations = updated
+            updateConversations(updated)
             return
         }
         for action in actions {
@@ -591,6 +604,34 @@ final class AppModel: ObservableObject {
                 GeckoCore.shared.blurConversation(id)
             case .focus(let id):
                 GeckoCore.shared.focusConversation(id)
+            }
+        }
+    }
+
+    private func updateConversations(_ updated: [XmppConversation]) {
+        conversations = updated
+        let matchingConversation = directChatRoute.pendingJid.flatMap { jid in
+            updated.first(where: { $0.jid == jid })?.id
+        }
+        let actions = directChatRoute.conversationsUpdated(
+            matchingConversation: matchingConversation)
+        guard uiTestDelaysDirectRouteAction, !actions.isEmpty else {
+            applyDirectChatRoute(actions)
+            return
+        }
+        uiTestDelaysDirectRouteAction = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            self?.applyDirectChatRoute(actions)
+        }
+    }
+
+    private func applyDirectChatRoute(_ actions: [DirectChatRouteAction]) {
+        for action in actions {
+            switch action {
+            case .navigate(let id):
+                replaceNavigation(with: [id])
+            case .startConversation(let jid):
+                startConversation(jid: jid)
             }
         }
     }
@@ -752,12 +793,11 @@ final class AppModel: ObservableObject {
     func setSendMarker(_ on: Bool) { sendMarker = on; GeckoCore.shared.setSendMarker(on) }
 
     func openChat(with jid: String) {
-        if let existing = conversations.first(where: { $0.jid == jid }) {
-            replaceNavigation(with: [existing.id])
-        } else {
-            pendingChatJid = jid
-            startConversation(jid: jid)
-        }
+        let matchingConversation = conversations.first(where: { $0.jid == jid })?.id
+        applyDirectChatRoute(
+            directChatRoute.request(
+                jid: jid,
+                matchingConversation: matchingConversation))
     }
 
     func addContact(jid: String, alias: String?) {
@@ -881,6 +921,7 @@ final class AppModel: ObservableObject {
             passwordChanged = true
         case "signed_out":
             accounts = []
+            directChatRoute = DirectChatRouteState()
             conversations = []
             messages = [:]
             messageRevisions = [:]
@@ -930,7 +971,7 @@ final class AppModel: ObservableObject {
             geckoDebugLog("Gecko: connection error (%@)", e["source"] as? String ?? "?")
         case "conversations":
             if let list = e["list"] as? [[String: Any]] {
-                conversations = list.compactMap { c in
+                let updated = list.compactMap { c -> XmppConversation? in
                     guard let id = c["id"] as? Int, let jid = c["jid"] as? String else { return nil }
                     return XmppConversation(
                         id: Int32(id), jid: jid,
@@ -944,11 +985,7 @@ final class AppModel: ObservableObject {
                         time: Date(timeIntervalSince1970: TimeInterval(c["time"] as? Int ?? 0)),
                         notifyEffective: c["notify_effective"] as? String ?? "on")
                 }.sorted { $0.time > $1.time }
-                if let pending = pendingChatJid,
-                   let conv = conversations.first(where: { $0.jid == pending }) {
-                    pendingChatJid = nil
-                    replaceNavigation(with: [conv.id])
-                }
+                updateConversations(updated)
             }
         case "confirm_create_muc":
             if let jid = e["jid"] as? String {

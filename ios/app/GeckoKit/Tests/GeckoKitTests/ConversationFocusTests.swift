@@ -34,4 +34,42 @@ final class ConversationFocusTests: XCTestCase {
 
         XCTAssertEqual(state.transition(to: 7), [])
     }
+
+    func testDirectRouteWaitsForInitialConversationSnapshot() {
+        var state = DirectChatRouteState()
+
+        XCTAssertEqual(
+            state.request(jid: "friend@example.com", matchingConversation: nil),
+            [])
+        XCTAssertEqual(
+            state.conversationsUpdated(matchingConversation: 42),
+            [.navigate(42)])
+        XCTAssertNil(state.pendingJid)
+    }
+
+    func testDirectRouteStartsMissingConversationOnlyOnce() {
+        var state = DirectChatRouteState()
+
+        XCTAssertEqual(
+            state.request(jid: "friend@example.com", matchingConversation: nil),
+            [])
+        XCTAssertEqual(
+            state.conversationsUpdated(matchingConversation: nil),
+            [.startConversation("friend@example.com")])
+        XCTAssertEqual(
+            state.conversationsUpdated(matchingConversation: nil),
+            [])
+        XCTAssertEqual(
+            state.conversationsUpdated(matchingConversation: 42),
+            [.navigate(42)])
+    }
+
+    func testDirectRouteUsesLatestAuthoritativeSnapshotImmediately() {
+        var state = DirectChatRouteState()
+        _ = state.conversationsUpdated(matchingConversation: nil)
+
+        XCTAssertEqual(
+            state.request(jid: "friend@example.com", matchingConversation: 42),
+            [.navigate(42)])
+    }
 }
