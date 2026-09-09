@@ -14,7 +14,7 @@ struct ReactionSheet: View {
     @State private var detent: PresentationDetent = .fraction(0.45)
     @FocusState private var searchFocused: Bool
 
-    private struct EmojiItem: Identifiable {
+    private struct EmojiItem: Identifiable, Equatable {
         let emoji: String
         let name: String
         var id: String { emoji }
@@ -66,6 +66,8 @@ struct ReactionSheet: View {
     }
 
     var body: some View {
+        let items = filteredEmojis
+
         NavigationStack {
             VStack(spacing: 12) {
                 HStack(spacing: 10) {
@@ -114,13 +116,28 @@ struct ReactionSheet: View {
 
                 searchBar
 
+#if targetEnvironment(macCatalyst)
+                if items.isEmpty {
+                    ScrollView {
+                        ContentUnavailableView.search(text: search)
+                            .padding(.top, 24)
+                    }
+                    .background(Color(uiColor: .systemBackground))
+                    .scrollDismissesKeyboard(.immediately)
+                } else {
+                    CatalystEmojiGrid(items: items) { emoji in
+                        onReact(emoji)
+                        dismiss()
+                    }
+                }
+#else
                 ScrollView {
-                    if filteredEmojis.isEmpty {
+                    if items.isEmpty {
                         ContentUnavailableView.search(text: search)
                             .padding(.top, 24)
                     } else {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 40))], spacing: 6) {
-                            ForEach(filteredEmojis) { item in
+                            ForEach(items) { item in
                                 Button {
                                     onReact(item.emoji)
                                     dismiss()
@@ -128,21 +145,14 @@ struct ReactionSheet: View {
                                     Text(item.emoji).font(.system(size: 30))
                                 }
                                 .accessibilityLabel(item.name)
-#if targetEnvironment(macCatalyst)
-                                .buttonStyle(.plain)
-#endif
                             }
                         }
                         .padding(.horizontal, 12)
                     }
                 }
-#if targetEnvironment(macCatalyst)
-                // Wheel events require a rendered native hit-test surface; a
-                // contentShape alone does not cover transparent grid gaps.
-                .background(Color(uiColor: .systemBackground))
-#endif
                 // Dismiss the keyboard when the user starts scrolling the grid.
                 .scrollDismissesKeyboard(.immediately)
+#endif
             }
 #if !targetEnvironment(macCatalyst)
             .padding(.top, 25)
@@ -202,4 +212,129 @@ struct ReactionSheet: View {
         .background(Color(.systemGray6), in: Capsule())
         .padding(.horizontal, 12)
     }
+
+#if targetEnvironment(macCatalyst)
+    private struct CatalystEmojiGrid: UIViewRepresentable {
+        let items: [EmojiItem]
+        let onSelect: (String) -> Void
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator(self)
+        }
+
+        func makeUIView(context: Context) -> UICollectionView {
+            let view = UICollectionView(frame: .zero, collectionViewLayout: GridLayout())
+            // An opaque native surface also receives wheel events in the gaps
+            // between cells and below short search results.
+            view.backgroundColor = .systemBackground
+            view.isOpaque = true
+            view.keyboardDismissMode = .onDrag
+            view.contentInsetAdjustmentBehavior = .never
+            view.alwaysBounceVertical = true
+            view.allowsSelection = false
+            view.register(EmojiCell.self, forCellWithReuseIdentifier: EmojiCell.reuseIdentifier)
+            view.dataSource = context.coordinator
+            return view
+        }
+
+        func updateUIView(_ uiView: UICollectionView, context: Context) {
+            let itemsChanged = context.coordinator.parent.items != items
+            // Visible buttons always call the latest SwiftUI action, even when
+            // the catalog did not change and their cells are not reconfigured.
+            context.coordinator.parent = self
+            guard itemsChanged else { return }
+            uiView.reloadData()
+            uiView.setContentOffset(.zero, animated: false)
+        }
+
+        final class Coordinator: NSObject, UICollectionViewDataSource {
+            var parent: CatalystEmojiGrid
+
+            init(_ parent: CatalystEmojiGrid) {
+                self.parent = parent
+            }
+
+            func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+                parent.items.count
+            }
+
+            func collectionView(
+                _ collectionView: UICollectionView,
+                cellForItemAt indexPath: IndexPath
+            ) -> UICollectionViewCell {
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: EmojiCell.reuseIdentifier,
+                    for: indexPath
+                ) as! EmojiCell
+                cell.configure(parent.items[indexPath.item]) { [weak self] emoji in
+                    self?.parent.onSelect(emoji)
+                }
+                return cell
+            }
+        }
+
+        final class EmojiCell: UICollectionViewCell {
+            static let reuseIdentifier = "ReactionEmoji"
+            private let button = UIButton(type: .custom)
+            private var emoji = ""
+            private var onSelect: ((String) -> Void)?
+
+            override init(frame: CGRect) {
+                super.init(frame: frame)
+                button.titleLabel?.font = .systemFont(ofSize: 30)
+                button.frame = contentView.bounds
+                button.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                button.addTarget(self, action: #selector(selectEmoji), for: .touchUpInside)
+                contentView.addSubview(button)
+            }
+
+            required init?(coder: NSCoder) {
+                fatalError("init(coder:) has not been implemented")
+            }
+
+            func configure(_ item: EmojiItem, onSelect: @escaping (String) -> Void) {
+                emoji = item.emoji
+                self.onSelect = onSelect
+                button.setTitle(item.emoji, for: .normal)
+                button.accessibilityLabel = item.name
+            }
+
+            @objc private func selectEmoji() {
+                onSelect?(emoji)
+            }
+        }
+
+        final class GridLayout: UICollectionViewFlowLayout {
+            override init() {
+                super.init()
+                minimumInteritemSpacing = 6
+                minimumLineSpacing = 6
+                sectionInset = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
+                estimatedItemSize = .zero
+            }
+
+            required init?(coder: NSCoder) {
+                fatalError("init(coder:) has not been implemented")
+            }
+
+            override func prepare() {
+                if let collectionView {
+                    let width = max(0, collectionView.bounds.width - sectionInset.left - sectionInset.right)
+                    let columns = max(1, floor((width + minimumInteritemSpacing) / (40 + minimumInteritemSpacing)))
+                    let cellWidth = (width - (columns - 1) * minimumInteritemSpacing) / columns
+                    let scale = collectionView.traitCollection.displayScale
+                    let size = CGSize(width: floor(cellWidth * scale) / scale, height: 36)
+                    if itemSize != size {
+                        itemSize = size
+                    }
+                }
+                super.prepare()
+            }
+
+            override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
+                newBounds.width != collectionView?.bounds.width
+            }
+        }
+    }
+#endif
 }

@@ -176,6 +176,80 @@ final class CatalystInteractionUITests: XCTestCase {
         XCTAssertEqual(editor.value as? String, "Reply draft", "Cancelling a reply discarded the draft")
     }
 
+    func testCustomReactionPickerSearchToggleAndCancelPreserveDraft() {
+        launchChat()
+        editor.click()
+        editor.typeText("Draft behind reactions")
+        let message = app.staticTexts["Newest fixture message"]
+        let search = app.textFields["Search emoji"]
+        let close = app.buttons["Close"]
+        let hedgehog = app.buttons["hedgehog"].firstMatch
+        let grinningFace = app.buttons["grinning face"].firstMatch
+        let reaction = app.buttons["🦔 1"]
+
+        func openPicker() {
+            message.rightClick()
+            let more = chatWindow.menus.firstMatch.menuItems["Reactions and More…"]
+            XCTAssertTrue(more.waitForExistence(timeout: 3))
+            more.click()
+            XCTAssertTrue(search.waitForExistence(timeout: 3))
+            XCTAssertTrue(close.exists)
+        }
+
+        openPicker()
+        for name in [
+            "thumbs up", "red heart", "face with tears of joy", "face with open mouth",
+            "crying face", "fire", "party popper", "lizard",
+        ] {
+            XCTAssertTrue(app.buttons[name].firstMatch.isHittable, "Missing quick reaction: \(name)")
+        }
+        XCTAssertTrue(app.buttons["Reply"].isHittable)
+        XCTAssertTrue(app.buttons["Copy"].isHittable)
+        XCTAssertFalse(app.buttons["Edit"].exists, "An incoming message must not offer editing")
+        XCTAssertTrue(grinningFace.waitForExistence(timeout: 3))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Custom reaction picker"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        search.click()
+        search.typeText("hedgehog")
+        XCTAssertTrue(hedgehog.waitForExistence(timeout: 3))
+        XCTAssertTrue(grinningFace.waitForNonExistence(timeout: 3), "Search retained unrelated emoji")
+        hedgehog.click()
+        XCTAssertTrue(search.waitForNonExistence(timeout: 3), "Selecting a reaction did not dismiss the picker")
+        XCTAssertTrue(reaction.waitForExistence(timeout: 3), "The selected grid emoji was not added to the message")
+        XCTAssertEqual(editor.value as? String, "Draft behind reactions")
+
+        openPicker()
+        XCTAssertFalse(app.buttons["Clear search"].exists, "Reopening retained the previous search")
+        search.click()
+        search.typeText("hedgehog")
+        XCTAssertTrue(hedgehog.waitForExistence(timeout: 3))
+        hedgehog.click()
+        XCTAssertTrue(search.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(reaction.waitForNonExistence(timeout: 3), "Selecting the same emoji did not remove the reaction")
+        XCTAssertEqual(editor.value as? String, "Draft behind reactions")
+
+        openPicker()
+        search.click()
+        search.typeText("hedgehog")
+        XCTAssertTrue(hedgehog.waitForExistence(timeout: 3))
+        let clear = app.buttons["Clear search"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 3))
+        clear.click()
+        XCTAssertTrue(clear.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(grinningFace.waitForExistence(timeout: 3), "Clearing search did not restore the emoji catalog")
+        close.click()
+        XCTAssertTrue(search.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(close.waitForNonExistence(timeout: 3))
+        XCTAssertFalse(reaction.exists, "Cancelling the picker added a reaction")
+        XCTAssertEqual(editor.value as? String, "Draft behind reactions", "Cancelling discarded the draft")
+        editor.click()
+        editor.typeText(" remains editable")
+        XCTAssertEqual(editor.value as? String, "Draft behind reactions remains editable")
+    }
+
     func testMediaWindowCanCloseAndReopenWithoutClosingChat() {
         app.launchEnvironment.removeValue(forKey: "DINO_UI_TEST_COMPOSER")
         app.launch()

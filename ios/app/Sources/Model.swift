@@ -754,6 +754,24 @@ final class AppModel: ObservableObject {
     }
 
     func setReaction(_ id: Int32, item: Int32, emoji: String, add: Bool) {
+#if DEBUG
+        if isUITestFixture {
+            guard let index = messages[id]?.firstIndex(where: { $0.id == item }) else { return }
+            var reactions = messages[id]![index].reactions
+            if let existing = reactions.firstIndex(where: { $0.emoji == emoji }) {
+                if reactions[existing].me != add {
+                    reactions[existing] = Reaction(
+                        emoji: emoji, count: reactions[existing].count + (add ? 1 : -1), me: add)
+                }
+                if reactions[existing].count == 0 { reactions.remove(at: existing) }
+            } else if add {
+                reactions.append(Reaction(emoji: emoji, count: 1, me: true))
+            }
+            messageRevisions[id, default: 0] &+= 1
+            messages[id]![index].reactions = reactions
+            return
+        }
+#endif
         GeckoCore.shared.setReaction(id, item: item, emoji: emoji, add: add)
     }
 

@@ -165,6 +165,15 @@ completed local files of any type. It reuses the same UIKit presenter with an
 anchor behind the attachment content, not the row or app window. The image
 context-menu regression checks popover proximity and dismissal/reopening.
 
+The custom reaction picker keeps its SwiftUI sheet, quick reactions, and search.
+On Catalyst its full catalog uses fixed-size, reusable `UICollectionView` cells
+instead of SwiftUI grid buttons; iOS retains the original lazy grid. Filtering
+is evaluated once per body, and unrelated updates do not reload native cells.
+`testCustomReactionPickerSearchToggleAndCancelPreserveDraft` checks searching,
+adding/removing a reaction, reopening, clearing search, and cancellation. The
+DEBUG fixture updates reactions locally with a message revision bump; it does
+not call the unstarted XMPP core or verify server delivery.
+
 Run the complete Catalyst UI suite (including the shared media/scroll tests and
 `CatalystInteractionUITests`) on an unlocked Mac desktop:
 
