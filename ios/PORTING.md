@@ -135,6 +135,13 @@ xcodebuild test -project Gecko.xcodeproj -scheme Gecko \
   -only-testing:GeckoUITests/ChatVisibilityUITests
 ```
 
+`LoginUITests` uses `DINO_UI_TEST_FIXTURE=login` to bypass core startup without
+loading or changing stored accounts. Run it with
+`-only-testing:GeckoUITests/LoginUITests` on either destination. It covers the
+width-limited, safe-area-centered login panel, address-to-password Return-key
+focus, credential-dependent button availability, and large-text scrolling on
+iOS. The tests do not submit credentials or exercise server authentication.
+
 Composer tests establish a post-keyboard baseline, then check each inserted
 character and backspace across soft wraps and explicit line breaks. The image
 test measures the actual preview button, not an inherited row identifier.

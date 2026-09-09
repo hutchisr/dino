@@ -810,33 +810,92 @@ struct AccountSetupView: View {
     @State private var jid = ""
     @State private var password = ""
     @State private var submitting = false
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable { case address, password }
+
+    private var canSubmit: Bool {
+        !submitting && !jid.isEmpty && !password.isEmpty
+    }
+
+    private func signIn() {
+        guard canSubmit else { return }
+        submitting = true
+        model.addAccount(jid: jid, password: password)
+    }
 
     var body: some View {
-        Form {
-            Section("XMPP Account") {
-                TextField("user@example.org", text: $jid)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.emailAddress)
-                SecureField("Password", text: $password)
-                Button {
-                    submitting = true
-                    model.addAccount(jid: jid, password: password)
-                } label: {
-                    if submitting {
-                        HStack {
-                            ProgressView()
-                            Text("Signing in…").padding(.leading, 8)
-                        }
-                    } else {
-                        Text("Sign in")
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 28) {
+                    VStack(spacing: 12) {
+                        Image(systemName: "bubble.left.and.bubble.right.fill")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.tint)
+                            .accessibilityHidden(true)
+                        Text("Welcome to Gecko")
+                            .font(.largeTitle.bold())
+                            .accessibilityAddTraits(.isHeader)
+                        Text("Sign in with your XMPP account.")
+                            .foregroundStyle(.secondary)
                     }
+                    .multilineTextAlignment(.center)
+
+                    VStack(alignment: .leading, spacing: 20) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("XMPP address").font(.subheadline.weight(.medium))
+                            TextField("user@example.org", text: $jid)
+                                .textContentType(.username)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .keyboardType(.emailAddress)
+                                .submitLabel(.next)
+                                .focused($focusedField, equals: .address)
+                                .onSubmit { focusedField = .password }
+                                .accessibilityLabel("XMPP address")
+                                .accessibilityIdentifier("login.address")
+                                .padding(12)
+                                .frame(minHeight: 44)
+                                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 12))
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Password").font(.subheadline.weight(.medium))
+                            SecureField("Password", text: $password)
+                                .textContentType(.password)
+                                .submitLabel(.go)
+                                .focused($focusedField, equals: .password)
+                                .onSubmit(signIn)
+                                .accessibilityIdentifier("login.password")
+                                .padding(12)
+                                .frame(minHeight: 44)
+                                .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 12))
+                        }
+                    }
+                    .textFieldStyle(.plain)
+
+                    Button(action: signIn) {
+                        HStack(spacing: 8) {
+                            if submitting { ProgressView() }
+                            Text(submitting ? "Signing in…" : "Sign in")
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 32)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .controlSize(.large)
+                    .disabled(!canSubmit)
+                    .accessibilityIdentifier("login.submit")
                 }
-                .disabled(submitting || jid.isEmpty || password.isEmpty)
+                .frame(maxWidth: 400)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("login.form")
+                .padding(24)
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .accessibilityIdentifier("login.viewport")
         }
-        .navigationTitle("Log In")
-        .navigationBarTitleDisplayMode(.inline)
+        .clipped()
+        .background(Color(.systemGroupedBackground))
         .onChange(of: model.lastError) { _, error in
             if error != nil { submitting = false }
         }

@@ -302,6 +302,12 @@ final class AppModel: ObservableObject {
 #if DEBUG
         let env = ProcessInfo.processInfo.environment
         guard let fixture = env["DINO_UI_TEST_FIXTURE"] else { return false }
+        if fixture == "login" {
+            isUITestFixture = true
+            ready = true
+            accounts = []
+            return true
+        }
         if fixture == "account-avatar" {
             let account = XmppAccount(id: "fixture@example.invalid", state: "connected")
             let renderer = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64))

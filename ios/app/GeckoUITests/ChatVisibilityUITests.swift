@@ -646,3 +646,89 @@ final class ChatVisibilityUITests: XCTestCase {
     }
 #endif
 }
+
+final class LoginUITests: XCTestCase {
+    private var app: XCUIApplication!
+
+    override func setUp() {
+        continueAfterFailure = false
+        app = XCUIApplication()
+        app.launchEnvironment["DINO_UI_TEST_FIXTURE"] = "login"
+    }
+
+    override func tearDown() {
+        app.terminate()
+        app = nil
+        super.tearDown()
+    }
+
+    func testLoginPanelIsCenteredAndWidthLimited() {
+        app.launch()
+        let form = app.otherElements["login.form"]
+        XCTAssertTrue(form.waitForExistence(timeout: 5))
+        let viewport = app.scrollViews["login.viewport"]
+        XCTAssertTrue(viewport.exists)
+        XCTAssertEqual(form.frame.midX, viewport.frame.midX, accuracy: 2)
+        // Scroll-view AX bounds include system chrome; the panel is centered
+        // inside the safe area. Allow that small inset asymmetry, not top alignment.
+        XCTAssertLessThan(abs(form.frame.midY - viewport.frame.midY), viewport.frame.height * 0.05)
+        XCTAssertGreaterThan(form.frame.minX, viewport.frame.minX)
+        XCTAssertLessThan(form.frame.maxX, viewport.frame.maxX)
+#if targetEnvironment(macCatalyst)
+        XCTAssertLessThan(form.frame.width, viewport.frame.width * 0.6, "Login should not stretch across a desktop window")
+#endif
+        XCTAssertTrue(app.textFields["login.address"].isHittable)
+        XCTAssertTrue(app.secureTextFields["login.password"].isHittable)
+        XCTAssertTrue(app.buttons["login.submit"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Centered login panel"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    func testCredentialsAndReturnKeyAdvanceToPassword() {
+        app.launch()
+        let address = app.textFields["login.address"]
+        XCTAssertTrue(address.waitForExistence(timeout: 5))
+        let submit = app.buttons["login.submit"]
+        XCTAssertFalse(submit.isEnabled)
+        address.tap()
+        address.typeText("fixture@example.invalid")
+        XCTAssertFalse(submit.isEnabled, "An address alone must not allow sign-in")
+        address.typeText("\n")
+        app.typeText("not-a-real-password")
+        XCTAssertEqual(address.value as? String, "fixture@example.invalid", "Return did not leave the address field")
+        XCTAssertTrue(submit.isEnabled, "Return should focus Password so typing completes the credentials")
+        let password = app.secureTextFields["login.password"]
+        password.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "not-a-real-password".count))
+        XCTAssertFalse(submit.isEnabled, "Clearing the password must disable sign-in")
+    }
+
+#if !targetEnvironment(macCatalyst)
+    func testLargeTextLoginRemainsScrollable() {
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let viewport = app.scrollViews["login.viewport"]
+        XCTAssertTrue(viewport.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(app.otherElements["login.form"].frame.height, viewport.frame.height)
+        let address = app.textFields["login.address"]
+        for _ in 0..<5 {
+            if address.isHittable { break }
+            viewport.swipeUp()
+        }
+        XCTAssertTrue(address.isHittable, "The address field must remain reachable at large text sizes")
+        let submit = app.buttons["login.submit"]
+        for _ in 0..<5 {
+            if submit.isHittable { break }
+            viewport.swipeUp()
+        }
+        XCTAssertTrue(submit.isHittable, "The sign-in action must remain reachable at large text sizes")
+        XCTAssertGreaterThanOrEqual(submit.frame.minX, viewport.frame.minX)
+        XCTAssertLessThanOrEqual(submit.frame.maxX, viewport.frame.maxX)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Large-text login after scrolling"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+#endif
+}
