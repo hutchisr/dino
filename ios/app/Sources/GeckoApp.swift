@@ -275,8 +275,10 @@ struct GeckoApp: App {
                     switch item {
                     case .image(let path):
                         ImageViewer(path: path)
+                            .focusedSceneValue(\.mediaViewerItem, item)
                     case .video(let path):
                         VideoViewer(path: path)
+                            .focusedSceneValue(\.mediaViewerItem, item)
                     }
                 } else {
                     Color.black
@@ -290,6 +292,9 @@ struct GeckoApp: App {
         }
         .defaultSize(width: 960, height: 720)
         .windowResizability(.contentMinSize)
+        .commands {
+            MediaViewerCommands()
+        }
     }
 
     private var desktopScene: some Scene {

@@ -250,7 +250,7 @@ final class CatalystInteractionUITests: XCTestCase {
         XCTAssertEqual(editor.value as? String, "Draft behind reactions remains editable")
     }
 
-    func testMediaWindowCanCloseAndReopenWithoutClosingChat() {
+    func testEscapeClosesMediaWindowWithoutClosingChat() {
         app.launchEnvironment.removeValue(forKey: "DINO_UI_TEST_COMPOSER")
         app.launch()
         let image = app.buttons["Open image"]
@@ -264,14 +264,61 @@ final class CatalystInteractionUITests: XCTestCase {
             XCTAssertTrue(previews.firstMatch.waitForExistence(timeout: 5))
             XCTAssertEqual(previews.count, 1, "Opening media accumulated preview windows")
             XCTAssertTrue(chatWindow.exists)
-            app.typeKey("w", modifierFlags: .command)
-            XCTAssertTrue(previews.firstMatch.waitForNonExistence(timeout: 5), "Close did not dismiss the media window")
+            app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+            XCTAssertTrue(previews.firstMatch.waitForNonExistence(timeout: 5), "Escape did not dismiss the media window")
             XCTAssertTrue(chatWindow.isHittable, "Closing media also closed the main chat")
             XCTAssertEqual(editor.value as? String, "Draft behind preview")
         }
         editor.click()
         editor.typeText(" remains editable")
         XCTAssertEqual(editor.value as? String, "Draft behind preview remains editable")
+    }
+
+    func testEscapeClosesFocusedVideoPreview() {
+        app.launchEnvironment["DINO_UI_TEST_IMAGE_DATA"] = """
+        AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMUbW9vdgAAAGxtdmhkAAAAAAAAAAAA
+        AAAAAAAD6AAAACgAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAA
+        AABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAj90cmFrAAAAXHRraGQAAAADAAAA
+        AAAAAAAAAAABAAAAAAAAACgAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAA
+        AAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAAoAAAAAAABAAAA
+        AAG3bWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAyAAAAAgBVxAAAAAAALWhkbHIAAAAAAAAAAHZp
+        ZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABYm1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAA
+        ACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAASJzdGJsAAAAvnN0c2QAAAAAAAAA
+        AQAAAK5hdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFExhdmM2
+        My4xLjEwMSBsaWJ4MjY0AAAAAAAAAAAAAAAAGP//AAAANGF2Y0MBZAAK/+EAF2dkAAqs2V7ARAAA
+        AwAEAAADAMg8SJZYAQAGaOvjyyLA/fj4AAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAino
+        AAAAAAAAABhzdHRzAAAAAAAAAAEAAAABAAACAAAAABxzdHNjAAAAAAAAAAEAAAABAAAAAQAAAAEA
+        AAAUc3RzegAAAAAAAALFAAAAAQAAABRzdGNvAAAAAAAAAAEAAANEAAAAYXVkdGEAAABZbWV0YQAA
+        AAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAsaWxzdAAAACSpdG9vAAAAHGRh
+        dGEAAAABAAAAAExhdmY2My4xLjEwMQAAAAhmcmVlAAACzW1kYXQAAAKuBgX//6rcRem95tlIt5Ys
+        2CDZI+7veDI2NCAtIGNvcmUgMTY1IHIzMjIyIGIzNTYwNWEgLSBILjI2NC9NUEVHLTQgQVZDIGNv
+        ZGVjIC0gQ29weWxlZnQgMjAwMy0yMDI1IC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5o
+        dG1sIC0gb3B0aW9uczogY2FiYWM9MSByZWY9MyBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgzOjB4
+        MTEzIG1lPWhleCBzdWJtZT03IHBzeT0xIHBzeV9yZD0xLjAwOjAuMDAgbWl4ZWRfcmVmPTEgbWVf
+        cmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0xIDh4OGRjdD0xIGNxbT0wIGRlYWR6b25lPTIx
+        LDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zmc2V0PS0yIHRocmVhZHM9MSBsb29rYWhlYWRf
+        dGhyZWFkcz0xIHNsaWNlZF90aHJlYWRzPTAgbnI9MCBkZWNpbWF0ZT0xIGludGVybGFjZWQ9MCBi
+        bHVyYXlfY29tcGF0PTAgY29uc3RyYWluZWRfaW50cmE9MCBiZnJhbWVzPTMgYl9weXJhbWlkPTIg
+        Yl9hZGFwdD0xIGJfYmlhcz0wIGRpcmVjdD0xIHdlaWdodGI9MSBvcGVuX2dvcD0wIHdlaWdodHA9
+        MiBrZXlpbnQ9MjUwIGtleWludF9taW49MjUgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJj
+        X2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0w
+        IHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAPZYiEACv//vZz
+        fAprbbGB
+        """
+        app.launchEnvironment["DINO_UI_TEST_IMAGE_EXTENSION"] = "mp4"
+        app.launch()
+
+        let video = app.buttons["Play gecko-image-fixture.mp4"]
+        XCTAssertTrue(video.waitForExistence(timeout: 8))
+        video.click()
+
+        let previews = app.children(matching: .window).containing(.any, identifier: "media.preview")
+        XCTAssertTrue(previews.firstMatch.waitForExistence(timeout: 5))
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertTrue(
+            previews.firstMatch.waitForNonExistence(timeout: 5),
+            "Escape did not dismiss the focused video preview")
+        XCTAssertTrue(chatWindow.isHittable, "Closing video preview also closed the main chat")
     }
 }
 #endif

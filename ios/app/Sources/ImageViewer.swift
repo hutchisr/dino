@@ -136,6 +136,51 @@ struct ImageViewer: View {
     }
 }
 
+#if targetEnvironment(macCatalyst)
+private final class EscapeHandlingVideoPlayerController: AVPlayerViewController {
+    var onEscape: (() -> Void)?
+
+    private lazy var escapeKeyCommand: UIKeyCommand = {
+        let command = UIKeyCommand(
+            input: UIKeyCommand.inputEscape,
+            modifierFlags: [],
+            action: #selector(closePreview))
+        command.wantsPriorityOverSystemBehavior = true
+        return command
+    }()
+
+    override var keyCommands: [UIKeyCommand]? {
+        [escapeKeyCommand] + (super.keyCommands ?? []).filter {
+            $0.input != UIKeyCommand.inputEscape
+        }
+    }
+
+    @objc private func closePreview() {
+        onEscape?()
+    }
+}
+
+private struct EscapeHandlingVideoPlayer: UIViewControllerRepresentable {
+    let player: AVPlayer?
+    let onEscape: () -> Void
+
+    func makeUIViewController(context: Context) -> EscapeHandlingVideoPlayerController {
+        let controller = EscapeHandlingVideoPlayerController()
+        controller.player = player
+        controller.onEscape = onEscape
+        return controller
+    }
+
+    func updateUIViewController(
+        _ controller: EscapeHandlingVideoPlayerController,
+        context: Context
+    ) {
+        controller.player = player
+        controller.onEscape = onEscape
+    }
+}
+#endif
+
 struct VideoViewer: View {
     let path: String
     var onDismiss: (() -> Void)? = nil
@@ -158,8 +203,13 @@ struct VideoViewer: View {
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
+#if targetEnvironment(macCatalyst)
+                EscapeHandlingVideoPlayer(player: player, onEscape: closeViewer)
+                    .ignoresSafeArea()
+#else
                 VideoPlayer(player: player)
                     .ignoresSafeArea()
+#endif
             }
             .navigationTitle("")
             .toolbar {

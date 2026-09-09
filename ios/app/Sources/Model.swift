@@ -364,6 +364,9 @@ final class AppModel: ObservableObject {
             let ext = env["DINO_UI_TEST_IMAGE_EXTENSION"] ?? "gif"
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("gecko-image-fixture.\(ext)")
+            let mime = MediaFileKind.isVideo(fileName: url.lastPathComponent)
+                ? "video/mp4"
+                : "image/\(ext)"
             do {
                 try data.write(to: url)
             } catch {
@@ -374,7 +377,7 @@ final class AppModel: ObservableObject {
                 ChatMessage(
                     id: 9_100, content: "file", direction: "in",
                     from: "visibility@example.invalid", body: "", time: Date(), encryption: "NONE",
-                    fileName: url.lastPathComponent, mime: "image/\(ext)", size: data.count,
+                    fileName: url.lastPathComponent, mime: mime, size: data.count,
                     fileState: "complete", path: url.path)
             ]
             return true
