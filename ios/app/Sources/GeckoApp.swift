@@ -7,23 +7,6 @@ enum ChatLayout {
 }
 
 #if targetEnvironment(macCatalyst)
-private struct CatalystToolbarButtonStyle: ButtonStyle {
-    @State private var isHovered = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background {
-                Circle()
-                    .fill(
-                        Color.primary.opacity(
-                            configuration.isPressed ? 0.14 : (isHovered ? 0.08 : 0)
-                        )
-                    )
-            }
-            .onHover { isHovered = $0 }
-    }
-}
-
 @MainActor
 private enum CatalystWindowSize {
     private static let widthKey = "macWindowContentWidth"
@@ -983,46 +966,6 @@ struct ConversationListView: View {
 #if !targetEnvironment(macCatalyst)
             .sharedBackgroundVisibility(.hidden)
 #endif
-                #if targetEnvironment(macCatalyst)
-                    ToolbarItem(placement: .topBarTrailing) {
-                        HStack(spacing: 0) {
-                            Button {
-                                model.presentNewMessage()
-                            } label: {
-                                Image(systemName: "square.and.pencil")
-                                    .frame(width: 32, height: 32)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(CatalystToolbarButtonStyle())
-                            .frame(width: 32, height: 32)
-                            .contentShape(.interaction, Rectangle())
-                            .accessibilityLabel("New Message")
-
-                            Menu {
-                                Button {
-                                    showJoinMuc = true
-                                } label: {
-                                    Label("Join channel", systemImage: "person.2")
-                                }
-                                Button {
-                                    model.accountSettingsPresented = true
-                                } label: {
-                                    Label("Account", systemImage: "person.crop.circle")
-                                }
-                            } label: {
-                                Image(systemName: "ellipsis")
-                                    .frame(width: 32, height: 32)
-                                    .contentShape(Rectangle())
-                            }
-                            .menuIndicator(.hidden)
-                            .buttonStyle(.plain)
-                            .frame(width: 32, height: 32)
-                            .contentShape(.interaction, Rectangle())
-                            .accessibilityLabel("More")
-                        }
-                    }
-                    .sharedBackgroundVisibility(.visible)
-                #else
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button("New Message", systemImage: "square.and.pencil", action: model.presentNewMessage)
                     .labelStyle(.iconOnly)
@@ -1042,7 +985,6 @@ struct ConversationListView: View {
                         .labelStyle(.iconOnly)
                 }
             }
-                #endif
         }
     }
 
@@ -1431,45 +1373,45 @@ struct ContactsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { model.requestBlocklist() }
             .toolbar {
-#if targetEnvironment(macCatalyst)
                 ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        isPresented = false
-                    } label: {
-                        Image(systemName: "xmark")
+                    Button { isPresented = false } label: {
+                        Label("Close", systemImage: "xmark")
+#if targetEnvironment(macCatalyst)
                             .padding(4)
+#endif
                     }
-                    .accessibilityLabel("Close")
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.large)
+                        .labelStyle(.iconOnly)
+                        .keyboardShortcut(.cancelAction)
+#if targetEnvironment(macCatalyst)
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .controlSize(.large)
+#endif
                 }
+#if targetEnvironment(macCatalyst)
                 .sharedBackgroundVisibility(.hidden)
+#endif
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showAdd = true
-                    } label: {
-                        Image(systemName: "plus")
+                    Button { showAdd = true } label: {
+                        Label("Add Contact", systemImage: "plus")
+#if targetEnvironment(macCatalyst)
                             .padding(4)
+#endif
                     }
-                    .accessibilityLabel("Add Contact")
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.large)
+                        .labelStyle(.iconOnly)
+#if targetEnvironment(macCatalyst)
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .controlSize(.large)
+#endif
                 }
+#if targetEnvironment(macCatalyst)
                 .sharedBackgroundVisibility(.hidden)
+#endif
+#if targetEnvironment(macCatalyst)
+                ToolbarSpacer(.fixed, placement: .primaryAction)
                 ToolbarItem(placement: .primaryAction) {
                     ContactSearchField(text: $search)
-                }
-#else
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { isPresented = false }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Add Contact", systemImage: "plus") {
-                        showAdd = true
-                    }
-                    .labelStyle(.iconOnly)
                 }
 #endif
             }
@@ -1742,33 +1684,35 @@ struct ChatView: View {
         // Explicit VStack so the banners stack above the input bar in order;
         // without it the banners (a bare ViewBuilder tuple) laid out wrong and
         // the reply preview ended up under the input.
-        VStack(spacing: 0) {
-            if editing != nil {
-                composerBanner(icon: "pencil", cancelLabel: "Cancel edit") {
-                    editing = nil
-                    draft = ""
-                } label: {
-                    Text("Editing message").font(.caption)
-                }
-            }
-            if let replyingTo {
-                composerBanner(icon: "arrowshape.turn.up.left", cancelLabel: "Cancel reply") {
-                    self.replyingTo = nil
-                } label: {
-                    VStack(alignment: .leading) {
-                        Text("Replying to \(replyingTo.fromDisplay.isEmpty ? replyingTo.from : replyingTo.fromDisplay)")
-                            .font(.caption.bold())
-                        Text(replyingTo.isFile ? replyingTo.fileName : replyingTo.body)
-                            .font(.caption)
-                            .lineLimit(1)
-                            .foregroundStyle(.secondary)
+        GlassEffectContainer(spacing: 6) {
+            VStack(spacing: 0) {
+                if editing != nil {
+                    composerBanner(icon: "pencil", cancelLabel: "Cancel edit") {
+                        editing = nil
+                        draft = ""
+                    } label: {
+                        Text("Editing message").font(.caption)
                     }
                 }
+                if let replyingTo {
+                    composerBanner(icon: "arrowshape.turn.up.left", cancelLabel: "Cancel reply") {
+                        self.replyingTo = nil
+                    } label: {
+                        VStack(alignment: .leading) {
+                            Text("Replying to \(replyingTo.fromDisplay.isEmpty ? replyingTo.from : replyingTo.fromDisplay)")
+                                .font(.caption.bold())
+                            Text(replyingTo.isFile ? replyingTo.fileName : replyingTo.body)
+                                .font(.caption)
+                                .lineLimit(1)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if let pendingFileSend {
+                    pendingFileSendPanel(pendingFileSend)
+                }
+                inputBar
             }
-            if let pendingFileSend {
-                pendingFileSendPanel(pendingFileSend)
-            }
-            inputBar
         }
     }
 
@@ -1836,7 +1780,7 @@ struct ChatView: View {
                     .font(.title2)
                     .foregroundStyle(.secondary)
                     .frame(width: 76, height: 76)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                    .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 16))
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -1953,104 +1897,103 @@ struct ChatView: View {
     }
 
     private var inputBar: some View {
-        GlassEffectContainer(spacing: 6) {
-            // Bottom-align so the +/send buttons stay pinned to the bottom as the
-            // text field grows upward over multiple lines.
-            HStack(alignment: .bottom, spacing: 12) {
+        // Bottom-align so the +/send buttons stay pinned to the bottom as the
+        // text field grows upward over multiple lines.
+        HStack(alignment: .bottom, spacing: 12) {
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
+                    showAttach.toggle()
+                }
+            } label: {
+                Image(systemName: showAttach ? "xmark" : "plus")
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: composerControlHeight, height: composerControlHeight)
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    // Make the whole circle tappable, not just the glyph.
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(showAttach ? "Close attachments" : "Attach")
+            .disabled(editing != nil)
+            .opacity(editing == nil ? 1 : 0.45)
+            // The Photo/File options grow upward out of the plus button —
+            // same GlassEffectContainer, so the glass blends as they emerge
+            // — instead of a system menu popping over it. Anchored to the
+            // button's bottom-leading corner and scaled from there so they
+            // visually originate at the plus.
+            .overlay(alignment: .bottomLeading) {
+                if showAttach {
+                    attachOptions
+                        .offset(y: -(composerControlHeight + 8))
+                        .transition(
+                            .scale(scale: 0.2, anchor: .bottomLeading)
+                                .combined(with: .opacity))
+                }
+            }
+
+            ZStack(alignment: .topLeading) {
+                if draft.isEmpty {
+                    Text("Message")
+                        .foregroundStyle(.secondary)
+                        .allowsHitTesting(false)
+                }
+                composerTextView
+            }
+            // Vertical inset too (not just horizontal) so multi-line text
+            // stays inside the capsule instead of spilling past its
+            // rounded top/bottom edges.
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, minHeight: composerControlHeight)
+            // RoundedRectangle, not Capsule: a wide multi-line field made
+            // a Capsule rounds its left/right ends into big semicircles
+            // (radius = half the height) that clip the text. Fixed 22pt
+            // corners keep a full-width text area; at one line (44pt tall)
+            // it still reads as a pill.
+            .glassEffect(.regular, in: .rect(cornerRadius: 22))
+            .glassEffectID("composerField", in: composerGlass)
+            .onChange(of: draft) { _, value in
+                if editing == nil {
+                    model.setTyping(conversationId, !value.isEmpty)
+                }
+                // Drive the send button's presence explicitly so it
+                // morphs in/out (split from / merge into the field) on
+                // BOTH first keystroke and delete-to-empty — relying on
+                // an implicit .animation(value:) didn't animate the
+                // structural removal on delete.
+                // Snappy so the button reaches its tappable position
+                // fast — a slow morph leaves it briefly unresponsive
+                // right after a send (while it animates back in).
+                withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
+                    showSend = shouldShowSendButton
+                }
+            }
+
+            if showSend {
+                // Tinted send button that fluidly splits out of the text
+                // field's glass (and merges back when the draft clears),
+                // via the shared GlassEffectContainer + matched id.
                 Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
-                        showAttach.toggle()
-                    }
+                    sendCurrentDraft()
                 } label: {
-                    Image(systemName: showAttach ? "xmark" : "plus")
-                        .font(.title3.weight(.medium))
-                        .foregroundStyle(.primary)
-                        .contentTransition(.symbolEffect(.replace))
+                    Image(systemName: editing != nil ? "checkmark" : "paperplane.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white)
                         .frame(width: composerControlHeight, height: composerControlHeight)
-                        .glassEffect(.regular.interactive(), in: Circle())
-                        // Make the whole circle tappable, not just the glyph.
+                        .glassEffect(.regular.tint(.accentColor).interactive(), in: Circle())
+                        .glassEffectID("composerSend", in: composerGlass)
+                        // Without this the hit area is just the glyph, not
+                        // the full circle — taps off the icon did nothing.
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(showAttach ? "Close attachments" : "Attach")
-                .disabled(editing != nil)
-                .opacity(editing == nil ? 1 : 0.45)
-                // The Photo/File options grow upward out of the plus button —
-                // same GlassEffectContainer, so the glass blends as they emerge
-                // — instead of a system menu popping over it. Anchored to the
-                // button's bottom-leading corner and scaled from there so they
-                // visually originate at the plus.
-                .overlay(alignment: .bottomLeading) {
-                    if showAttach {
-                        attachOptions
-                            .offset(y: -(composerControlHeight + 8))
-                            .transition(.scale(scale: 0.2, anchor: .bottomLeading)
-                                .combined(with: .opacity))
-                    }
-                }
-
-                ZStack(alignment: .topLeading) {
-                    if draft.isEmpty {
-                        Text("Message")
-                            .foregroundStyle(.secondary)
-                            .allowsHitTesting(false)
-                    }
-                    composerTextView
-                }
-                // Vertical inset too (not just horizontal) so multi-line text
-                // stays inside the capsule instead of spilling past its
-                // rounded top/bottom edges.
-                .padding(.horizontal, 16)
-                .padding(.vertical, 11)
-                .frame(maxWidth: .infinity, minHeight: composerControlHeight)
-                // RoundedRectangle, not Capsule: a wide multi-line field made
-                // a Capsule rounds its left/right ends into big semicircles
-                // (radius = half the height) that clip the text. Fixed 22pt
-                // corners keep a full-width text area; at one line (44pt tall)
-                // it still reads as a pill.
-                .glassEffect(.regular, in: .rect(cornerRadius: 22))
-                .glassEffectID("composerField", in: composerGlass)
-                .onChange(of: draft) { _, value in
-                    if editing == nil {
-                        model.setTyping(conversationId, !value.isEmpty)
-                    }
-                    // Drive the send button's presence explicitly so it
-                    // morphs in/out (split from / merge into the field) on
-                    // BOTH first keystroke and delete-to-empty — relying on
-                    // an implicit .animation(value:) didn't animate the
-                    // structural removal on delete.
-                    // Snappy so the button reaches its tappable position
-                    // fast — a slow morph leaves it briefly unresponsive
-                    // right after a send (while it animates back in).
-                    withAnimation(.spring(response: 0.2, dampingFraction: 0.85)) {
-                        showSend = shouldShowSendButton
-                    }
-                }
-
-                if showSend {
-                    // Blue send button that fluidly splits out of the text
-                    // field's glass (and merges back when the draft clears),
-                    // via the shared GlassEffectContainer + matched id.
-                    Button {
-                        sendCurrentDraft()
-                    } label: {
-                        Image(systemName: editing != nil ? "checkmark" : "paperplane.fill")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: composerControlHeight, height: composerControlHeight)
-                            .glassEffect(.regular.tint(.blue).interactive(), in: Circle())
-                            .glassEffectID("composerSend", in: composerGlass)
-                            // Without this the hit area is just the glyph, not
-                            // the full circle — taps off the icon did nothing.
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(editing != nil ? "Save edit" : "Send")
-                }
+                .accessibilityLabel(editing != nil ? "Save edit" : "Send")
             }
-            .padding(.horizontal, composerHorizontalPadding)
-            .padding(.vertical, composerInputVerticalPadding)
         }
+        .padding(.horizontal, composerHorizontalPadding)
+        .padding(.vertical, composerInputVerticalPadding)
     }
 
     private var attachOptions: some View {
@@ -2360,58 +2303,7 @@ struct ChatView: View {
         ToolbarItem(placement: .principal) {
             chatTitleItem
         }
-#if targetEnvironment(macCatalyst)
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 0) {
-                    Menu {
-                        notifyOption("All messages", "on")
-                        if isGroupChat {
-                            notifyOption("Only when mentioned", "highlight")
-                        }
-                        notifyOption("Off", "off")
-                } label: {
-                        Image(systemName: bellIcon)
-                            .frame(width: 32, height: 32)
-                            .contentShape(Rectangle())
-                }
-                    .menuIndicator(.hidden)
-                    .buttonStyle(.plain)
-                    .frame(width: 32, height: 32)
-                    .contentShape(.interaction, Rectangle())
-                    .accessibilityLabel("Notifications")
-
-                    if isGroupChat {
-                        Button {
-                            model.requestOccupants(conversationId)
-                            showOccupants = true
-                        } label: {
-                            Image(systemName: "person.2")
-                                .frame(width: 32, height: 32)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(CatalystToolbarButtonStyle())
-                        .frame(width: 32, height: 32)
-                        .contentShape(.interaction, Rectangle())
-                        .accessibilityLabel("Participants")
-                    }
-
-                    Button {
-                        toggleEncryption()
-                    } label: {
-                        Image(systemName: lockIcon)
-                            .foregroundStyle(lockTint)
-                            .frame(width: 32, height: 32)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(CatalystToolbarButtonStyle())
-                    .frame(width: 32, height: 32)
-                    .contentShape(.interaction, Rectangle())
-                    .accessibilityLabel(lockAccessibilityLabel)
-            }
-        }
-            .sharedBackgroundVisibility(.visible)
-#else
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItemGroup(placement: .topBarTrailing) {
             Menu {
                 notifyOption("All messages", "on")
                 if isGroupChat {
@@ -2422,9 +2314,7 @@ struct ChatView: View {
                 Image(systemName: bellIcon)
             }
             .accessibilityLabel("Notifications")
-        }
-        if isGroupChat {
-            ToolbarItem(placement: .topBarTrailing) {
+            if isGroupChat {
                 Button {
                     model.requestOccupants(conversationId)
                     showOccupants = true
@@ -2433,8 +2323,6 @@ struct ChatView: View {
                 }
                 .accessibilityLabel("Participants")
             }
-        }
-        ToolbarItem(placement: .topBarTrailing) {
             Button {
                 toggleEncryption()
             } label: {
@@ -2442,8 +2330,9 @@ struct ChatView: View {
                     .foregroundStyle(lockTint)
             }
             .accessibilityLabel(lockAccessibilityLabel)
+        } label: {
+            Label("Chat actions", systemImage: "ellipsis")
         }
-#endif
     }
 
     /// The tappable avatar+name shown in the navigation bar's principal slot.

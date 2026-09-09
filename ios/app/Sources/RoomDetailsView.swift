@@ -54,10 +54,10 @@ struct RoomDetailsView: View {
                             .padding(4)
                     }
                     .accessibilityLabel("Close")
+                    .keyboardShortcut(.cancelAction)
                     .buttonStyle(.glass)
                     .buttonBorderShape(.circle)
                     .controlSize(.large)
-                    .keyboardShortcut(.cancelAction)
                 }
                 .sharedBackgroundVisibility(.hidden)
 #else

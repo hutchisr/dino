@@ -87,6 +87,26 @@ Or open `Gecko.xcodeproj` in Xcode and build the shared `Gecko` scheme. The
 scheme selects `ios/prefix/sim-arm64`, `ios/prefix/device-arm64`, or
 `ios/prefix/catalyst-arm64` from the destination SDK.
 
+Both app targets require OS 26 and use the system's Liquid Glass toolbar and
+sheet treatments. Keep toolbar actions as native `ToolbarItem` /
+`ToolbarItemGroup` controls rather than fixed-size stacks with custom hover
+backgrounds or stacked glass treatments. Chat's trailing actions use the
+labeled `ToolbarItemGroup` initializer, which wraps them in a native
+`ControlGroup` so they share one glass background on Catalyst as well as iOS.
+The label describes the group if it collapses into a menu when space is tight.
+The custom chat composer groups its
+field, controls, and accessory banners in one `GlassEffectContainer`; its
+6-point spacing is the glass merging threshold, not the layout gap. Message
+bubbles and attachment thumbnails remain content surfaces, not glass.
+Catalyst retains its native Contacts search field, Escape shortcuts, and media
+window close controls; the media viewer keeps its immersive black backdrop.
+A fixed `ToolbarSpacer` separates Contacts' Add action from its search field
+into distinct glass backgrounds.
+Catalyst's standalone sheet Close and Add buttons use `.buttonStyle(.glass)`
+with the toolbar's shared background hidden, so the visible circle is the
+interactive control rather than a larger decorative toolbar background.
+Four-point label padding restores the roughly 36-point toolbar height.
+
 Mac Catalyst uses a persistent desktop lifecycle: it keeps XMPP connected when
 the window is hidden, enables GLib network monitoring and XEP-0198 resumption,
 and identifies as a desktop client. iOS retains its delayed clean disconnect

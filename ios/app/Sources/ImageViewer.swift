@@ -40,24 +40,13 @@ struct MediaViewerCommands: Commands {
 
 /// Both viewers wear the same chrome, so it lives here once. On macCatalyst the
 /// window's own title bar already provides a close affordance, so only the share
-/// button is added — styled as a floating glass circle over the black backdrop.
+/// button is added. Both platforms use the system toolbar's glass treatment.
 private struct MediaViewerToolbar: ToolbarContent {
     let url: URL
     let onClose: () -> Void
 
     var body: some ToolbarContent {
-#if targetEnvironment(macCatalyst)
-        ToolbarItem(placement: .primaryAction) {
-            ShareLink(item: url) {
-                Image(systemName: "square.and.arrow.up")
-                    .frame(width: 36, height: 36)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.circle)
-        }
-        .sharedBackgroundVisibility(.hidden)
-#else
+#if !targetEnvironment(macCatalyst)
         ToolbarItem(placement: .cancellationAction) {
             Button {
                 onClose()
@@ -66,12 +55,12 @@ private struct MediaViewerToolbar: ToolbarContent {
             }
             .accessibilityLabel("Close")
         }
+#endif
         ToolbarItem(placement: .primaryAction) {
             ShareLink(item: url) {
                 Image(systemName: "square.and.arrow.up")
             }
         }
-#endif
     }
 }
 
