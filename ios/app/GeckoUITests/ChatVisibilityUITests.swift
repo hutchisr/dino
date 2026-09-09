@@ -558,6 +558,30 @@ final class ChatVisibilityUITests: XCTestCase {
     }
 
 #if targetEnvironment(macCatalyst)
+    func testImageContextMenuShareAnchorsToAttachment() {
+        app.launch()
+        let image = app.buttons["Open image"]
+        XCTAssertTrue(image.waitForExistence(timeout: 8))
+        for _ in 0..<2 {
+            let anchor = image.frame
+            image.rightClick()
+            let share = app.windows.firstMatch.menus.firstMatch.menuItems["Share…"]
+            XCTAssertTrue(share.waitForExistence(timeout: 3))
+            share.click()
+            let popover = app.popovers.firstMatch
+            XCTAssertTrue(popover.waitForExistence(timeout: 5))
+            XCTAssertTrue(popover.buttons["Copy"].waitForExistence(timeout: 5))
+            let frame = popover.frame
+            XCTAssertFalse(frame.isEmpty)
+            let horizontalGap = max(0, max(frame.minX - anchor.maxX, anchor.minX - frame.maxX))
+            let verticalGap = max(0, max(frame.minY - anchor.maxY, anchor.minY - frame.maxY))
+            XCTAssertLessThanOrEqual(horizontalGap, 32, "Share popover is detached from the attachment")
+            XCTAssertLessThanOrEqual(verticalGap, 32, "Share popover is detached from the attachment")
+            app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+            XCTAssertTrue(popover.waitForNonExistence(timeout: 3))
+        }
+    }
+
     func testCompletedImageContextMenuCopiesAndSavesImage() throws {
         let exportDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("GeckoSaveUITest-\(UUID().uuidString)", isDirectory: true)

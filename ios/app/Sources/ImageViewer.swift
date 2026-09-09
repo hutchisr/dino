@@ -346,7 +346,7 @@ private struct AttachmentShareButton: View {
 }
 
 /// UIKit supplies only the popover anchor; SwiftUI owns the visible control.
-private struct AttachmentShareAnchor: UIViewControllerRepresentable {
+struct AttachmentShareAnchor: UIViewControllerRepresentable {
     let url: URL
     let request: Int
 

@@ -153,6 +153,10 @@ Catalyst and completing/reopening the share sheet on iOS. Save and share use
 matching plain SwiftUI buttons with adjoining 44-point tap targets. An invisible
 UIKit view behind share supplies the popover anchor, avoiding both Catalyst's
 native button bezel and `ShareLink`'s inferred geometry inside a scrolling chat.
+The Catalyst attachment context menu also offers Share alongside Save As for
+completed local files of any type. It reuses the same UIKit presenter with an
+anchor behind the attachment content, not the row or app window. The image
+context-menu regression checks popover proximity and dismissal/reopening.
 
 Run the complete Catalyst UI suite (including the shared media/scroll tests and
 `CatalystInteractionUITests`) on an unlocked Mac desktop:

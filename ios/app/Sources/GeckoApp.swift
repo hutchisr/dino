@@ -2625,6 +2625,7 @@ struct MessageBubble: View {
     @State private var replyArmed = false
 #if targetEnvironment(macCatalyst)
     @State private var clipboardWriteGate = ClipboardWriteGate()
+    @State private var shareRequest = 0
 #endif
 
     private let replyTriggerOffset: CGFloat = 56
@@ -2726,6 +2727,9 @@ struct MessageBubble: View {
                     }
                 }
                 if canSaveAttachment {
+                    Button("Share…", systemImage: "square.and.arrow.up") {
+                        shareRequest += 1
+                    }
                     Button("Save As…", systemImage: "square.and.arrow.down") {
                         onSaveAttachment?(msg)
                     }
@@ -2799,6 +2803,15 @@ struct MessageBubble: View {
                                     onSaveAttachment: onSaveAttachment,
                                     onImageRendered: onImageRendered,
                                     transferProgress: transferProgress)
+#if targetEnvironment(macCatalyst)
+                                    .background {
+                                        if canSaveAttachment {
+                                            AttachmentShareAnchor(url: URL(fileURLWithPath: msg.path), request: shareRequest)
+                                                .allowsHitTesting(false)
+                                                .accessibilityHidden(true)
+                                        }
+                                    }
+#endif
                     } else {
                         messageBody(msg.body)
                     }
