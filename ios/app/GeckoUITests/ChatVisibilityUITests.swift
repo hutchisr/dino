@@ -13,6 +13,26 @@ final class ChatVisibilityUITests: XCTestCase {
         app.launchEnvironment["DINO_UI_TEST_FIXTURE"] = "chat-visibility"
     }
 
+    func testRoomDetailsSeparatesOnlineAndOfflineMembers() {
+        app.launchEnvironment["DINO_UI_TEST_ROOM_MEMBERS"] = "1"
+        app.launch()
+
+        if !app.buttons["Participants"].exists {
+            let actions = app.buttons["Chat actions"]
+            XCTAssertTrue(actions.waitForExistence(timeout: 5))
+            actions.tap()
+        }
+        let participants = app.buttons["Participants"]
+        XCTAssertTrue(participants.waitForExistence(timeout: 5))
+        participants.tap()
+
+        XCTAssertTrue(app.navigationBars["Room details"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Online (1)"].exists)
+        XCTAssertTrue(app.staticTexts["Offline (2)"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["Offline Owner, offline"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["Offline Member, offline"].exists)
+    }
+
     func testAnimatedGIFPlaysAndStopsInline() throws {
         try assertInlinePlayback(
             encoded: """

@@ -73,6 +73,22 @@ struct Occupant: Identifiable {
     }
 }
 
+/// An affiliated room member who is not currently present in a private room.
+struct OfflineMember: Identifiable {
+    let id: String
+    let name: String
+    let jid: String
+    let affiliation: String
+
+    var badge: String? {
+        switch affiliation {
+        case "owner": return "Owner"
+        case "admin": return "Admin"
+        default: return nil
+        }
+    }
+}
+
 /// Room-wide settings/state for a group chat, fetched on demand.
 struct RoomInfo {
     var subject: String = ""
@@ -169,6 +185,7 @@ final class AppModel: ObservableObject {
     @Published var chatStates: [Int32: String] = [:]    // conversation id -> XEP-0085 state
     @Published var typingNames: [Int32: [String]] = [:]
     @Published var occupants: [Int32: [Occupant]] = [:]
+    @Published var offlineMembers: [Int32: [OfflineMember]] = [:]
     @Published var roomInfo: [Int32: RoomInfo] = [:]
     @Published var selfShow = "online"     // online | away | dnd | xa
     @Published var selfStatus = ""
@@ -196,6 +213,9 @@ final class AppModel: ObservableObject {
     private var acceptingMucInvite: MucInvitation?
     private var autoMucInviteFailure: (conversation: Int32, invitee: String)?
     private var requestedAvatars = Set<String>()
+#if DEBUG
+    private var uiTestRoomMembersFixture = false
+#endif
     private let messagePageSize: Int32 = 50
     @Published private var historyPagination: [Int32: HistoryPagination] = [:]
     private var replacingMessageHistory = Set<Int32>()
@@ -333,8 +353,10 @@ final class AppModel: ObservableObject {
         let progressFixture = env["DINO_UI_TEST_UPLOAD_PROGRESS"] == "1" || uploadImageFixture
         let unreadClearFixture = env["DINO_UI_TEST_UNREAD_CLEAR"] == "1"
         let delayedRouteFixture = env["DINO_UI_TEST_DELAYED_ROUTE"] == "1"
+        let roomMembersFixture = env["DINO_UI_TEST_ROOM_MEMBERS"] == "1"
         let conversation: Int32 = 9001
         isUITestFixture = true
+        uiTestRoomMembersFixture = roomMembersFixture
         uiTestClearsUnreadOnFocus = unreadClearFixture
         uiTestDelaysDirectRouteAction = delayedRouteFixture
         ready = !delayedRouteFixture
@@ -345,6 +367,7 @@ final class AppModel: ObservableObject {
                 jid: "visibility@example.invalid",
                 name: "Visibility Regression",
                 encryption: "NONE",
+                kind: roomMembersFixture ? "groupchat" : "chat",
                 unread: unreadClearFixture ? 3 : 0),
         ]
         if delayedRouteFixture {
@@ -357,6 +380,29 @@ final class AppModel: ObservableObject {
         } else {
             updateConversations(conversationSnapshot)
             navigation = unreadClearFixture ? [] : [conversation]
+        }
+        if roomMembersFixture {
+            occupants[conversation] = [
+                Occupant(
+                    nick: "Fixture User",
+                    jid: "visibility@example.invalid/Fixture User",
+                    realJid: "fixture@example.invalid",
+                    isSelf: true,
+                    affiliation: "owner",
+                    role: "moderator"),
+            ]
+            offlineMembers[conversation] = [
+                OfflineMember(
+                    id: "offline:offline-owner@example.invalid",
+                    name: "Offline Owner",
+                    jid: "offline-owner@example.invalid",
+                    affiliation: "owner"),
+                OfflineMember(
+                    id: "offline:offline-member@example.invalid",
+                    name: "Offline Member",
+                    jid: "offline-member@example.invalid",
+                    affiliation: "member"),
+            ]
         }
 
         if let encoded = env["DINO_UI_TEST_IMAGE_DATA"],
@@ -734,7 +780,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func requestRoomInfo(_ id: Int32) { GeckoCore.shared.requestRoomInfo(id) }
+    func requestRoomInfo(_ id: Int32) {
+#if DEBUG
+        if uiTestRoomMembersFixture { return }
+#endif
+        GeckoCore.shared.requestRoomInfo(id)
+    }
     func setRoomSubject(_ id: Int32, _ subject: String) { GeckoCore.shared.mucSetSubject(id, subject: subject) }
     func inviteToRoom(_ id: Int32, jid: String) { GeckoCore.shared.mucInvite(id, jid: jid) }
     func setRoomName(_ id: Int32, _ name: String) { GeckoCore.shared.mucSetName(id, name: name) }
@@ -753,6 +804,9 @@ final class AppModel: ObservableObject {
     }
 
     func requestOccupants(_ id: Int32) {
+#if DEBUG
+        if uiTestRoomMembersFixture { return }
+#endif
         GeckoCore.shared.requestOccupants(id)
     }
 
@@ -783,6 +837,9 @@ final class AppModel: ObservableObject {
     }
 
     func ensureAvatar(for jid: String) {
+#if DEBUG
+        if uiTestRoomMembersFixture { return }
+#endif
         if avatars[jid] == nil && !requestedAvatars.contains(jid) {
             requestedAvatars.insert(jid)
             GeckoCore.shared.requestAvatar(jid: jid)
@@ -1090,8 +1147,10 @@ final class AppModel: ObservableObject {
                 }
             }
         case "occupants":
-            if let cid = e["conversation"] as? Int, let list = e["list"] as? [[String: Any]] {
-                occupants[Int32(cid)] = list.compactMap { o in
+            if let cid = e["conversation"] as? Int {
+                let key = Int32(cid)
+                let list = e["list"] as? [[String: Any]] ?? []
+                occupants[key] = list.compactMap { o in
                     guard let nick = o["nick"] as? String else { return nil }
                     let real = o["real_jid"] as? String
                     return Occupant(
@@ -1101,7 +1160,20 @@ final class AppModel: ObservableObject {
                         isSelf: o["self"] as? Bool ?? false,
                         affiliation: o["affiliation"] as? String ?? "none",
                         role: o["role"] as? String ?? "none")
-                }.sorted { $0.nick.lowercased() < $1.nick.lowercased() }
+                }.sorted { $0.nick.localizedCaseInsensitiveCompare($1.nick) == .orderedAscending }
+                offlineMembers[key] = (e["offline"] as? [[String: Any]] ?? []).compactMap { m in
+                    guard let id = m["id"] as? String,
+                          let name = m["name"] as? String,
+                          let jid = m["jid"] as? String
+                    else { return nil }
+                    return OfflineMember(
+                        id: id,
+                        name: name,
+                        jid: jid,
+                        affiliation: m["affiliation"] as? String ?? "member")
+                }.sorted {
+                    $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                }
             }
         case "self_presence":
             selfShow = e["show"] as? String ?? "online"
@@ -1312,6 +1384,7 @@ final class AppModel: ObservableObject {
         chatStates[id] = nil
         typingNames[id] = nil
         occupants[id] = nil
+        offlineMembers[id] = nil
         roomInfo[id] = nil
     }
 

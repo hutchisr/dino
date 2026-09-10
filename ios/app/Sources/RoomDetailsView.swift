@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Group-chat details: header, owner settings (name / private / moderated),
-/// topic, invite, and the participant list (each row pushes a MemberDetailView).
+/// topic, invite, and separate online-participant and offline-member lists.
 struct RoomDetailsView: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
@@ -20,6 +20,7 @@ struct RoomDetailsView: View {
     @FocusState private var inviteFocused: Bool
 
     private var occupants: [Occupant] { model.occupants[conversationId] ?? [] }
+    private var offlineMembers: [OfflineMember] { model.offlineMembers[conversationId] ?? [] }
     private var me: Occupant? { occupants.first { $0.isSelf } }
     private var info: RoomInfo { model.roomInfo[conversationId] ?? RoomInfo() }
     private var conversation: XmppConversation? { model.conversations.first { $0.id == conversationId } }
@@ -41,6 +42,7 @@ struct RoomDetailsView: View {
                 if info.iAmOwner { settingsSection }
                 inviteSection
                 participantsSection
+                if !offlineMembers.isEmpty { offlineMembersSection }
             }
             .navigationTitle("Room details")
             .navigationBarTitleDisplayMode(.inline)
@@ -210,7 +212,7 @@ struct RoomDetailsView: View {
     }
 
     private var participantsSection: some View {
-        Section("Participants (\(occupants.count))") {
+        Section("Online (\(occupants.count))") {
             ForEach(occupants) { occupant in
                 NavigationLink {
                     MemberDetailView(conversationId: conversationId, occupant: occupant, me: me,
@@ -221,6 +223,34 @@ struct RoomDetailsView: View {
                 }
             }
         }
+    }
+
+    private var offlineMembersSection: some View {
+        Section("Offline (\(offlineMembers.count))") {
+            ForEach(offlineMembers) { member in
+                offlineMemberRow(member)
+            }
+        }
+    }
+
+    private func offlineMemberRow(_ member: OfflineMember) -> some View {
+        HStack(spacing: 10) {
+            AvatarView(jid: member.jid, name: member.name, isGroup: false, size: 32,
+                       avatarPath: model.avatars[member.jid],
+                       requestAvatar: { model.ensureAvatar(for: member.jid) })
+            VStack(alignment: .leading, spacing: 1) {
+                Text(member.name).foregroundStyle(.primary)
+                if member.name != member.jid {
+                    Text(member.jid).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer()
+            if let badge = member.badge {
+                MemberBadge(text: badge, color: member.affiliation == "owner" ? .orange : .blue)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(member.name), offline")
     }
 
     private func sendInvite() {

@@ -135,6 +135,10 @@ xcodebuild test -project Gecko.xcodeproj -scheme Gecko \
   -only-testing:GeckoUITests/ChatVisibilityUITests
 ```
 
+`testRoomDetailsSeparatesOnlineAndOfflineMembers` uses
+`DINO_UI_TEST_ROOM_MEMBERS=1` with that fixture to open a group chat's Room
+Details sheet and verify distinct online-participant and offline-member sections.
+
 `LoginUITests` uses `DINO_UI_TEST_FIXTURE=login` to bypass core startup without
 loading or changing stored accounts. Run it with
 `-only-testing:GeckoUITests/LoginUITests` on either destination. It covers the

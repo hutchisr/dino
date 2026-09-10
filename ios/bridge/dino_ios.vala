@@ -1859,6 +1859,7 @@ private static void emit_occupants(Conversation c) {
     var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
     var occupants = muc.get_occupants(c.counterpart, c.account);
     Xmpp.Jid? own = muc.get_own_jid(c.counterpart, c.account);
+    var online_real_jids = new Gee.HashSet<Xmpp.Jid>(Xmpp.Jid.hash_bare_func, Xmpp.Jid.equals_bare_func);
     var b = new StringBuilder();
     b.append_printf("{\"type\":\"occupants\",\"conversation\":%d,\"list\":[", c.id);
     bool first = true;
@@ -1870,6 +1871,7 @@ private static void emit_occupants(Conversation c) {
             bool is_self = own != null && own.equals(occupant);
             // Real bare jid is known only in non-anonymous rooms; "" otherwise.
             Xmpp.Jid? real = muc.get_real_jid(occupant, c.account);
+            if (real != null) online_real_jids.add(real.bare_jid);
             // Push the occupant's avatar (keyed by their full room jid) so
             // the list can show it.
             push_avatar(c.account, occupant);
@@ -1879,6 +1881,30 @@ private static void emit_occupants(Conversation c) {
                 esc(real != null ? real.bare_jid.to_string() : ""),
                 affiliation_name(muc.get_affiliation(c.counterpart, occupant, c.account)),
                 role_name(muc.get_role(occupant, c.account))));
+        }
+    }
+    b.append("],\"offline\":[");
+    first = true;
+    // Only private rooms reveal every online occupant's real JID, which lets
+    // us distinguish cached members who are genuinely offline.
+    if (room_is_private(c)) {
+        var members = muc.get_offline_members(c.counterpart, c.account);
+        if (members != null) {
+            foreach (Xmpp.Jid member in members) {
+                if (member.equals_bare(c.account.bare_jid) || online_real_jids.contains(member.bare_jid)) continue;
+                var affiliation = muc.get_affiliation(c.counterpart, member, c.account);
+                if (affiliation != Xmpp.Xep.Muc.Affiliation.MEMBER
+                        && affiliation != Xmpp.Xep.Muc.Affiliation.ADMIN
+                        && affiliation != Xmpp.Xep.Muc.Affiliation.OWNER) continue;
+                if (!first) b.append_c(',');
+                first = false;
+                string name = Dino.get_real_display_name(app.stream_interactor, c.account, member)
+                    ?? member.localpart ?? member.domainpart;
+                push_avatar(c.account, member.bare_jid);
+                b.append("{\"id\":\"offline:%s\",\"name\":\"%s\",\"jid\":\"%s\",\"affiliation\":\"%s\"}".printf(
+                    esc(member.bare_jid.to_string()), esc(name), esc(member.bare_jid.to_string()),
+                    affiliation_name(affiliation)));
+            }
         }
     }
     b.append("]}");
