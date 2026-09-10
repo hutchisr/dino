@@ -903,13 +903,14 @@ struct SwiftUIMessageList: View {
         rowPresentationCache.rows(
             messages: messages,
             messageRevision: messageRevision,
-            conversationId: conversationId,
-            isGroupchat: isGroupchat,
-            avatarPaths: avatarPaths,
-            avatarRevision: avatarRevision,
-            calendar: calendar,
-            localeIdentifier: locale.identifier,
-            timeZoneIdentifier: timeZone.identifier)
+            context: RowPresentationContext(
+                conversationId: conversationId,
+                isGroupchat: isGroupchat,
+                avatarPaths: avatarPaths,
+                avatarRevision: avatarRevision,
+                calendar: calendar,
+                localeIdentifier: locale.identifier,
+                timeZoneIdentifier: timeZone.identifier))
     }
 
     @ViewBuilder
@@ -969,46 +970,50 @@ struct SwiftUIMessageList: View {
     /// Reference-backed derived-data cache: per-frame scroll state still
     /// invalidates `body`, but only message/avatar/calendar revisions rebuild
     /// neighbour grouping, day labels, and avatar presentation.
+    private struct RowPresentationContext {
+        let conversationId: Int32
+        let isGroupchat: Bool
+        let avatarPaths: [String: String]
+        let avatarRevision: Int
+        let calendar: Calendar
+        let localeIdentifier: String
+        let timeZoneIdentifier: String
+    }
+
+    private struct RowPresentationCacheKey: Equatable {
+        let conversationId: Int32
+        let messageRevision: Int
+        let messageCount: Int
+        let firstMessageID: Int32?
+        let lastMessageID: Int32?
+        let isGroupchat: Bool
+        let avatarRevision: Int
+        let calendarIdentifier: String
+        let localeIdentifier: String
+        let timeZoneIdentifier: String
+    }
+
     @MainActor
     private final class RowPresentationCache {
-        private struct Key: Equatable {
-            let conversationId: Int32
-            let messageRevision: Int
-            let messageCount: Int
-            let firstMessageID: Int32?
-            let lastMessageID: Int32?
-            let isGroupchat: Bool
-            let avatarRevision: Int
-            let calendarIdentifier: String
-            let localeIdentifier: String
-            let timeZoneIdentifier: String
-        }
-
-        private var key: Key?
+        private var key: RowPresentationCacheKey?
         private var cachedRows: [Row] = []
 
         func rows(
             messages: [ChatMessage],
             messageRevision: Int,
-            conversationId: Int32,
-            isGroupchat: Bool,
-            avatarPaths: [String: String],
-            avatarRevision: Int,
-            calendar: Calendar,
-            localeIdentifier: String,
-            timeZoneIdentifier: String
+            context: RowPresentationContext
         ) -> [Row] {
-            let nextKey = Key(
-                conversationId: conversationId,
+            let nextKey = RowPresentationCacheKey(
+                conversationId: context.conversationId,
                 messageRevision: messageRevision,
                 messageCount: messages.count,
                 firstMessageID: messages.first?.id,
                 lastMessageID: messages.last?.id,
-                isGroupchat: isGroupchat,
-                avatarRevision: avatarRevision,
-                calendarIdentifier: String(describing: calendar.identifier),
-                localeIdentifier: localeIdentifier,
-                timeZoneIdentifier: timeZoneIdentifier)
+                isGroupchat: context.isGroupchat,
+                avatarRevision: context.avatarRevision,
+                calendarIdentifier: String(describing: context.calendar.identifier),
+                localeIdentifier: context.localeIdentifier,
+                timeZoneIdentifier: context.timeZoneIdentifier)
             if key == nextKey {
                 return cachedRows
             }
@@ -1017,11 +1022,11 @@ struct SwiftUIMessageList: View {
             output.reserveCapacity(messages.count)
             for (index, message) in messages.enumerated() {
                 let startsDay = index == 0
-                    || !calendar.isDate(message.time, inSameDayAs: messages[index - 1].time)
-                let showsSender = isGroupchat && message.direction == "in"
+                    || !context.calendar.isDate(message.time, inSameDayAs: messages[index - 1].time)
+                let showsSender = context.isGroupchat && message.direction == "in"
                     && (startsDay || messages[index - 1].from != message.from)
-                let avatarPath = isGroupchat && message.direction == "in"
-                    ? avatarPaths[message.from]
+                let avatarPath = context.isGroupchat && message.direction == "in"
+                    ? context.avatarPaths[message.from]
                     : nil
                 output.append(Row(
                     msg: message,

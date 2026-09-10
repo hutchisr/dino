@@ -2631,9 +2631,15 @@ struct ChatView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             if model.roomInfo[conversationId]?.iAmOwner == true {
-                Text("End-to-end encryption needs a private room (members-only, with member addresses visible). Make it private to enable encryption, then tap the lock.")
+                Text(
+                    "End-to-end encryption needs a private room (members-only, with member addresses visible). " +
+                        "Make it private to enable encryption, then tap the lock."
+                )
             } else {
-                Text("End-to-end encryption needs a private room (members-only, with member addresses visible). Ask a room owner to make it private.")
+                Text(
+                    "End-to-end encryption needs a private room (members-only, with member addresses visible). " +
+                        "Ask a room owner to make it private."
+                )
             }
         }
     }

@@ -15,7 +15,6 @@ final class AttachmentStagingTests: XCTestCase {
         XCTAssertFalse(AttachmentStaging.canStageFile(byteCount: -1, maxByteCount: 10))
     }
 
-
     func testTemporaryCopyURLPreservesSourceName() {
         let id = UUID(uuidString: "00000000-0000-0000-0000-000000000123")!
         let temp = URL(fileURLWithPath: "/tmp/gecko")

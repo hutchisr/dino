@@ -17,7 +17,6 @@ enum AttachmentStagingError: LocalizedError, Equatable {
     }
 }
 
-
 enum AttachmentStaging {
     static let maxByteCount: Int64 = 512 * 1024 * 1024
     private static let directoryPrefix = "GeckoAttachment-"
