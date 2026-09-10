@@ -25,6 +25,9 @@ final class CatalystInteractionUITests: XCTestCase {
     }
 
     private var editor: XCUIElement { composer.textViews.firstMatch }
+    private var field: XCUIElement {
+        composer.descendants(matching: .any)["chat.composer.field"]
+    }
 
     private var chatWindow: XCUIElement {
         app.children(matching: .window).containing(.any, identifier: "chat.composer").firstMatch
@@ -35,6 +38,34 @@ final class CatalystInteractionUITests: XCTestCase {
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Newest fixture message"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
+    }
+
+    func testComposerGlassFieldRoutesPaddingClicksToEditor() {
+        launchChat()
+        let original = String(repeating: "0123456789", count: 6)
+        let attach = app.buttons["Attach"]
+        XCTAssertTrue(attach.isHittable)
+        XCTAssertTrue(field.exists)
+
+        let initialTop = CGPoint(x: field.frame.midX, y: field.frame.minY + 3)
+        let initialBottom = CGPoint(x: field.frame.midX, y: field.frame.maxY - 3)
+        XCTAssertTrue(editor.frame.contains(initialTop), "The native editor does not fill the glass field's top edge")
+        XCTAssertTrue(editor.frame.contains(initialBottom), "The native editor does not fill the glass field's bottom edge")
+
+        editor.click()
+        editor.typeText(original)
+        let send = app.buttons["Send"]
+        XCTAssertTrue(send.isHittable)
+        let clickPoint = CGPoint(x: field.frame.midX, y: field.frame.minY + 3)
+        XCTAssertTrue(editor.frame.contains(clickPoint), "The native editor does not fill the expanded glass field")
+        chatWindow.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: clickPoint.x - chatWindow.frame.minX, dy: clickPoint.y - chatWindow.frame.minY))
+            .click()
+        app.typeText("|")
+
+        let edited = editor.value as? String
+        XCTAssertEqual(edited?.count, original.count + 1)
+        XCTAssertFalse(edited?.hasSuffix("|") == true, "The glass field did not route the middle click to the editor")
     }
 
     func testClosingMainWindowKeepsDraftAndReopensSameChat() {

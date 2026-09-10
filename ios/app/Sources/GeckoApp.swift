@@ -1647,6 +1647,8 @@ struct ChatView: View {
     @State private var showAttach = false
     /// Shared height for the composer's buttons and text field so they align.
     private let composerControlHeight: CGFloat = 44
+    private let composerFieldHorizontalInset: CGFloat = 16
+    private let composerFieldVerticalInset: CGFloat = 11
 #if targetEnvironment(macCatalyst)
     private let floatingButtonSize: CGFloat = 36
 #else
@@ -1939,8 +1941,8 @@ struct ChatView: View {
             text: $draft,
             maxLines: 6,
             minimumHeight: 0,
-            horizontalInset: 0,
-            verticalInset: 0,
+            horizontalInset: composerFieldHorizontalInset,
+            verticalInset: composerFieldVerticalInset,
             verticalAlignmentOffset: 0,
             canPasteImages: editing == nil,
             onImagePaste: stagePastedImage,
@@ -1951,8 +1953,8 @@ struct ChatView: View {
             text: $draft,
             maxLines: 6,
             minimumHeight: 0,
-            horizontalInset: 0,
-            verticalInset: 0,
+            horizontalInset: composerFieldHorizontalInset,
+            verticalInset: composerFieldVerticalInset,
             verticalAlignmentOffset: 0,
             canPasteImages: editing == nil,
             onImagePaste: stagePastedImage
@@ -2002,14 +2004,14 @@ struct ChatView: View {
                     Text("Message")
                         .foregroundStyle(.secondary)
                         .allowsHitTesting(false)
+                        .padding(.horizontal, composerFieldHorizontalInset)
+                        .padding(.vertical, composerFieldVerticalInset)
                 }
                 composerTextView
             }
-            // Vertical inset too (not just horizontal) so multi-line text
-            // stays inside the capsule instead of spilling past its
-            // rounded top/bottom edges.
-            .padding(.horizontal, 16)
-            .padding(.vertical, 11)
+            // Keep padding inside the native text view so the entire visible
+            // glass field accepts pointer clicks. Its vertical inset also keeps
+            // multi-line text inside the rounded top and bottom edges.
             .frame(maxWidth: .infinity, minHeight: composerControlHeight)
             // RoundedRectangle, not Capsule: a wide multi-line field made
             // a Capsule rounds its left/right ends into big semicircles
@@ -2017,6 +2019,8 @@ struct ChatView: View {
             // corners keep a full-width text area; at one line (44pt tall)
             // it still reads as a pill.
             .glassEffect(.regular, in: .rect(cornerRadius: 22))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("chat.composer.field")
             .glassEffectID("composerField", in: composerGlass)
             .onChange(of: draft) { _, value in
                 if editing == nil {
