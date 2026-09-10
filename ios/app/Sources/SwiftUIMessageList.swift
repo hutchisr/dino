@@ -1057,6 +1057,7 @@ struct SwiftUIMessageList: View {
 
         func updateUIView(_ view: MessageFrameProbe, context _: Context) {
             view.onLayout = onLayout
+            view.reportLayoutIfNeeded()
         }
 
         static func dismantleUIView(_ view: MessageFrameProbe, coordinator _: ()) {
@@ -1071,6 +1072,7 @@ struct SwiftUIMessageList: View {
         let metrics: ScrollMetrics
         let messageID: Int32
         var onLayout: (() -> Void)?
+        private var lastReportedHeight: CGFloat?
 
         init(metrics: ScrollMetrics, messageID: Int32) {
             self.metrics = metrics
@@ -1086,12 +1088,21 @@ struct SwiftUIMessageList: View {
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            if window != nil { onLayout?() }
+            reportLayoutIfNeeded()
         }
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            if window != nil { onLayout?() }
+            if window == nil { lastReportedHeight = nil }
+            reportLayoutIfNeeded()
+        }
+
+        func reportLayoutIfNeeded() {
+            guard window != nil, let onLayout else { return }
+            let height = bounds.height
+            guard lastReportedHeight != height else { return }
+            lastReportedHeight = height
+            onLayout()
         }
     }
 

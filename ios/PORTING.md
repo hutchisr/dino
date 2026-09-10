@@ -202,7 +202,8 @@ The desktop-only interaction tests reuse the account-free `chat-visibility`
 fixture. They cover main-window close/Dock reopen and app hide/activation with
 draft preservation, composer autofocus and Return versus Shift-Return,
 Command-N Contacts and cancellation, Command-comma Settings and Escape,
-text Copy/Reply cancellation, and repeated secondary-media-window closure.
+text Copy/Reply cancellation, repeated main-window corner resizing with
+chat/editor responsiveness, and repeated secondary-media-window closure.
 Composer submission checks local draft/focus behavior, not XMPP delivery.
 Native window counts use direct application children because Catalyst also
 exposes nested UIKit accessibility windows. Reopening the closed main window
@@ -231,7 +232,9 @@ backgrounds during coalesced post-layout scroll work. Keep per-row SwiftUI
 can loop in AttributeGraph row placement and coordinate-space resolution before
 observer actions run, so deferring those actions alone does not prevent a hang.
 The native probes are weakly registered and do not publish geometry into
-SwiftUI state during layout.
+SwiftUI state during layout. They enqueue a post-layout sample only on window
+attachment or when a row's height changes; width-only viewport changes remain
+covered by the outer scroll geometry observer.
 
 ## Changes to the main tree
 

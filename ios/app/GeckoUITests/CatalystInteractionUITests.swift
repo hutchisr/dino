@@ -33,6 +33,15 @@ final class CatalystInteractionUITests: XCTestCase {
         app.children(matching: .window).containing(.any, identifier: "chat.composer").firstMatch
     }
 
+    private func resizeChatWindow(by delta: CGVector) {
+        let before = chatWindow.frame
+        let corner = chatWindow.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1))
+            .withOffset(CGVector(dx: -4, dy: -4))
+        corner.press(forDuration: 0.1, thenDragTo: corner.withOffset(delta))
+        XCTAssertEqual(chatWindow.frame.width, before.width + delta.dx, accuracy: 8)
+        XCTAssertEqual(chatWindow.frame.height, before.height + delta.dy, accuracy: 8)
+    }
+
     private func launchChat() {
         app.launch()
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
@@ -66,6 +75,27 @@ final class CatalystInteractionUITests: XCTestCase {
         let edited = editor.value as? String
         XCTAssertEqual(edited?.count, original.count + 1)
         XCTAssertFalse(edited?.hasSuffix("|") == true, "The glass field did not route the middle click to the editor")
+    }
+    func testRepeatedWindowResizingKeepsChatResponsive() {
+        app.launchArguments += [
+            "-macWindowContentWidth", "1100",
+            "-macWindowContentHeight", "760",
+        ]
+        launchChat()
+        let newest = app.staticTexts["Newest fixture message"]
+        editor.click()
+        editor.typeText("Draft during resize")
+
+        for _ in 0..<6 {
+            resizeChatWindow(by: CGVector(dx: -160, dy: -100))
+            XCTAssertTrue(newest.isHittable)
+            resizeChatWindow(by: CGVector(dx: 160, dy: 100))
+            XCTAssertTrue(newest.isHittable)
+        }
+
+        editor.click()
+        editor.typeText(" remains editable")
+        XCTAssertEqual(editor.value as? String, "Draft during resize remains editable")
     }
 
     func testClosingMainWindowKeepsDraftAndReopensSameChat() {
