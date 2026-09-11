@@ -200,10 +200,11 @@ runners serial: the keyboard, Dock, clipboard, and native dialogs are shared.
 
 The desktop-only interaction tests reuse the account-free `chat-visibility`
 fixture. They cover main-window close/Dock reopen and app hide/activation with
-draft preservation, composer autofocus and Return versus Shift-Return,
-Command-N Contacts and cancellation, Command-comma Settings and Escape,
-text Copy/Reply cancellation, repeated main-window corner resizing with
-chat/editor responsiveness, and repeated secondary-media-window closure.
+draft preservation, initial and conversation-switch composer autofocus,
+Return versus Shift-Return, Command-N Contacts and cancellation,
+Command-comma Settings and Escape, text Copy/Reply cancellation, repeated
+main-window corner resizing with chat/editor responsiveness, and repeated
+secondary-media-window closure.
 Composer submission checks local draft/focus behavior, not XMPP delivery.
 Native window counts use direct application children because Catalyst also
 exposes nested UIKit accessibility windows. Reopening the closed main window

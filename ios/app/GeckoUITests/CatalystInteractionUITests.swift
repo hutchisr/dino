@@ -161,6 +161,37 @@ final class CatalystInteractionUITests: XCTestCase {
         XCTAssertEqual(editor.value as? String, "Next draft", "Submitting lost composer keyboard focus")
     }
 
+    func testSwitchingConversationsMovesKeyboardFocusToComposer() {
+        app.launchEnvironment["DINO_UI_TEST_SWITCH_CONVERSATIONS"] = "1"
+        launchChat()
+        let first = app.staticTexts["Visibility Regression"]
+        let second = app.staticTexts["Focus Target"]
+        XCTAssertTrue(first.exists)
+        XCTAssertTrue(second.waitForExistence(timeout: 3))
+
+        for index in 0..<4 {
+            second.tap()
+            XCTAssertTrue(app.staticTexts["Second fixture message"].waitForExistence(timeout: 3))
+            let secondDraft = editor.value as? String ?? ""
+            let secondInput = "B\(index)"
+            app.typeText(secondInput)
+            XCTAssertEqual(
+                editor.value as? String,
+                secondDraft + secondInput,
+                "Switching to the second conversation left focus outside its composer")
+
+            first.tap()
+            XCTAssertTrue(app.staticTexts["Newest fixture message"].waitForExistence(timeout: 3))
+            let firstDraft = editor.value as? String ?? ""
+            let firstInput = "A\(index)"
+            app.typeText(firstInput)
+            XCTAssertEqual(
+                editor.value as? String,
+                firstDraft + firstInput,
+                "Switching back left focus outside the first conversation's composer")
+        }
+    }
+
     func testNewMessageShortcutSearchAndCancelReturnToDraft() {
         launchChat()
         editor.click()

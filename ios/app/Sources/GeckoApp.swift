@@ -1946,6 +1946,7 @@ struct ChatView: View {
             verticalAlignmentOffset: 0,
             canPasteImages: editing == nil,
             onImagePaste: stagePastedImage,
+            autofocusID: conversationId,
             onSubmit: submitComposer
         )
 #else

@@ -354,14 +354,16 @@ final class AppModel: ObservableObject {
         let unreadClearFixture = env["DINO_UI_TEST_UNREAD_CLEAR"] == "1"
         let delayedRouteFixture = env["DINO_UI_TEST_DELAYED_ROUTE"] == "1"
         let roomMembersFixture = env["DINO_UI_TEST_ROOM_MEMBERS"] == "1"
+        let switchConversationsFixture = env["DINO_UI_TEST_SWITCH_CONVERSATIONS"] == "1"
         let conversation: Int32 = 9001
+        let secondaryConversation: Int32 = 9002
         isUITestFixture = true
         uiTestRoomMembersFixture = roomMembersFixture
         uiTestClearsUnreadOnFocus = unreadClearFixture
         uiTestDelaysDirectRouteAction = delayedRouteFixture
         ready = !delayedRouteFixture
         accounts = [XmppAccount(id: "fixture@example.invalid", state: "connected")]
-        let conversationSnapshot = [
+        var conversationSnapshot = [
             XmppConversation(
                 id: conversation,
                 jid: "visibility@example.invalid",
@@ -370,6 +372,16 @@ final class AppModel: ObservableObject {
                 kind: roomMembersFixture ? "groupchat" : "chat",
                 unread: unreadClearFixture ? 3 : 0),
         ]
+        if switchConversationsFixture {
+            conversationSnapshot.append(
+                XmppConversation(
+                    id: secondaryConversation,
+                    jid: "focus-target@example.invalid",
+                    name: "Focus Target",
+                    encryption: "NONE",
+                    kind: "chat",
+                    unread: 0))
+        }
         if delayedRouteFixture {
             navigation = []
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
@@ -523,6 +535,15 @@ final class AppModel: ObservableObject {
             }
             self.messages[conversation] = fixture
             self.messageRevisions[conversation, default: 0] += 1
+            if switchConversationsFixture {
+                self.messages[secondaryConversation] = [
+                    ChatMessage(
+                        id: 9_200, content: "text", direction: "in",
+                        from: "focus-target@example.invalid", body: "Second fixture message",
+                        time: start.addingTimeInterval(4_860), encryption: "NONE"),
+                ]
+                self.messageRevisions[secondaryConversation, default: 0] += 1
+            }
         }
 
         guard !composerFixture, !progressFixture else { return true }

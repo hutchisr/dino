@@ -16,6 +16,7 @@ struct PasteAwareComposerTextView: UIViewRepresentable {
     let canPasteImages: Bool
     let onImagePaste: (ComposerPastedImage) -> Void
 #if targetEnvironment(macCatalyst)
+    let autofocusID: Int32
     let onSubmit: () -> Void
 #endif
 
@@ -46,7 +47,7 @@ struct PasteAwareComposerTextView: UIViewRepresentable {
         view.onSubmit = { [weak coordinator = context.coordinator] in
             coordinator?.handleSubmit()
         }
-        view.autofocusWhenAttached = true
+        view.requestAutofocus(for: autofocusID)
 #endif
         return view
     }
@@ -64,6 +65,9 @@ struct PasteAwareComposerTextView: UIViewRepresentable {
             uiView.invalidateIntrinsicContentSize()
         }
         updateScrolling(uiView)
+#if targetEnvironment(macCatalyst)
+        uiView.requestAutofocus(for: autofocusID)
+#endif
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: PasteAwareTextView, context: Context) -> CGSize? {
@@ -143,17 +147,57 @@ final class PasteAwareTextView: UITextView {
     var onImagePaste: ((ComposerPastedImage) -> Void)?
 #if targetEnvironment(macCatalyst)
     var onSubmit: (() -> Void)?
-    var autofocusWhenAttached = false
-    private var didAutofocus = false
+    private var autofocusID: Int32?
+    private var scheduledAutofocusID: Int32?
+    private var completedAutofocusID: Int32?
+    private var autofocusAttempts = 0
+
+    /// Re-arm autofocus when SwiftUI reuses this native view for another chat.
+    /// A temporarily rejected responder request gets two bounded retries.
+    func requestAutofocus(for id: Int32) {
+        if autofocusID != id {
+            autofocusID = id
+            completedAutofocusID = nil
+            autofocusAttempts = 0
+        }
+        scheduleAutofocus()
+    }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window != nil, autofocusWhenAttached, !didAutofocus else { return }
-        didAutofocus = true
+        if window != nil, completedAutofocusID != autofocusID {
+            autofocusAttempts = 0
+        }
+        scheduleAutofocus()
+    }
+
+    private func scheduleAutofocus() {
+        guard window != nil,
+              autofocusAttempts < 3,
+              let autofocusID,
+              completedAutofocusID != autofocusID,
+              scheduledAutofocusID != autofocusID else { return }
+        scheduledAutofocusID = autofocusID
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.window != nil else { return }
+            guard let self else { return }
+            if self.scheduledAutofocusID == autofocusID {
+                self.scheduledAutofocusID = nil
+            }
+            guard self.window != nil, self.autofocusID == autofocusID else { return }
+            self.autofocusAttempts += 1
             let focused = self.becomeFirstResponder()
-            geckoDebugLog("gecko-composer: Catalyst autofocus=%d", focused ? 1 : 0)
+            if focused {
+                self.completedAutofocusID = autofocusID
+            } else if self.autofocusAttempts < 3 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                    guard self?.autofocusID == autofocusID else { return }
+                    self?.scheduleAutofocus()
+                }
+            }
+            geckoDebugLog(
+                "gecko-composer: Catalyst autofocus=%d attempt=%d",
+                focused ? 1 : 0,
+                self.autofocusAttempts)
         }
     }
 
