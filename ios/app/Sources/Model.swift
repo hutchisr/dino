@@ -400,8 +400,15 @@ final class AppModel: ObservableObject {
                     jid: "visibility@example.invalid/Fixture User",
                     realJid: "fixture@example.invalid",
                     isSelf: true,
-                    affiliation: "owner",
+                    affiliation: env["DINO_UI_TEST_ROOM_AFFILIATION"] ?? "owner",
                     role: "moderator"),
+                Occupant(
+                    nick: "Online Member",
+                    jid: "visibility@example.invalid/Online Member",
+                    realJid: "online-member@example.invalid",
+                    isSelf: false,
+                    affiliation: "member",
+                    role: "participant"),
             ]
             offlineMembers[conversation] = [
                 OfflineMember(
@@ -774,8 +781,8 @@ final class AppModel: ObservableObject {
         if navigation.contains(id) { replaceNavigation(with: []) }
     }
 
-    func startOccupantDM(_ id: Int32, nick: String) {
-        GeckoCore.shared.startOccupantDM(id, nick: nick)
+    func startRoomMemberDM(_ id: Int32, jid: String) {
+        GeckoCore.shared.startRoomMemberDM(id, jid: jid)
     }
 
     func mucKick(_ id: Int32, nick: String) {
@@ -783,9 +790,8 @@ final class AppModel: ObservableObject {
         refreshOccupantsSoon(id)
     }
 
-    func mucSetAffiliation(_ id: Int32, nick: String, affiliation: String) {
-        GeckoCore.shared.mucSetAffiliation(id, nick: nick, affiliation: affiliation)
-        refreshOccupantsSoon(id)
+    func mucSetAffiliation(_ id: Int32, jid: String, affiliation: String) {
+        GeckoCore.shared.mucSetAffiliation(id, jid: jid, affiliation: affiliation)
     }
 
     func mucSetRole(_ id: Int32, nick: String, role: String) {

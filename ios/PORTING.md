@@ -138,6 +138,18 @@ xcodebuild test -project Gecko.xcodeproj -scheme Gecko \
 `testRoomDetailsSeparatesOnlineAndOfflineMembers` uses
 `DINO_UI_TEST_ROOM_MEMBERS=1` with that fixture to open a group chat's Room
 Details sheet and verify distinct online-participant and offline-member sections.
+Offline rows open the same member-details screen as online participants, with
+direct messaging, affiliation changes, and bans subject to the same owner/admin
+permissions. Kick and voice controls remain online-only. Offline actions target
+real bare JIDs, and affiliation caches update only after a successful server
+acknowledgement. Online anonymous participants retain nickname-based moderation
+and room-private messaging.
+
+The room-controls tests also use `DINO_UI_TEST_ROOM_AFFILIATION` to cover owner,
+admin, and ordinary-member permissions, online-only controls, and cancellation
+of a ban confirmation on iOS and Catalyst. Host protocol regressions run with
+`meson compile -C _build xmpp-vala-test && _build/xmpp-vala/xmpp-vala-test -p /Muc`
+and cover acknowledged/rejected affiliation updates and anonymous nick targeting.
 
 `LoginUITests` uses `DINO_UI_TEST_FIXTURE=login` to bypass core startup without
 loading or changing stored accounts. Run it with

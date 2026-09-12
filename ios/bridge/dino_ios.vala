@@ -1949,18 +1949,51 @@ private static string role_name(Xmpp.Xep.Muc.Role? r) {
     }
 }
 
-// --- MUC moderation (owner/admin/moderator actions on an occupant) --------
-// Each takes the groupchat conversation + the occupant's nick. After the
-// server applies the change it broadcasts updated presence; the UI re-requests
-// the occupant list to reflect it.
+// --- MUC moderation -----------------------------------------------------
+// Kick and voice target an online nickname; affiliations target a member JID.
 public void muc_kick(int conversation_id, string nick) {
     muc_occupant_action(conversation_id, nick, (muc, c, n) => muc.kick(c.account, c.counterpart, n));
 }
 
 // affiliation: "owner" | "admin" | "member" | "outcast" (ban) | "none"
-public void muc_set_affiliation(int conversation_id, string nick, string affiliation) {
+public void muc_set_affiliation(int conversation_id, string jid, string affiliation) {
+    int cid = conversation_id;
+    string target_jid = jid;
     string a = affiliation;
-    muc_occupant_action(conversation_id, nick, (muc, c, n) => muc.change_affiliation(c.account, c.counterpart, n, a));
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null || c.type_ != Conversation.Type.GROUPCHAT) return Source.REMOVE;
+        var stream = app.stream_interactor.get_stream(c.account);
+        if (stream == null) {
+            emit("{\"type\":\"error\",\"message\":\"Could not change affiliation while disconnected\"}");
+            emit_occupants(c);
+            return Source.REMOVE;
+        }
+        try {
+            var target = new Xmpp.Jid(target_jid);
+            Xmpp.Jid? real = target;
+            string? nick = null;
+            if (target.is_full()) {
+                if (!target.equals_bare(c.counterpart)) {
+                    emit("{\"type\":\"error\",\"message\":\"Invalid room member JID\"}");
+                    return Source.REMOVE;
+                }
+                real = app.stream_interactor.get_module(Dino.MucManager.IDENTITY).get_real_jid(target, c.account);
+                if (real == null) nick = target.resourcepart;
+            }
+            var module = stream.get_module(Xmpp.Xep.Muc.Module.IDENTITY);
+            module.change_affiliation.begin(stream, c.counterpart.bare_jid, real, nick, a, (_, res) => {
+                bool success = module.change_affiliation.end(res);
+                if (!success) {
+                    emit("{\"type\":\"error\",\"message\":\"Could not change affiliation: the server rejected the request\"}");
+                }
+                emit_occupants(c);
+            });
+        } catch (Error e) {
+            emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
+        }
+        return Source.REMOVE;
+    });
 }
 
 // role: "moderator" | "participant" | "visitor" | "none"
@@ -2163,23 +2196,28 @@ public void muc_set_moderated(int conversation_id, bool moderated) {
     muc_configure(conversation_id, (form) => set_form_field(form, "muc#roomconfig_moderatedroom", m ? "1" : "0"));
 }
 
-// Open a direct chat with a MUC occupant. In a non-anonymous room we know
-// their real jid, so start a normal 1:1; otherwise fall back to a private
-// message routed through the room (GROUPCHAT_PM to room@conf/nick).
-public void start_occupant_dm(int conversation_id, string nick) {
+// Real bare JIDs open normal 1:1 chats; anonymous online occupants use a
+// private message routed through their full room JID.
+public void start_room_member_dm(int conversation_id, string jid) {
     int cid = conversation_id;
-    string n = nick;
+    string target_jid = jid;
     Idle.add(() => {
         Conversation? c = conversation_by_id(cid);
-        if (c == null) return Source.REMOVE;
+        if (c == null || c.type_ != Conversation.Type.GROUPCHAT) return Source.REMOVE;
         try {
-            var muc = app.stream_interactor.get_module(Dino.MucManager.IDENTITY);
-            Xmpp.Jid occupant = c.counterpart.with_resource(n);
-            Xmpp.Jid? real = muc.get_real_jid(occupant, c.account);
+            var target = new Xmpp.Jid(target_jid);
+            Xmpp.Jid? real = target;
+            if (target.is_full()) {
+                if (!target.equals_bare(c.counterpart)) {
+                    emit("{\"type\":\"error\",\"message\":\"Invalid room member JID\"}");
+                    return Source.REMOVE;
+                }
+                real = app.stream_interactor.get_module(Dino.MucManager.IDENTITY).get_real_jid(target, c.account);
+            }
             var cm = app.stream_interactor.get_module(Dino.ConversationManager.IDENTITY);
             Conversation conv = real != null
                 ? cm.create_conversation(real.bare_jid, c.account, Conversation.Type.CHAT)
-                : cm.create_conversation(occupant, c.account, Conversation.Type.GROUPCHAT_PM);
+                : cm.create_conversation(target, c.account, Conversation.Type.GROUPCHAT_PM);
             cm.start_conversation(conv);
             push_conversations();
             emit("{\"type\":\"open_conversation\",\"id\":%d}".printf(conv.id));

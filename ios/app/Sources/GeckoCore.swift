@@ -116,9 +116,9 @@ final class GeckoCore {
     func correctMessage(_ id: Int32, item: Int32, body: String) { dino_ios_correct_message(id, item, body) }
     func closeConversation(_ id: Int32) { dino_ios_close_conversation(id) }
     func requestOccupants(_ id: Int32) { dino_ios_request_occupants(id) }
-    func startOccupantDM(_ id: Int32, nick: String) { dino_ios_start_occupant_dm(id, nick) }
+    func startRoomMemberDM(_ id: Int32, jid: String) { dino_ios_start_room_member_dm(id, jid) }
     func mucKick(_ id: Int32, nick: String) { dino_ios_muc_kick(id, nick) }
-    func mucSetAffiliation(_ id: Int32, nick: String, affiliation: String) { dino_ios_muc_set_affiliation(id, nick, affiliation) }
+    func mucSetAffiliation(_ id: Int32, jid: String, affiliation: String) { dino_ios_muc_set_affiliation(id, jid, affiliation) }
     func mucSetRole(_ id: Int32, nick: String, role: String) { dino_ios_muc_set_role(id, nick, role) }
     func requestRoomInfo(_ id: Int32) { dino_ios_request_room_info(id) }
     func mucSetSubject(_ id: Int32, subject: String) { dino_ios_muc_set_subject(id, subject) }

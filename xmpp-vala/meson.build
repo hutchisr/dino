@@ -160,6 +160,7 @@ test_sources = [
 
     'tests/jid.vala',
     'tests/stanza.vala',
+    'tests/muc.vala',
     'tests/color.vala',
     'tests/util.vala',
 ]

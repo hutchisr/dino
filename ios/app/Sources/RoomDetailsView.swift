@@ -5,7 +5,7 @@ import SwiftUI
 struct RoomDetailsView: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
-    /// Called with a participant's nick when "Message" is chosen; the parent
+    /// Called with a member's JID when "Message" is chosen; the parent
     /// dismisses the sheet and opens the DM.
     let onSelect: (String) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -215,8 +215,8 @@ struct RoomDetailsView: View {
         Section("Online (\(occupants.count))") {
             ForEach(occupants) { occupant in
                 NavigationLink {
-                    MemberDetailView(conversationId: conversationId, occupant: occupant, me: me,
-                                     onMessage: { onSelect(occupant.nick) })
+                    MemberDetailView(conversationId: conversationId, member: .online(occupant), me: me,
+                                     onMessage: { onSelect(occupant.jid) })
                         .environmentObject(model)
                 } label: {
                     occupantRow(occupant)
@@ -228,7 +228,13 @@ struct RoomDetailsView: View {
     private var offlineMembersSection: some View {
         Section("Offline (\(offlineMembers.count))") {
             ForEach(offlineMembers) { member in
-                offlineMemberRow(member)
+                NavigationLink {
+                    MemberDetailView(conversationId: conversationId, member: .offline(member), me: me,
+                                     onMessage: { onSelect(member.jid) })
+                        .environmentObject(model)
+                } label: {
+                    offlineMemberRow(member)
+                }
             }
         }
     }

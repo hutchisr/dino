@@ -38,18 +38,63 @@ extension Occupant {
     var badgeIcon: String? { isMuted && !isModerator ? "mic.slash.fill" : nil }
 }
 
-/// Detail + moderation actions for one MUC participant. Actions are gated by
+/// Detail + moderation actions for one online or offline MUC member. Actions are gated by
 /// the viewer's own affiliation/role; the server is the final authority, so
 /// gating here only hides clearly-disallowed actions.
 struct MemberDetailView: View {
     @EnvironmentObject var model: AppModel
     let conversationId: Int32
-    let occupant: Occupant
+    let member: Member
     let me: Occupant?
     let onMessage: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var confirmKick = false
     @State private var confirmBan = false
+
+    enum Member {
+        case online(Occupant)
+        case offline(OfflineMember)
+
+        var occupant: Occupant? {
+            if case .online(let occupant) = self { return occupant }
+            return nil
+        }
+
+        var name: String {
+            switch self {
+            case .online(let occupant): return occupant.nick
+            case .offline(let member): return member.name
+            }
+        }
+
+        var jid: String {
+            switch self {
+            case .online(let occupant): return occupant.jid
+            case .offline(let member): return member.jid
+            }
+        }
+
+        var realJid: String? {
+            switch self {
+            case .online(let occupant): return occupant.realJid
+            case .offline(let member): return member.jid
+            }
+        }
+
+        var affiliation: String {
+            switch self {
+            case .online(let occupant): return occupant.affiliation
+            case .offline(let member): return member.affiliation
+            }
+        }
+
+        var badge: String? {
+            switch self {
+            case .online(let occupant): return occupant.badge
+            case .offline(let member): return member.badge
+            }
+        }
+    }
 
     private var iAmOwner: Bool { me?.isOwner ?? false }
     private var iAmAdmin: Bool { me?.isAdmin ?? false }
@@ -68,15 +113,16 @@ struct MemberDetailView: View {
     /// who passes it is an owner or admin, so they already hold both the
     /// affiliation and moderation rights the individual actions need.
     private var canManageTarget: Bool {
-        guard !occupant.isSelf else { return false }
+        guard member.occupant?.isSelf != true else { return false }
         if iAmOwner { return true }
-        if iAmAdmin { return rank(occupant.affiliation) < 2 }
+        if iAmAdmin { return rank(member.affiliation) < 2 }
         return false
     }
 
     /// Voice is meaningful only for plain members/visitors, not staff or mods.
     private var canManageVoice: Bool {
-        canManageTarget && !occupant.isModerator
+        guard let occupant = member.occupant else { return false }
+        return canManageTarget && !occupant.isModerator
             && !occupant.isOwner && !occupant.isAdmin
     }
 
@@ -84,7 +130,7 @@ struct MemberDetailView: View {
         List {
             Section { header }
 
-            if !occupant.isSelf {
+            if member.occupant?.isSelf != true {
                 Section {
                     Button(action: onMessage) {
                         Label("Message", systemImage: "message")
@@ -92,7 +138,7 @@ struct MemberDetailView: View {
                 }
             }
 
-            if canManageVoice {
+            if let occupant = member.occupant, canManageVoice {
                 Section("Voice") {
                     if occupant.hasVoice {
                         Button { run { model.mucSetRole(conversationId, nick: occupant.nick, role: "visitor") } } label: {
@@ -108,16 +154,16 @@ struct MemberDetailView: View {
 
             if canManageTarget {
                 Section("Role") {
-                    if iAmOwner && !occupant.isOwner {
+                    if iAmOwner && member.affiliation != "owner" {
                         Button { run { setAffiliation("owner") } } label: { Label("Make owner", systemImage: "crown.fill") }
                     }
-                    if iAmOwner && !occupant.isAdmin {
+                    if iAmOwner && member.affiliation != "admin" {
                         Button { run { setAffiliation("admin") } } label: { Label("Make admin", systemImage: "star.fill") }
                     }
-                    if occupant.affiliation != "member" {
+                    if member.affiliation != "member" {
                         Button { run { setAffiliation("member") } } label: { Label("Make member", systemImage: "person.fill.checkmark") }
                     }
-                    if occupant.affiliation != "none" {
+                    if member.affiliation != "none" {
                         Button { run { setAffiliation("none") } } label: { Label("Remove affiliation", systemImage: "person.fill.xmark") }
                     }
                 }
@@ -125,8 +171,10 @@ struct MemberDetailView: View {
 
             if canManageTarget {
                 Section {
-                    Button(role: .destructive) { confirmKick = true } label: {
-                        Label("Kick from room", systemImage: "door.left.hand.open")
+                    if member.occupant != nil {
+                        Button(role: .destructive) { confirmKick = true } label: {
+                            Label("Kick from room", systemImage: "door.left.hand.open")
+                        }
                     }
                     Button(role: .destructive) { confirmBan = true } label: {
                         Label("Ban from room", systemImage: "nosign")
@@ -134,12 +182,14 @@ struct MemberDetailView: View {
                 }
             }
         }
-        .navigationTitle(occupant.nick)
+        .navigationTitle(member.name)
         .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog("Kick \(occupant.nick)?", isPresented: $confirmKick, titleVisibility: .visible) {
-            Button("Kick", role: .destructive) { run { model.mucKick(conversationId, nick: occupant.nick) } }
+        .confirmationDialog("Kick \(member.name)?", isPresented: $confirmKick, titleVisibility: .visible) {
+            if let occupant = member.occupant {
+                Button("Kick", role: .destructive) { run { model.mucKick(conversationId, nick: occupant.nick) } }
+            }
         }
-        .confirmationDialog("Ban \(occupant.nick)?", isPresented: $confirmBan, titleVisibility: .visible) {
+        .confirmationDialog("Ban \(member.name)?", isPresented: $confirmBan, titleVisibility: .visible) {
             Button("Ban", role: .destructive) { run { setAffiliation("outcast") } }
         } message: {
             Text("They'll be removed and blocked from rejoining.")
@@ -148,16 +198,21 @@ struct MemberDetailView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            AvatarView(jid: occupant.jid, name: occupant.nick, isGroup: false, size: 52,
-                       avatarPath: model.avatars[occupant.jid],
-                       requestAvatar: { model.ensureAvatar(for: occupant.jid) })
+            AvatarView(jid: member.jid, name: member.name, isGroup: false, size: 52,
+                       avatarPath: model.avatars[member.jid],
+                       requestAvatar: { model.ensureAvatar(for: member.jid) })
             VStack(alignment: .leading, spacing: 2) {
-                Text(occupant.nick).font(.headline)
-                if let real = occupant.realJid {
+                Text(member.name).font(.headline)
+                if let real = member.realJid {
                     Text(real).font(.caption).foregroundStyle(.secondary)
                 }
-                if let badge = occupant.badge {
-                    MemberBadge(text: badge, color: occupant.badgeColor, systemImage: occupant.badgeIcon)
+                if member.occupant == nil {
+                    Text("Offline").font(.caption).foregroundStyle(.secondary)
+                }
+                if let badge = member.badge {
+                    MemberBadge(text: badge,
+                                color: member.occupant?.badgeColor ?? (member.affiliation == "owner" ? .orange : .blue),
+                                systemImage: member.occupant?.badgeIcon)
                 }
             }
             Spacer()
@@ -166,7 +221,7 @@ struct MemberDetailView: View {
     }
 
     private func setAffiliation(_ affiliation: String) {
-        model.mucSetAffiliation(conversationId, nick: occupant.nick, affiliation: affiliation)
+        model.mucSetAffiliation(conversationId, jid: member.jid, affiliation: affiliation)
     }
 
     /// Perform an action then pop back to the (auto-refreshing) participant list.

@@ -228,7 +228,7 @@ public class Module : XmppStreamModule {
         stream.get_module(Iq.Module.IDENTITY).send_iq(stream, iq);
     }
 
-    public async void change_affiliation(XmppStream stream, Jid muc_jid, Jid? user_jid, string? nick, string new_affiliation) {
+    public async bool change_affiliation(XmppStream stream, Jid muc_jid, Jid? user_jid, string? nick, string new_affiliation) {
         StanzaNode item_node = new StanzaNode.build("item", NS_URI_ADMIN)
                 .put_attribute("affiliation", new_affiliation, NS_URI_ADMIN);
         if (user_jid != null) {
@@ -239,7 +239,16 @@ public class Module : XmppStreamModule {
 
         StanzaNode query = new StanzaNode.build("query", NS_URI_ADMIN).add_self_xmlns().put_node(item_node);
         Iq.Stanza iq = new Iq.Stanza.set(query) { to=muc_jid };
-        yield stream.get_module(Iq.Module.IDENTITY).send_iq_async(stream, iq);
+        try {
+            Iq.Stanza result = yield stream.get_module(Iq.Module.IDENTITY).send_iq_async(stream, iq);
+            if (result.type_ != Iq.Stanza.TYPE_RESULT) return false;
+            if (user_jid != null) {
+                stream.get_flag(Flag.IDENTITY).set_offline_member(muc_jid, user_jid, parse_affiliation(new_affiliation));
+            }
+            return true;
+        } catch (IOError e) {
+            return false;
+        }
     }
 
     public async DataForms.DataForm? get_config_form(XmppStream stream, Jid jid) {

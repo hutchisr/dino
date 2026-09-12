@@ -14,9 +14,85 @@ final class ChatVisibilityUITests: XCTestCase {
     }
 
     func testRoomDetailsSeparatesOnlineAndOfflineMembers() {
-        app.launchEnvironment["DINO_UI_TEST_ROOM_MEMBERS"] = "1"
-        app.launch()
+        openRoomParticipants()
+        scrollRoomElementIntoView(app.staticTexts["Online (2)"])
+        XCTAssertTrue(app.staticTexts["Online (2)"].exists)
+        scrollRoomElementIntoView(app.descendants(matching: .any)["Offline Member, offline"].firstMatch)
+        XCTAssertTrue(app.staticTexts["Offline (2)"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["Offline Owner, offline"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["Offline Member, offline"].exists)
+    }
 
+    func testOfflineMemberOffersAffiliationActionsAndBanCanBeCancelled() {
+        openRoomParticipants()
+        openRoomMember("Offline Member", offline: true)
+        assertRoomActions(
+            available: ["Message", "Make owner", "Make admin", "Remove affiliation", "Ban from room"],
+            unavailable: ["Kick from room", "Grant voice", "Revoke voice"])
+        attachRoomMemberControls("Offline member controls as owner")
+
+        app.buttons["Ban from room"].tap()
+        let ban = app.buttons["Ban"]
+        XCTAssertTrue(ban.waitForExistence(timeout: 3))
+        attachRoomMemberControls("Offline member ban confirmation")
+#if targetEnvironment(macCatalyst)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+#else
+        let outside = app.otherElements["PopoverDismissRegion"]
+        if outside.exists {
+            outside.tap()
+        } else {
+            app.buttons["Cancel"].tap()
+        }
+#endif
+        XCTAssertTrue(ban.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["Offline Member"].exists)
+        XCTAssertTrue(app.buttons["Ban from room"].isHittable)
+    }
+
+    func testAdminCannotModerateOfflineOwner() {
+        openRoomParticipants(affiliation: "admin")
+        openRoomMember("Offline Owner", offline: true)
+        assertRoomActions(
+            available: ["Message"],
+            unavailable: ["Make owner", "Make admin", "Make member", "Remove affiliation",
+                          "Ban from room", "Kick from room", "Grant voice", "Revoke voice"])
+        attachRoomMemberControls("Offline owner controls as admin")
+    }
+
+    func testAdminCanManageOfflineMemberWithoutPromotingToStaff() {
+        openRoomParticipants(affiliation: "admin")
+        openRoomMember("Offline Member", offline: true)
+        assertRoomActions(
+            available: ["Message", "Remove affiliation", "Ban from room"],
+            unavailable: ["Make owner", "Make admin", "Kick from room", "Grant voice", "Revoke voice"])
+        attachRoomMemberControls("Offline member controls as admin")
+    }
+
+    func testOrdinaryMemberCannotModerateOfflineMember() {
+        openRoomParticipants(affiliation: "member")
+        openRoomMember("Offline Member", offline: true)
+        assertRoomActions(
+            available: ["Message"],
+            unavailable: ["Make owner", "Make admin", "Make member", "Remove affiliation",
+                          "Ban from room", "Kick from room", "Grant voice", "Revoke voice"])
+        attachRoomMemberControls("Offline member controls as member")
+    }
+
+    func testOnlineMemberRetainsVoiceAndKickControls() {
+        openRoomParticipants()
+        openRoomMember("Online Member", offline: false)
+        assertRoomActions(
+            available: ["Message", "Revoke voice", "Make owner", "Make admin",
+                        "Remove affiliation", "Kick from room", "Ban from room"],
+            unavailable: ["Grant voice"])
+        attachRoomMemberControls("Online member moderation controls")
+    }
+
+    private func openRoomParticipants(affiliation: String = "owner") {
+        app.launchEnvironment["DINO_UI_TEST_ROOM_MEMBERS"] = "1"
+        app.launchEnvironment["DINO_UI_TEST_ROOM_AFFILIATION"] = affiliation
+        app.launch()
         if !app.buttons["Participants"].exists {
             let actions = app.buttons["Chat actions"]
             XCTAssertTrue(actions.waitForExistence(timeout: 5))
@@ -25,12 +101,54 @@ final class ChatVisibilityUITests: XCTestCase {
         let participants = app.buttons["Participants"]
         XCTAssertTrue(participants.waitForExistence(timeout: 5))
         participants.tap()
-
         XCTAssertTrue(app.navigationBars["Room details"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Online (1)"].exists)
-        XCTAssertTrue(app.staticTexts["Offline (2)"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["Offline Owner, offline"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["Offline Member, offline"].exists)
+    }
+
+    private func openRoomMember(_ name: String, offline: Bool) {
+        let row = offline
+            ? app.descendants(matching: .any)["\(name), offline"].firstMatch
+            : app.staticTexts[name]
+        scrollRoomElementIntoView(row)
+        row.tap()
+        XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 5))
+    }
+
+    private func assertRoomActions(available: [String], unavailable: [String]) {
+        for name in unavailable {
+            XCTAssertFalse(app.buttons[name].exists, "Unexpected member action: \(name)")
+        }
+        for name in available {
+            let action = app.buttons[name]
+            scrollRoomElementIntoView(action)
+            XCTAssertTrue(action.isEnabled, "Member action is disabled: \(name)")
+        }
+        for name in unavailable {
+            XCTAssertFalse(app.buttons[name].exists, "Unexpected member action: \(name)")
+        }
+    }
+
+    private func scrollRoomElementIntoView(_ element: XCUIElement) {
+        for _ in 0..<8 {
+            if element.exists && element.isHittable { return }
+            let list = (app.collectionViews.allElementsBoundByIndex
+                + app.tables.allElementsBoundByIndex
+                + app.scrollViews.allElementsBoundByIndex).first { $0.isHittable }
+            XCTAssertNotNil(list, "Room screen has no visible scrolling container")
+            guard let list else { return }
+#if targetEnvironment(macCatalyst)
+            list.scroll(byDeltaX: 0, deltaY: -400)
+#else
+            list.swipeUp()
+#endif
+        }
+        XCTAssertTrue(element.exists && element.isHittable, "Room element is not reachable: \(element)")
+    }
+
+    private func attachRoomMemberControls(_ name: String) {
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = name
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     func testAnimatedGIFPlaysAndStopsInline() throws {

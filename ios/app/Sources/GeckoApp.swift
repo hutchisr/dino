@@ -1668,7 +1668,7 @@ struct ChatView: View {
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showOccupants = false
-    @State private var occupantDMNick: String?
+    @State private var memberDMJid: String?
     @State private var showEncryptionHelp = false
     @State private var editing: ChatMessage?
     @State private var replyingTo: ChatMessage?
@@ -2587,13 +2587,13 @@ struct ChatView: View {
         .sheet(isPresented: $showOccupants, onDismiss: {
             // Start the DM only after the sheet has finished sliding away, so
             // the push into the new chat reads as a distinct second step.
-            if let nick = occupantDMNick {
-                occupantDMNick = nil
-                model.startOccupantDM(conversationId, nick: nick)
+            if let jid = memberDMJid {
+                memberDMJid = nil
+                model.startRoomMemberDM(conversationId, jid: jid)
             }
         }) {
-            RoomDetailsView(conversationId: conversationId) { nick in
-                occupantDMNick = nick
+            RoomDetailsView(conversationId: conversationId) { jid in
+                memberDMJid = jid
                 showOccupants = false
             }
             .environmentObject(model)
