@@ -39,6 +39,10 @@ attachment stops playback; iOS also pauses when the app enters the background.
 Outgoing attachments preserve their filenames. Temporary copies live in unique
 staging directories, so selecting same-named files does not add UUID prefixes to
 the uploaded names.
+Drag a file from Files or Finder onto the chat or message field to prepare an
+attachment, then use its Send button. Drops use the same preview, cancellation,
+and 512 MiB staging limit as picked files. Attach one file at a time; folders
+are not supported.
 
 Not implemented: voice/video calls (`plugin-rtp`/`plugin-ice` need GStreamer's
 iOS binaries), OpenPGP, and ICU-based JID stringprep (a casefold fallback is

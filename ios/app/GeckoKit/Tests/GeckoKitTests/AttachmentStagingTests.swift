@@ -206,4 +206,16 @@ final class AttachmentStagingTests: XCTestCase {
         ) { XCTAssertTrue($0 is CancellationError) }
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), ["source.bin"])
     }
+
+    func testStagingRejectsDirectoriesAndRemoteURLsWithoutCreatingCopies() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for source in [root, URL(string: "https://example.invalid/report.pdf")!] {
+            XCTAssertThrowsError(try AttachmentStaging.stageCopyCancellable(
+                of: source, in: root, isCancelled: { false })
+            ) { XCTAssertEqual($0 as? AttachmentStagingError, .notAFile) }
+        }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), [])
+    }
 }

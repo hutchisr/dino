@@ -4,6 +4,7 @@ enum AttachmentStagingError: LocalizedError, Equatable {
     case tooLarge
     case copyFailed
     case writeFailed
+    case notAFile
 
     var errorDescription: String? {
         switch self {
@@ -11,6 +12,8 @@ enum AttachmentStagingError: LocalizedError, Equatable {
             return AttachmentStaging.tooLargeMessage(noun: "file")
         case .copyFailed:
             return "Could not copy this file for sending."
+        case .notAFile:
+            return "Only regular files can be attached. Choose a file rather than a folder."
         case .writeFailed:
             return "Could not prepare this image for sending."
         }
@@ -30,6 +33,10 @@ enum AttachmentStaging {
         isCancelled: () -> Bool
     ) throws -> URL {
         try checkCancellation(isCancelled)
+        guard source.isFileURL,
+              (try? source.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else {
+            throw AttachmentStagingError.notAFile
+        }
         guard canStageFile(
             byteCount: byteCount(at: source),
             maxByteCount: maxByteCount

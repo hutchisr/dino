@@ -15,6 +15,7 @@ struct PasteAwareComposerTextView: UIViewRepresentable {
     let verticalAlignmentOffset: CGFloat
     let canPasteImages: Bool
     let onImagePaste: (ComposerPastedImage) -> Void
+    let onFileDrop: ([NSItemProvider]) -> Bool
 #if targetEnvironment(macCatalyst)
     let autofocusID: Int32
     let onSubmit: () -> Void
@@ -28,6 +29,7 @@ struct PasteAwareComposerTextView: UIViewRepresentable {
         let view = PasteAwareTextView()
         view.backgroundColor = .clear
         view.delegate = context.coordinator
+        view.textDropDelegate = context.coordinator
         view.font = UIFont.preferredFont(forTextStyle: .body)
         view.adjustsFontForContentSizeCategory = true
         view.textColor = .label
@@ -118,11 +120,35 @@ struct PasteAwareComposerTextView: UIViewRepresentable {
         return max(minimumHeight, contentHeight)
     }
 
-    final class Coordinator: NSObject, UITextViewDelegate {
+    final class Coordinator: NSObject, UITextViewDelegate, UITextDropDelegate {
         var parent: PasteAwareComposerTextView
 
         init(_ parent: PasteAwareComposerTextView) {
             self.parent = parent
+        }
+
+        func textDroppableView(
+            _ textDroppableView: UIView & UITextDroppable,
+            proposalForDrop drop: UITextDropRequest
+        ) -> UITextDropProposal {
+            guard drop.dropSession.hasItemsConforming(
+                toTypeIdentifiers: AttachmentSelectionPipeline.fileDropTypeIdentifiers
+            ) else {
+                return drop.suggestedProposal
+            }
+            let proposal = UITextDropProposal(operation: parent.canPasteImages ? .copy : .forbidden)
+            proposal.dropPerformer = .delegate
+            return proposal
+        }
+
+        func textDroppableView(
+            _ textDroppableView: UIView & UITextDroppable,
+            willPerformDrop drop: UITextDropRequest
+        ) {
+            guard drop.dropSession.hasItemsConforming(
+                toTypeIdentifiers: AttachmentSelectionPipeline.fileDropTypeIdentifiers
+            ) else { return }
+            _ = parent.onFileDrop(drop.dropSession.items.map(\.itemProvider))
         }
 
         func textViewDidChange(_ textView: UITextView) {

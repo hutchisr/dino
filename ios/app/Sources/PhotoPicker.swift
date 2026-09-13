@@ -9,6 +9,9 @@ import UniformTypeIdentifiers
 @MainActor
 final class AttachmentSelectionPipeline: ObservableObject {
     @Published private(set) var isStaging = false
+    // Catalyst's Finder bridge advertises file content plus this marker, not
+    // public.file-url. The marker distinguishes text files from dragged text.
+    static let fileDropTypeIdentifiers = [UTType.fileURL.identifier, "com.apple.finder.node"]
 
     private final class CancellationToken: @unchecked Sendable {
         private let lock = NSLock()
@@ -94,6 +97,44 @@ final class AttachmentSelectionPipeline: ObservableObject {
             Task { @MainActor in
                 self.finish(generation: operation.generation, result: result)
             }
+        }
+    }
+
+    func stageDroppedFile(
+        _ provider: NSItemProvider,
+        onPicked: @escaping (URL) -> Void,
+        onTooLarge: @escaping () -> Void,
+        onError: @escaping (String) -> Void
+    ) {
+        let operation = begin(onPicked: onPicked, onTooLarge: onTooLarge, onError: onError)
+        let stage: @Sendable (URL?, Error?) -> Void = { [weak self] url, error in
+            guard let self else { return }
+            // Provider file representations expire when their callback returns.
+            // Hold sandbox access through the complete background copy.
+            let result: Result<URL, Error> = self.stagingQueue.sync {
+                Result {
+                    if let error { throw error }
+                    guard let url else { throw AttachmentStagingError.copyFailed }
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    return try AttachmentStaging.stageCopyCancellable(
+                        of: url, isCancelled: { operation.token.isCancelled })
+                }
+            }
+            Task { @MainActor in
+                self.finish(generation: operation.generation, result: result)
+            }
+        }
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            providerProgress = provider.loadObject(ofClass: NSURL.self) { item, error in
+                stage(item as? URL, error)
+            }
+        } else if let type = provider.registeredTypeIdentifiers.first(where: {
+            UTType($0)?.conforms(to: .data) == true
+        }) {
+            providerProgress = provider.loadFileRepresentation(forTypeIdentifier: type, completionHandler: stage)
+        } else {
+            finish(generation: operation.generation, result: .failure(AttachmentStagingError.notAFile))
         }
     }
 

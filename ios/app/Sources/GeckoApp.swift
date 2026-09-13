@@ -1689,6 +1689,7 @@ struct ChatView: View {
     @State private var keyboardOverlap: CGFloat = 0
     @State private var pendingFileSend: PendingFileSend?
     @StateObject private var attachmentPipeline = AttachmentSelectionPipeline()
+    @State private var isFileDropTargeted = false
     @State private var attachmentExport: AttachmentExport?
 
     private func openMediaViewer(_ item: MediaViewerItem) {
@@ -1946,6 +1947,7 @@ struct ChatView: View {
             verticalAlignmentOffset: 0,
             canPasteImages: editing == nil,
             onImagePaste: stagePastedImage,
+            onFileDrop: dropFiles,
             autofocusID: conversationId,
             onSubmit: submitComposer
         )
@@ -1958,7 +1960,8 @@ struct ChatView: View {
             verticalInset: composerFieldVerticalInset,
             verticalAlignmentOffset: 0,
             canPasteImages: editing == nil,
-            onImagePaste: stagePastedImage
+            onImagePaste: stagePastedImage,
+            onFileDrop: dropFiles
         )
 #endif
     }
@@ -2091,7 +2094,41 @@ struct ChatView: View {
         .buttonStyle(.plain)
     }
 
+    private func stageImportedFile(_ url: URL) {
+        guard editing == nil else { return }
+        showAttach = false
+        attachmentPipeline.stageImportedFile(
+            url,
+            onPicked: setPendingFileSend,
+            onTooLarge: reportAttachmentTooLarge,
+            onError: { model.lastError = $0 })
+    }
+
+    private func dropFiles(_ providers: [NSItemProvider]) -> Bool {
+        guard editing == nil, !providers.isEmpty else { return false }
+        guard providers.allSatisfy({ provider in
+            AttachmentSelectionPipeline.fileDropTypeIdentifiers.contains {
+                provider.hasItemConformingToTypeIdentifier($0)
+            }
+        }) else { return false }
+        guard providers.count == 1 else {
+            model.lastError = "Attach one file at a time."
+            return false
+        }
+        showAttach = false
+        attachmentPipeline.stageDroppedFile(
+            providers[0],
+            onPicked: setPendingFileSend,
+            onTooLarge: reportAttachmentTooLarge,
+            onError: { model.lastError = $0 })
+        return true
+    }
+
     private func setPendingFileSend(_ url: URL) {
+        guard editing == nil else {
+            cleanupTemporaryAttachment(at: url)
+            return
+        }
         guard acceptAttachmentForStaging(url) else { return }
         let old = pendingFileSend
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
@@ -2103,6 +2140,7 @@ struct ChatView: View {
     }
 
     private func cancelPendingFileSend() {
+        attachmentPipeline.cancel()
         let old = pendingFileSend
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             pendingFileSend = nil
@@ -2127,14 +2165,12 @@ struct ChatView: View {
             return
         }
 
-        do {
-            let url = try AttachmentStaging.stagePastedImageCancellable(
-                image.data, fileExtension: image.fileExtension, isCancelled: { false })
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) { showAttach = false }
-            setPendingFileSend(url)
-        } catch {
-            model.lastError = "Could not paste this image."
-        }
+        showAttach = false
+        attachmentPipeline.stagePastedImage(
+            image,
+            onPicked: setPendingFileSend,
+            onTooLarge: { model.lastError = AttachmentStaging.tooLargeMessage(noun: "image") },
+            onError: { model.lastError = $0 })
     }
 
     private func acceptAttachmentForStaging(_ url: URL) -> Bool {
@@ -2539,6 +2575,20 @@ struct ChatView: View {
                 }
                 .onPreferenceChange(ComposerHeightKey.self, perform: updateComposerHeight)
         }
+        .contentShape(Rectangle())
+        .onDrop(
+            of: [.fileURL, .data],
+            isTargeted: $isFileDropTargeted,
+            perform: dropFiles)
+        .overlay {
+            if isFileDropTargeted && editing == nil {
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(Color.accentColor, lineWidth: 3)
+                    .padding(4)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(
             for: UIResponder.keyboardWillChangeFrameNotification
         )) { note in
@@ -2559,15 +2609,7 @@ struct ChatView: View {
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
             if case .success(let url) = result {
-                let scoped = url.startAccessingSecurityScopedResource()
-                guard acceptAttachmentForStaging(url) else {
-                    if scoped { url.stopAccessingSecurityScopedResource() }
-                    return
-                }
-                if let dest = AttachmentStaging.stageCopy(of: url) {
-                    setPendingFileSend(dest)
-                }
-                if scoped { url.stopAccessingSecurityScopedResource() }
+                stageImportedFile(url)
             }
         }
         .sheet(item: $attachmentExport) { export in
@@ -2622,8 +2664,15 @@ struct ChatView: View {
             if isGroupChat { model.requestRoomInfo(conversationId) }
         }
         .onDisappear {
+            attachmentPipeline.cancel()
             guard talksToCore else { return }
             model.blurConversation(conversationId)
+        }
+        .onChange(of: conversationId) { _, _ in
+            cancelPendingFileSend()
+        }
+        .onChange(of: editing?.id) { _, value in
+            if value != nil { attachmentPipeline.cancel() }
         }
         .confirmationDialog("Encryption unavailable", isPresented: $showEncryptionHelp, titleVisibility: .visible) {
             if model.roomInfo[conversationId]?.iAmOwner == true {
