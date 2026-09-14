@@ -2416,25 +2416,25 @@ struct ChatView: View {
                 }
                 notifyOption("Off", "off")
             } label: {
-                Image(systemName: bellIcon)
+                Label("Notifications", systemImage: bellIcon)
             }
-            .accessibilityLabel("Notifications")
+            .labelStyle(.iconOnly)
             if isGroupChat {
                 Button {
                     model.requestOccupants(conversationId)
                     showOccupants = true
                 } label: {
-                    Image(systemName: "person.2")
+                    Label("Participants", systemImage: "person.2")
                 }
-                .accessibilityLabel("Participants")
+                .labelStyle(.iconOnly)
             }
             Button {
                 toggleEncryption()
             } label: {
-                Image(systemName: lockIcon)
+                Label(lockAccessibilityLabel, systemImage: lockIcon)
                     .foregroundStyle(lockTint)
             }
-            .accessibilityLabel(lockAccessibilityLabel)
+            .labelStyle(.iconOnly)
         } label: {
             Label("Chat actions", systemImage: "ellipsis")
         }
