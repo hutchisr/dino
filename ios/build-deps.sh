@@ -97,6 +97,7 @@ c_link_args = ['-target', '$TRIPLE', '-isysroot', '$SDKPATH', '-L$PREFIX/lib']
 cpp_args = ['-target', '$TRIPLE', '-isysroot', '$SDKPATH', '-I$PREFIX/include']
 cpp_link_args = ['-target', '$TRIPLE', '-isysroot', '$SDKPATH', '-L$PREFIX/lib']
 objc_args = ['-target', '$TRIPLE', '-isysroot', '$SDKPATH']
+vala_args = ['--vapidir', '$PREFIX/share/vala/vapi']
 objc_link_args = ['-target', '$TRIPLE', '-isysroot', '$SDKPATH']
 
 [properties]
@@ -164,6 +165,27 @@ build_gee() {
 build_pixbuf() {
   fetch "https://download.gnome.org/sources/gdk-pixbuf/$PIXBUF_VER/gdk-pixbuf-$PIXBUF_VER.$PIXBUF_PATCH.tar.xz" "gdk-pixbuf"
   (cd "$DEPS/gdk-pixbuf" && "$MESON" wrap install libpng 2>/dev/null || true)
+  if [ "$TARGET" = "catalyst-arm64" ]; then
+    # libpng 1.6.37 treats every Apple target as classic Mac OS and includes
+    # the long-removed <fp.h>. Catalyst defines both TARGET_OS_MAC and
+    # TARGET_OS_MACCATALYST, so keep the legacy branch off for this ABI.
+    python3 - "$DEPS/gdk-pixbuf/subprojects/libpng-1.6.37/pngpriv.h" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+source = path.read_text()
+old = "    defined(THINK_C) || defined(__SC__) || defined(TARGET_OS_MAC)"
+new = (
+    "    defined(THINK_C) || defined(__SC__) || \\\n"
+    "    (defined(TARGET_OS_MAC) && !defined(TARGET_OS_MACCATALYST))"
+)
+if old in source:
+    path.write_text(source.replace(old, new, 1))
+elif new not in source:
+    raise SystemExit(f"unexpected libpng Apple-target condition in {path}")
+PY
+  fi
   meson_build "$DEPS/gdk-pixbuf" \
     -Dpng=enabled -Djpeg=disabled -Dtiff=disabled -Dgif=enabled \
     -Dothers=disabled -Dbuiltin_loaders=all -Dgio_sniffing=false \
