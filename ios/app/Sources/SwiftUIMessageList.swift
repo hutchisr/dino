@@ -113,6 +113,7 @@ struct SwiftUIMessageList: View {
         private var pendingScrollSampleAction: (@MainActor (ScrollSample) -> Void)?
         private var pendingScrollSampleTask: Task<Void, Never>?
         private var scrollSampleGeneration = 0
+        var attemptedNewestMaterializationForContainerHeight = false
 
         var isBottomScrollAnimating: Bool {
             bottomScrollAnimator.isAnimating
@@ -128,6 +129,37 @@ struct SwiftUIMessageList: View {
                   let scrollView else { return nil }
             return view.convert(view.bounds, to: scrollView)
                 .offsetBy(dx: -scrollView.bounds.minX, dy: -scrollView.bounds.minY)
+        }
+        /// Returns only materialized lazy rows, ordered visually from top to
+        /// bottom. Scanning the full message history on every scroll sample
+        /// makes interaction cost grow with every loaded history page even
+        /// though only a small viewport-sized set can have live views.
+        @MainActor
+        func liveMessageFrames() -> [(messageID: Int32, frame: CGRect)] {
+            guard let scrollView else { return [] }
+            var deadIDs: [Int32] = []
+            var frames: [(messageID: Int32, frame: CGRect)] = []
+            frames.reserveCapacity(messageViews.count)
+            for (messageID, messageView) in messageViews {
+                guard let view = messageView.view else {
+                    deadIDs.append(messageID)
+                    continue
+                }
+                guard view.window != nil else { continue }
+                let frame = view.convert(view.bounds, to: scrollView)
+                    .offsetBy(dx: -scrollView.bounds.minX, dy: -scrollView.bounds.minY)
+                frames.append((messageID, frame))
+            }
+            for id in deadIDs {
+                messageViews[id] = nil
+            }
+            frames.sort {
+                if $0.frame.minY == $1.frame.minY {
+                    return $0.messageID < $1.messageID
+                }
+                return $0.frame.minY < $1.frame.minY
+            }
+            return frames
         }
 
         /// Coalesces bottom-scroll requests onto one post-layout task. A higher
@@ -408,6 +440,7 @@ struct SwiftUIMessageList: View {
             }
             .onChange(of: newestMessageID) { _, newest in
                 metrics.newestMessageID = newest
+                metrics.attemptedNewestMaterializationForContainerHeight = false
                 guard let newest else { return }
                 let policy = newestMessageUpdatePolicy(
                     initialScrollCompleted: didInitialScroll,
@@ -492,11 +525,15 @@ struct SwiftUIMessageList: View {
         proxy: ScrollViewProxy
     ) {
         let previousContentHeight = metrics.contentHeight
+        let previousContainerHeight = metrics.containerHeight
         metrics.distanceFromTop = sample.distanceFromTop
         metrics.distanceFromBottom = sample.distanceFromBottom
         metrics.isUnderfilled = sample.isUnderfilled
         metrics.contentHeight = sample.contentHeight
         metrics.containerHeight = sample.containerHeight
+        if abs(sample.containerHeight - previousContainerHeight) > 0.5 {
+            metrics.attemptedNewestMaterializationForContainerHeight = false
+        }
         updateVisibleMessageMetrics()
 
         let atBottom = sample.distanceFromBottom <= Self.bottomThreshold
@@ -531,6 +568,25 @@ struct SwiftUIMessageList: View {
            metrics.historyLoadTrigger.state == .armed {
             requestOlderIfNeeded(distanceFromTop: sample.distanceFromTop)
         }
+#if targetEnvironment(macCatalyst)
+        if didInitialScroll,
+           stickToBottom,
+           !userInteracting,
+           !metrics.awaitingHistoryRestoreGeometry,
+           sample.distanceFromBottom <= 0.5,
+           !metrics.newestRowVisible,
+           !metrics.attemptedNewestMaterializationForContainerHeight {
+            metrics.attemptedNewestMaterializationForContainerHeight = true
+            scrollToNewest(
+                proxy,
+                animated: false,
+                initial: false,
+                priority: .newestMessage,
+                delay: Self.scrollSampleSettleDelay,
+                forceNewestMaterialization: true)
+            return
+        }
+#endif
 
         // Resizing may already have preserved the bottom during layout. Only
         // correct a remaining gap, rather than issuing a redundant proxy scroll.
@@ -555,12 +611,11 @@ struct SwiftUIMessageList: View {
             viewportMinY,
             metrics.containerHeight - max(0, visualBottomInset))
         var visibility = MessageViewportVisibility()
-        for message in messages {
-            guard let frame = metrics.messageFrame(message.id) else { continue }
+        for measured in metrics.liveMessageFrames() {
             visibility.observe(
-                messageID: message.id,
-                minY: Double(frame.minY),
-                maxY: Double(frame.maxY),
+                messageID: measured.messageID,
+                minY: Double(measured.frame.minY),
+                maxY: Double(measured.frame.maxY),
                 viewport: Double(viewportMinY)..<Double(viewportMaxY),
                 newestMessageID: newestMessageID)
         }
@@ -577,7 +632,7 @@ struct SwiftUIMessageList: View {
 
     private func messageRows(_ proxy: ScrollViewProxy) -> some View {
         ForEach(rows) { row in
-            rowView(row)
+            let content = rowView(row)
                 .id(row.msg.id)
                 .accessibilityIdentifier("chat.message.\(row.msg.id)")
                 .background {
@@ -591,7 +646,14 @@ struct SwiftUIMessageList: View {
                         }
                     }
                 }
-                .transition(rowInsertionTransition)
+#if targetEnvironment(macCatalyst)
+            // Catalyst already disables message insertion animation. Omitting
+            // the inert transition avoids a TransitionTraitKey graph node on
+            // every lazy row while the window is being resized.
+            content
+#else
+            content.transition(rowInsertionTransition)
+#endif
         }
     }
 
@@ -605,7 +667,8 @@ struct SwiftUIMessageList: View {
         initial: Bool,
         priority: BottomScrollPriority,
         delay: Duration? = nil,
-        interruptsActiveAnimation: Bool = false
+        interruptsActiveAnimation: Bool = false,
+        forceNewestMaterialization: Bool = false
     ) {
         guard let last = rows.last?.id else { return }
         if initial {
@@ -626,9 +689,42 @@ struct SwiftUIMessageList: View {
             if !usedNativeAnimator {
                 var transaction = Transaction(animation: nil)
                 transaction.disablesAnimations = true
+#if targetEnvironment(macCatalyst)
+                if !initial,
+                   forceNewestMaterialization || metrics.messageFrame(last) == nil {
+                    // A non-lazy bottom anchor can be reached while Catalyst
+                    // leaves the adjacent newest LazyVStack row de-materialized.
+                    // Materialize that stable row first, then finish at the
+                    // clearance anchor in one tracked, cancellable follow-up.
+                    withTransaction(transaction) {
+                        proxy.scrollTo(last, anchor: .bottom)
+                    }
+                    metrics.scheduleBottomScroll(
+                        priority: max(
+                            priority.rawValue,
+                            BottomScrollPriority.newestMessage.rawValue),
+                        delay: Self.scrollSampleSettleDelay
+                    ) {
+                        guard newestMessageID == last,
+                              stickToBottom,
+                              !userInteracting,
+                              !metrics.awaitingHistoryRestoreGeometry else { return }
+                        var finalTransaction = Transaction(animation: nil)
+                        finalTransaction.disablesAnimations = true
+                        withTransaction(finalTransaction) {
+                            proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                        }
+                    }
+                } else {
+                    withTransaction(transaction) {
+                        proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                    }
+                }
+#else
                 withTransaction(transaction) {
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
+#endif
             }
             if initial, !initialViewportReveal.isReady {
                 initialViewportReveal.initialScrollCompleted()

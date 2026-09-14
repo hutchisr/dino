@@ -81,15 +81,19 @@ final class CatalystInteractionUITests: XCTestCase {
             "-macWindowContentWidth", "1100",
             "-macWindowContentHeight", "760",
         ]
+        // Large enough for Catalyst to recycle the newest lazy row during resize.
+        app.launchEnvironment["DINO_UI_TEST_MESSAGE_COUNT"] = "5000"
         launchChat()
         let newest = app.staticTexts["Newest fixture message"]
         editor.click()
         editor.typeText("Draft during resize")
 
+        // macOS can restore the window at its minimum size despite the launch
+        // arguments. Grow first, then return, so both directions remain exact.
         for _ in 0..<6 {
-            resizeChatWindow(by: CGVector(dx: -160, dy: -100))
-            XCTAssertTrue(newest.isHittable)
             resizeChatWindow(by: CGVector(dx: 160, dy: 100))
+            XCTAssertTrue(newest.isHittable)
+            resizeChatWindow(by: CGVector(dx: -160, dy: -100))
             XCTAssertTrue(newest.isHittable)
         }
 

@@ -215,8 +215,8 @@ fixture. They cover main-window close/Dock reopen and app hide/activation with
 draft preservation, initial and conversation-switch composer autofocus,
 Return versus Shift-Return, Command-N Contacts and cancellation,
 Command-comma Settings and Escape, text Copy/Reply cancellation, repeated
-main-window corner resizing with chat/editor responsiveness, and repeated
-secondary-media-window closure.
+main-window corner resizing against a 5,000-message fixture with chat/editor
+responsiveness, and repeated secondary-media-window closure.
 Composer submission checks local draft/focus behavior, not XMPP delivery.
 Native window counts use direct application children because Catalyst also
 exposes nested UIKit accessibility windows. Reopening the closed main window
@@ -248,6 +248,13 @@ The native probes are weakly registered and do not publish geometry into
 SwiftUI state during layout. They enqueue a post-layout sample only on window
 attachment or when a row's height changes; width-only viewport changes remain
 covered by the outer scroll geometry observer.
+
+On Catalyst, a large width reflow can reach the non-lazy bottom anchor while
+the adjacent newest `LazyVStack` row is still de-materialized. The post-layout
+sample detects that bottom-without-newest state once per container height,
+materializes the stable newest message ID, then returns to the composer
+clearance anchor. Visibility reduction scans only live native probes, so its
+cost stays bounded by materialized rows rather than total loaded history.
 
 ## Changes to the main tree
 

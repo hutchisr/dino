@@ -317,6 +317,7 @@ final class AppModel: ObservableObject {
     /// Installs delayed in-memory chat history for UI tests. The default fixture
     /// expands its last file row into an image; the composer variant uses longer,
     /// mixed-height text history to expose lazy-layout jumps during resizing.
+    /// `DINO_UI_TEST_MESSAGE_COUNT` scales that fixture for long-history tests.
     @discardableResult
     func configureUITestFixtureIfRequested() -> Bool {
 #if DEBUG
@@ -500,9 +501,13 @@ final class AppModel: ObservableObject {
                 guard let data = image.pngData(), (try? data.write(to: url)) != nil else { return }
                 uploadImagePath = url.path
             }
-            var fixture = (0..<(composerFixture ? 80 : 24)).map { index in
+            let requestedMessageCount = Int(env["DINO_UI_TEST_MESSAGE_COUNT"] ?? "")
+                .map { min(max($0, 1), 20_000) }
+            let messageCount = requestedMessageCount ?? (composerFixture ? 80 : 24)
+            let baseMessageID: Int32 = requestedMessageCount == nil ? 9_100 : 1_000_000
+            var fixture = (0..<messageCount).map { index in
                 ChatMessage(
-                    id: Int32(9_100 + index),
+                    id: baseMessageID + Int32(index),
                     content: "text",
                     direction: index.isMultiple(of: 2) ? "in" : "out",
                     from: index.isMultiple(of: 2)
