@@ -1439,12 +1439,12 @@ struct ContactsView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button { isPresented = false } label: {
-                        Label("Close", systemImage: "xmark")
+                        Image(systemName: "xmark")
 #if targetEnvironment(macCatalyst)
                             .padding(4)
 #endif
                     }
-                        .labelStyle(.iconOnly)
+                        .accessibilityLabel("Close")
                         .keyboardShortcut(.cancelAction)
 #if targetEnvironment(macCatalyst)
                         .buttonStyle(.glass)
@@ -1457,12 +1457,12 @@ struct ContactsView: View {
 #endif
                 ToolbarItem(placement: .primaryAction) {
                     Button { showAdd = true } label: {
-                        Label("Add Contact", systemImage: "plus")
+                        Image(systemName: "plus")
 #if targetEnvironment(macCatalyst)
                             .padding(4)
 #endif
                     }
-                        .labelStyle(.iconOnly)
+                        .accessibilityLabel("Add Contact")
 #if targetEnvironment(macCatalyst)
                         .buttonStyle(.glass)
                         .buttonBorderShape(.circle)
