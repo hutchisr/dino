@@ -7,12 +7,17 @@ final class ScrollToBottomAnimator: NSObject {
     private var startOffset = CGPoint.zero
     private var startTime: CFTimeInterval = 0
     private var duration: CFTimeInterval = 0
+    private var completion: (@MainActor () -> Void)?
     var isAnimating: Bool {
         displayLink != nil
     }
 
     @MainActor
-    func scrollToBottom(_ scrollView: UIScrollView, animated: Bool) -> Bool {
+    func scrollToBottom(
+        _ scrollView: UIScrollView,
+        animated: Bool,
+        completion: @escaping @MainActor () -> Void
+    ) -> Bool {
         scrollView.layoutIfNeeded()
         guard scrollView.bounds.height > 0 else { return false }
 
@@ -33,6 +38,7 @@ final class ScrollToBottomAnimator: NSObject {
             scrollView.setContentOffset(
                 CGPoint(x: startOffset.x, y: targetY),
                 animated: false)
+            completion()
             return true
         }
 
@@ -42,6 +48,7 @@ final class ScrollToBottomAnimator: NSObject {
         self.startOffset = startOffset
         self.startTime = CACurrentMediaTime()
         self.duration = duration
+        self.completion = completion
 
         let displayLink = CADisplayLink(target: self, selector: #selector(step))
         displayLink.preferredFrameRateRange = CAFrameRateRange(
@@ -58,6 +65,7 @@ final class ScrollToBottomAnimator: NSObject {
         displayLink?.invalidate()
         displayLink = nil
         scrollView = nil
+        self.completion = nil
     }
 
     @MainActor
@@ -76,10 +84,12 @@ final class ScrollToBottomAnimator: NSObject {
             animated: false)
 
         if progress >= 1 {
+            let completion = self.completion
             scrollView.setContentOffset(
                 CGPoint(x: startOffset.x, y: targetY),
                 animated: false)
             cancel()
+            completion?()
         }
     }
 

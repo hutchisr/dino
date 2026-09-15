@@ -263,12 +263,16 @@ struct SwiftUIMessageList: View {
         /// Takes ownership from pending proxy work and active deceleration, then
         /// drives the native scroll view to its live lower boundary.
         @MainActor
-        func startNativeBottomScroll(animated: Bool) -> Bool {
+        func startNativeBottomScroll(
+            animated: Bool,
+            completion: @escaping @MainActor () -> Void
+        ) -> Bool {
             cancelPendingBottomScroll()
             guard let scrollView else { return false }
             return bottomScrollAnimator.scrollToBottom(
                 scrollView,
-                animated: animated)
+                animated: animated,
+                completion: completion)
         }
     }
 
@@ -380,12 +384,12 @@ struct SwiftUIMessageList: View {
             }
             .accessibilityIdentifier("chat.messageList")
             .scrollDismissesKeyboard(.interactively)
-            // Keep the resize itself bottom-anchored. Correcting it afterward
-            // lets LazyVStack briefly restore an older estimated row when the
-            // composer loses a line, then visibly snap back to the newest row.
+            // Resize anchoring must not consume a live arrival's scroll distance
+            // before the native animator starts. Keep it off through completion;
+            // composer resizing and settled image growth remain bottom-anchored.
             // Leave initial positioning to the explicit first-population scroll.
             .defaultScrollAnchor(
-                stickToBottom && !userInteracting ? .bottom : nil,
+                stickToBottom && !userInteracting && !shouldAnimateBottomGrowth ? .bottom : nil,
                 for: .sizeChanges)
             // Top chrome and indicators keep independent insets; bottom content
             // clearance belongs to the non-lazy anchor above.
@@ -445,10 +449,14 @@ struct SwiftUIMessageList: View {
                 let policy = newestMessageUpdatePolicy(
                     initialScrollCompleted: didInitialScroll,
                     updateWasSynced: messageUpdateWasSynced,
-                    isFollowingBottom: shouldFollowNewestMessage(
+                    isFollowingBottom: !userInteracting && shouldFollowNewestMessage(
                         intent: stickToBottom,
                         measuredAtBottom: metrics.isAtBottom))
-                guard policy.followsNewest else { return }
+                guard policy.followsNewest else {
+                    lastSettledNewestID = newest
+                    animateBottomGrowthForNewestID = nil
+                    return
+                }
                 stickToBottom = true
                 let animated = policy.animates && !accessibilityReduceMotion
                 animateBottomGrowthForNewestID = animated ? newest : nil
@@ -504,6 +512,12 @@ struct SwiftUIMessageList: View {
 #endif
                 if phase == .tracking || phase == .interacting {
                     metrics.cancelBottomScrollWork()
+                }
+                if userInteracting {
+                    // An abandoned arrival must not leave resize anchoring
+                    // disabled after the user finishes scrolling.
+                    lastSettledNewestID = newestMessageID
+                    animateBottomGrowthForNewestID = nil
                 }
                 if phase == .tracking || (phase == .interacting && previous == .idle) {
                     metrics.historyLoadTrigger.beginUserScroll()
@@ -684,8 +698,26 @@ struct SwiftUIMessageList: View {
             delay: delay,
             interruptsActiveAnimation: interruptsActiveAnimation
         ) {
+            // A gesture may begin after the arrival queued this post-layout
+            // work. Only an explicit command may take scrolling from the user.
+            guard initial || priority == .explicitCommand
+                    || (!userInteracting && stickToBottom) else {
+                if metrics.newestMessageID == last {
+                    lastSettledNewestID = last
+                    animateBottomGrowthForNewestID = nil
+                }
+                return
+            }
+            let completeScroll: @MainActor () -> Void = {
+                // The native driver follows a live bottom boundary, including
+                // any arrivals coalesced into this animation.
+                lastSettledNewestID = metrics.newestMessageID
+                animateBottomGrowthForNewestID = nil
+            }
             let usedNativeAnimator = animated
-                && metrics.startNativeBottomScroll(animated: true)
+                && metrics.startNativeBottomScroll(
+                    animated: true,
+                    completion: completeScroll)
             if !usedNativeAnimator {
                 var transaction = Transaction(animation: nil)
                 transaction.disablesAnimations = true
@@ -729,11 +761,8 @@ struct SwiftUIMessageList: View {
             if initial, !initialViewportReveal.isReady {
                 initialViewportReveal.initialScrollCompleted()
             }
-            if newestMessageID == last {
-                lastSettledNewestID = last
-                if animateBottomGrowthForNewestID == last {
-                    animateBottomGrowthForNewestID = nil
-                }
+            if !usedNativeAnimator {
+                completeScroll()
             }
         }
     }
