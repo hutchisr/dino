@@ -23,15 +23,18 @@ struct RoomDetailsView: View {
     private var offlineMembers: [OfflineMember] { model.offlineMembers[conversationId] ?? [] }
     private var me: Occupant? { occupants.first { $0.isSelf } }
     private var info: RoomInfo { model.roomInfo[conversationId] ?? RoomInfo() }
-    private var conversation: XmppConversation? { model.conversations.first { $0.id == conversationId } }
+    private var conversation: XmppConversation? {
+        model.conversations.first { $0.id == conversationId }
+    }
 
     private var inviteSuggestions: [RosterContact] {
         let query = inviteJid.trimmingCharacters(in: .whitespaces)
         guard inviteFocused, !query.isEmpty else { return [] }
-        return Array(model.roster.lazy.filter {
-            $0.displayName.localizedStandardContains(query) ||
-            $0.id.localizedStandardContains(query)
-        }.prefix(5))
+        return Array(
+            model.roster.lazy.filter {
+                $0.displayName.localizedStandardContains(query)
+                    || $0.id.localizedStandardContains(query)
+            }.prefix(5))
     }
 
     var body: some View {
@@ -47,24 +50,26 @@ struct RoomDetailsView: View {
             .navigationTitle("Room details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-#if targetEnvironment(macCatalyst)
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .padding(4)
+                            #if targetEnvironment(macCatalyst)
+                                .padding(4)
+                            #endif
                     }
                     .accessibilityLabel("Close")
                     .keyboardShortcut(.cancelAction)
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.large)
+                    #if targetEnvironment(macCatalyst)
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .controlSize(.large)
+                    #endif
                 }
-                .sharedBackgroundVisibility(.hidden)
-#else
-                Button("Close") { dismiss() }
-#endif
+                #if targetEnvironment(macCatalyst)
+                    .sharedBackgroundVisibility(.hidden)
+                #endif
             }
         }
         .onAppear {
@@ -98,16 +103,19 @@ struct RoomDetailsView: View {
 
     private var avatar: some View {
         let jid = conversation?.jid ?? ""
-        return AvatarView(jid: jid, name: conversation?.name ?? "", isGroup: true, size: 52,
-                          avatarPath: model.avatars[jid],
-                          requestAvatar: jid.isEmpty ? nil : { model.ensureAvatar(for: jid) })
+        return AvatarView(
+            jid: jid, name: conversation?.name ?? "", isGroup: true, size: 52,
+            avatarPath: model.avatars[jid],
+            requestAvatar: jid.isEmpty ? nil : { model.ensureAvatar(for: jid) })
     }
 
     private var headerSection: some View {
         Section {
             HStack(spacing: 12) {
                 if info.iAmOwner {
-                    Button { showPhotoPicker = true } label: {
+                    Button {
+                        showPhotoPicker = true
+                    } label: {
                         avatar.overlay(alignment: .bottomTrailing) {
                             Image(systemName: "camera.fill")
                                 .font(.system(size: 9))
@@ -157,17 +165,22 @@ struct RoomDetailsView: View {
             } label: {
                 LabeledContent("Name", value: conversation?.name ?? "")
             }
-            Toggle("Private", isOn: Binding(
-                get: { info.isPrivate },
-                set: { model.setRoomPrivate(conversationId, $0) }))
-            Toggle("Moderated", isOn: Binding(
-                get: { info.isModerated },
-                set: { model.setRoomModerated(conversationId, $0) }))
+            Toggle(
+                "Private",
+                isOn: Binding(
+                    get: { info.isPrivate },
+                    set: { model.setRoomPrivate(conversationId, $0) }))
+            Toggle(
+                "Moderated",
+                isOn: Binding(
+                    get: { info.isModerated },
+                    set: { model.setRoomModerated(conversationId, $0) }))
         } header: {
             Text("Settings")
         } footer: {
-            Text("Private rooms are members-only and show real addresses (needed for encryption). "
-                 + "Moderated rooms require granted voice to speak.")
+            Text(
+                "Private rooms are members-only and show real addresses (needed for encryption). "
+                    + "Moderated rooms require granted voice to speak.")
         }
     }
 
@@ -189,9 +202,10 @@ struct RoomDetailsView: View {
                     inviteFocused = false
                 } label: {
                     HStack(spacing: 10) {
-                        AvatarView(jid: contact.id, name: contact.displayName, isGroup: false, size: 32,
-                                   presence: contact.show, avatarPath: model.avatars[contact.id],
-                                   requestAvatar: { model.ensureAvatar(for: contact.id) })
+                        AvatarView(
+                            jid: contact.id, name: contact.displayName, isGroup: false, size: 32,
+                            presence: contact.show, avatarPath: model.avatars[contact.id],
+                            requestAvatar: { model.ensureAvatar(for: contact.id) })
                         VStack(alignment: .leading, spacing: 1) {
                             Text(contact.displayName)
                                 .foregroundStyle(.primary)
@@ -215,9 +229,11 @@ struct RoomDetailsView: View {
         Section("Online (\(occupants.count))") {
             ForEach(occupants) { occupant in
                 NavigationLink {
-                    MemberDetailView(conversationId: conversationId, member: .online(occupant), me: me,
-                                     onMessage: { onSelect(occupant.jid) })
-                        .environmentObject(model)
+                    MemberDetailView(
+                        conversationId: conversationId, member: .online(occupant), me: me,
+                        onMessage: { onSelect(occupant.jid) }
+                    )
+                    .environmentObject(model)
                 } label: {
                     occupantRow(occupant)
                 }
@@ -229,9 +245,11 @@ struct RoomDetailsView: View {
         Section("Offline (\(offlineMembers.count))") {
             ForEach(offlineMembers) { member in
                 NavigationLink {
-                    MemberDetailView(conversationId: conversationId, member: .offline(member), me: me,
-                                     onMessage: { onSelect(member.jid) })
-                        .environmentObject(model)
+                    MemberDetailView(
+                        conversationId: conversationId, member: .offline(member), me: me,
+                        onMessage: { onSelect(member.jid) }
+                    )
+                    .environmentObject(model)
                 } label: {
                     offlineMemberRow(member)
                 }
@@ -241,9 +259,10 @@ struct RoomDetailsView: View {
 
     private func offlineMemberRow(_ member: OfflineMember) -> some View {
         HStack(spacing: 10) {
-            AvatarView(jid: member.jid, name: member.name, isGroup: false, size: 32,
-                       avatarPath: model.avatars[member.jid],
-                       requestAvatar: { model.ensureAvatar(for: member.jid) })
+            AvatarView(
+                jid: member.jid, name: member.name, isGroup: false, size: 32,
+                avatarPath: model.avatars[member.jid],
+                requestAvatar: { model.ensureAvatar(for: member.jid) })
             VStack(alignment: .leading, spacing: 1) {
                 Text(member.name).foregroundStyle(.primary)
                 if member.name != member.jid {
@@ -269,9 +288,10 @@ struct RoomDetailsView: View {
     @ViewBuilder
     private func occupantRow(_ occupant: Occupant) -> some View {
         HStack(spacing: 10) {
-            AvatarView(jid: occupant.jid, name: occupant.nick, isGroup: false, size: 32,
-                       avatarPath: model.avatars[occupant.jid],
-                       requestAvatar: { model.ensureAvatar(for: occupant.jid) })
+            AvatarView(
+                jid: occupant.jid, name: occupant.nick, isGroup: false, size: 32,
+                avatarPath: model.avatars[occupant.jid],
+                requestAvatar: { model.ensureAvatar(for: occupant.jid) })
             VStack(alignment: .leading, spacing: 1) {
                 Text(occupant.nick).foregroundStyle(.primary)
                 if let real = occupant.realJid {
@@ -283,7 +303,8 @@ struct RoomDetailsView: View {
                 Text("you").font(.caption).foregroundStyle(.secondary)
             }
             if let badge = occupant.badge {
-                MemberBadge(text: badge, color: occupant.badgeColor, systemImage: occupant.badgeIcon)
+                MemberBadge(
+                    text: badge, color: occupant.badgeColor, systemImage: occupant.badgeIcon)
             }
         }
         .contentShape(.rect)

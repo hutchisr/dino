@@ -14,7 +14,9 @@ struct AccountSettingsView: View {
     @State private var presenceDirty = false
     @State private var closingForSignOut = false
 
-    private let presenceOptions = [("online", "Online"), ("away", "Away"), ("dnd", "Do Not Disturb")]
+    private let presenceOptions = [
+        ("online", "Online"), ("away", "Away"), ("dnd", "Do Not Disturb"),
+    ]
     private var jid: String { model.accounts.first?.id ?? "" }
     private var presenceShowBinding: Binding<String> {
         Binding(
@@ -49,14 +51,16 @@ struct AccountSettingsView: View {
                                     isGroup: false,
                                     size: 88,
                                     avatarPath: model.avatars[jid],
-                                    requestAvatar: jid.isEmpty ? nil : { model.ensureAvatar(for: jid) })
-                                    .overlay(alignment: .bottomTrailing) {
-                                        Image(systemName: "camera.fill")
-                                            .font(.caption)
-                                            .padding(6)
-                                            .background(Circle().fill(Color.accentColor))
-                                            .foregroundStyle(.white)
-                                    }
+                                    requestAvatar: jid.isEmpty
+                                        ? nil : { model.ensureAvatar(for: jid) }
+                                )
+                                .overlay(alignment: .bottomTrailing) {
+                                    Image(systemName: "camera.fill")
+                                        .font(.caption)
+                                        .padding(6)
+                                        .background(Circle().fill(Color.accentColor))
+                                        .foregroundStyle(.white)
+                                }
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Change account photo")
@@ -128,24 +132,32 @@ struct AccountSettingsView: View {
                 }
 
                 Section {
-                    Toggle("Typing notifications", isOn: Binding(
-                        get: { model.sendTyping },
-                        set: { model.setSendTyping($0) }))
-                    Toggle("Read receipts", isOn: Binding(
-                        get: { model.sendMarker },
-                        set: { model.setSendMarker($0) }))
+                    Toggle(
+                        "Typing notifications",
+                        isOn: Binding(
+                            get: { model.sendTyping },
+                            set: { model.setSendTyping($0) }))
+                    Toggle(
+                        "Read receipts",
+                        isOn: Binding(
+                            get: { model.sendMarker },
+                            set: { model.setSendMarker($0) }))
                 } header: {
                     Text("Privacy")
                 } footer: {
-                    Text("When off, others won't see when you're typing or that you've read their messages.")
+                    Text(
+                        "When off, others won't see when you're typing or that you've read their messages."
+                    )
                 }
 
                 Section {
                     NavigationLink {
                         BlockedContactsView().environmentObject(model)
                     } label: {
-                        LabeledContent("Blocked contacts",
-                                       value: model.blockedContacts.isEmpty ? "" : "\(model.blockedContacts.count)")
+                        LabeledContent(
+                            "Blocked contacts",
+                            value: model.blockedContacts.isEmpty
+                                ? "" : "\(model.blockedContacts.count)")
                     }
                 }
 
@@ -163,22 +175,24 @@ struct AccountSettingsView: View {
             .navigationTitle("Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-#if targetEnvironment(macCatalyst)
                 ToolbarItem(placement: .cancellationAction) {
                     Button(action: closeSheet) {
                         Image(systemName: "xmark")
-                            .padding(4)
+                            #if targetEnvironment(macCatalyst)
+                                .padding(4)
+                            #endif
                     }
                     .accessibilityLabel("Close")
                     .keyboardShortcut(.cancelAction)
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.large)
+                    #if targetEnvironment(macCatalyst)
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .controlSize(.large)
+                    #endif
                 }
-                .sharedBackgroundVisibility(.hidden)
-#else
-                Button("Done", action: closeSheet)
-#endif
+                #if targetEnvironment(macCatalyst)
+                    .sharedBackgroundVisibility(.hidden)
+                #endif
             }
             .sheet(isPresented: $showPhotoPicker) {
                 PhotoPicker(
@@ -202,7 +216,8 @@ struct AccountSettingsView: View {
                 alias = value
             }
             .onChange(of: model.selfShow) { _, _ in if !presenceDirty { syncPresenceFromModel() } }
-            .onChange(of: model.selfStatus) { _, _ in if !presenceDirty { syncPresenceFromModel() } }
+            .onChange(of: model.selfStatus) { _, _ in if !presenceDirty { syncPresenceFromModel() }
+            }
             .onDisappear {
                 avatarSelection.cancel()
                 if !closingForSignOut { savePresenceIfNeeded() }

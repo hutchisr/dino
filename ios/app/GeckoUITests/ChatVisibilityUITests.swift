@@ -1,7 +1,8 @@
-import XCTest
 import UIKit
+import XCTest
+
 #if targetEnvironment(macCatalyst)
-import Vision
+    import Vision
 #endif
 
 final class ChatVisibilityUITests: XCTestCase {
@@ -17,7 +18,8 @@ final class ChatVisibilityUITests: XCTestCase {
         openRoomParticipants()
         scrollRoomElementIntoView(app.staticTexts["Online (2)"])
         XCTAssertTrue(app.staticTexts["Online (2)"].exists)
-        scrollRoomElementIntoView(app.descendants(matching: .any)["Offline Member, offline"].firstMatch)
+        scrollRoomElementIntoView(
+            app.descendants(matching: .any)["Offline Member, offline"].firstMatch)
         XCTAssertTrue(app.staticTexts["Offline (2)"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["Offline Owner, offline"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["Offline Member, offline"].exists)
@@ -27,7 +29,9 @@ final class ChatVisibilityUITests: XCTestCase {
         openRoomParticipants()
         openRoomMember("Offline Member", offline: true)
         assertRoomActions(
-            available: ["Message", "Make owner", "Make admin", "Remove affiliation", "Ban from room"],
+            available: [
+                "Message", "Make owner", "Make admin", "Remove affiliation", "Ban from room",
+            ],
             unavailable: ["Kick from room", "Grant voice", "Revoke voice"])
         attachRoomMemberControls("Offline member controls as owner")
 
@@ -35,16 +39,16 @@ final class ChatVisibilityUITests: XCTestCase {
         let ban = app.buttons["Ban"]
         XCTAssertTrue(ban.waitForExistence(timeout: 3))
         attachRoomMemberControls("Offline member ban confirmation")
-#if targetEnvironment(macCatalyst)
-        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
-#else
-        let outside = app.otherElements["PopoverDismissRegion"]
-        if outside.exists {
-            outside.tap()
-        } else {
-            app.buttons["Cancel"].tap()
-        }
-#endif
+        #if targetEnvironment(macCatalyst)
+            app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        #else
+            let outside = app.otherElements["PopoverDismissRegion"]
+            if outside.exists {
+                outside.tap()
+            } else {
+                app.buttons["Cancel"].tap()
+            }
+        #endif
         XCTAssertTrue(ban.waitForNonExistence(timeout: 3))
         XCTAssertTrue(app.navigationBars["Offline Member"].exists)
         XCTAssertTrue(app.buttons["Ban from room"].isHittable)
@@ -55,8 +59,10 @@ final class ChatVisibilityUITests: XCTestCase {
         openRoomMember("Offline Owner", offline: true)
         assertRoomActions(
             available: ["Message"],
-            unavailable: ["Make owner", "Make admin", "Make member", "Remove affiliation",
-                          "Ban from room", "Kick from room", "Grant voice", "Revoke voice"])
+            unavailable: [
+                "Make owner", "Make admin", "Make member", "Remove affiliation",
+                "Ban from room", "Kick from room", "Grant voice", "Revoke voice",
+            ])
         attachRoomMemberControls("Offline owner controls as admin")
     }
 
@@ -65,7 +71,9 @@ final class ChatVisibilityUITests: XCTestCase {
         openRoomMember("Offline Member", offline: true)
         assertRoomActions(
             available: ["Message", "Remove affiliation", "Ban from room"],
-            unavailable: ["Make owner", "Make admin", "Kick from room", "Grant voice", "Revoke voice"])
+            unavailable: [
+                "Make owner", "Make admin", "Kick from room", "Grant voice", "Revoke voice",
+            ])
         attachRoomMemberControls("Offline member controls as admin")
     }
 
@@ -74,8 +82,10 @@ final class ChatVisibilityUITests: XCTestCase {
         openRoomMember("Offline Member", offline: true)
         assertRoomActions(
             available: ["Message"],
-            unavailable: ["Make owner", "Make admin", "Make member", "Remove affiliation",
-                          "Ban from room", "Kick from room", "Grant voice", "Revoke voice"])
+            unavailable: [
+                "Make owner", "Make admin", "Make member", "Remove affiliation",
+                "Ban from room", "Kick from room", "Grant voice", "Revoke voice",
+            ])
         attachRoomMemberControls("Offline member controls as member")
     }
 
@@ -83,8 +93,10 @@ final class ChatVisibilityUITests: XCTestCase {
         openRoomParticipants()
         openRoomMember("Online Member", offline: false)
         assertRoomActions(
-            available: ["Message", "Revoke voice", "Make owner", "Make admin",
-                        "Remove affiliation", "Kick from room", "Ban from room"],
+            available: [
+                "Message", "Revoke voice", "Make owner", "Make admin",
+                "Remove affiliation", "Kick from room", "Ban from room",
+            ],
             unavailable: ["Grant voice"])
         attachRoomMemberControls("Online member moderation controls")
     }
@@ -105,7 +117,8 @@ final class ChatVisibilityUITests: XCTestCase {
     }
 
     private func openRoomMember(_ name: String, offline: Bool) {
-        let row = offline
+        let row =
+            offline
             ? app.descendants(matching: .any)["\(name), offline"].firstMatch
             : app.staticTexts[name]
         scrollRoomElementIntoView(row)
@@ -130,18 +143,20 @@ final class ChatVisibilityUITests: XCTestCase {
     private func scrollRoomElementIntoView(_ element: XCUIElement) {
         for _ in 0..<8 {
             if element.exists && element.isHittable { return }
-            let list = (app.collectionViews.allElementsBoundByIndex
+            let list =
+                (app.collectionViews.allElementsBoundByIndex
                 + app.tables.allElementsBoundByIndex
                 + app.scrollViews.allElementsBoundByIndex).first { $0.isHittable }
             XCTAssertNotNil(list, "Room screen has no visible scrolling container")
             guard let list else { return }
-#if targetEnvironment(macCatalyst)
-            list.scroll(byDeltaX: 0, deltaY: -400)
-#else
-            list.swipeUp()
-#endif
+            #if targetEnvironment(macCatalyst)
+                list.scroll(byDeltaX: 0, deltaY: -400)
+            #else
+                list.swipeUp()
+            #endif
         }
-        XCTAssertTrue(element.exists && element.isHittable, "Room element is not reachable: \(element)")
+        XCTAssertTrue(
+            element.exists && element.isHittable, "Room element is not reachable: \(element)")
     }
 
     private func attachRoomMemberControls(_ name: String) {
@@ -154,18 +169,18 @@ final class ChatVisibilityUITests: XCTestCase {
     func testAnimatedGIFPlaysAndStopsInline() throws {
         try assertInlinePlayback(
             encoded: """
-            R0lGODlhAgACAIEAAP8AAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQICgAAACwAAAAA
-            AgACAAAIBgABCAQQEAAh+QQIGQAAACwAAAAAAgACAIEAAP8AAAAAAAAAAAAIBgABCAQQEAA7
-            """, fileExtension: "gif")
+                R0lGODlhAgACAIEAAP8AAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQICgAAACwAAAAA
+                AgACAAAIBgABCAQQEAAh+QQIGQAAACwAAAAAAgACAIEAAP8AAAAAAAAAAAAIBgABCAQQEAA7
+                """, fileExtension: "gif")
     }
 
     func testAnimatedWebPPlaysAndStopsInline() throws {
         try assertInlinePlayback(
             encoded: """
-            UklGRoQAAABXRUJQVlA4WAoAAAACAAAAAQAAAQAAQU5JTQYAAAD/////AABBTk1GKAAAAAAAAAAA
-            AAEAAAEAAGQAAAJWUDhMDwAAAC8BQAAABxD9j/4HIqL/AQBBTk1GKAAAAAAAAAAAAAEAAAEAAPoA
-            AABWUDhMDwAAAC8BQAAABxDR//4HIqL/AQA=
-            """, fileExtension: "webp")
+                UklGRoQAAABXRUJQVlA4WAoAAAACAAAAAQAAAQAAQU5JTQYAAAD/////AABBTk1GKAAAAAAAAAAA
+                AAEAAAEAAGQAAAJWUDhMDwAAAC8BQAAABxD9j/4HIqL/AQBBTk1GKAAAAAAAAAAAAAEAAAEAAPoA
+                AABWUDhMDwAAAC8BQAAABxDR//4HIqL/AQA=
+                """, fileExtension: "webp")
     }
 
     private func assertInlinePlayback(encoded: String, fileExtension: String) throws {
@@ -209,121 +224,130 @@ final class ChatVisibilityUITests: XCTestCase {
         let preview = app.buttons["Open image"]
         XCTAssertTrue(preview.waitForExistence(timeout: 5))
         preview.tap()
-#if targetEnvironment(macCatalyst)
-        XCTAssertTrue(app.descendants(matching: .any)["media.preview"].waitForExistence(timeout: 5))
-#else
-        XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 5))
-#endif
+        #if targetEnvironment(macCatalyst)
+            XCTAssertTrue(
+                app.descendants(matching: .any)["media.preview"].waitForExistence(timeout: 5))
+        #else
+            XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 5))
+        #endif
     }
 
-#if targetEnvironment(macCatalyst)
-    func testContactsSearchClearRestoresVisiblePlaceholder() throws {
-        app.launchEnvironment["DINO_UI_TEST_COMPOSER"] = "1"
-        app.launch()
-        defer { app.terminate() }
-        XCTAssertTrue(app.staticTexts["Newest fixture message"].waitForExistence(timeout: 5))
-        app.typeKey("n", modifierFlags: .command)
-        let search = app.textFields["Search contacts"]
-        XCTAssertTrue(search.waitForExistence(timeout: 5))
-        let placeholderText = search.label
-        search.click()
+    #if targetEnvironment(macCatalyst)
+        func testContactsSearchClearRestoresVisiblePlaceholder() throws {
+            app.launchEnvironment["DINO_UI_TEST_COMPOSER"] = "1"
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.staticTexts["Newest fixture message"].waitForExistence(timeout: 5))
+            app.typeKey("n", modifierFlags: .command)
+            let search = app.textFields["Search contacts"]
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            let placeholderText = search.label
+            search.click()
 
-        for query in ["person@example.invalid", "another contact"] {
-            search.typeText(query)
-            XCTAssertEqual(search.value as? String, query)
-            let clear = search.buttons["Clear text"]
-            XCTAssertTrue(clear.waitForExistence(timeout: 2))
-            clear.click()
+            for query in ["person@example.invalid", "another contact"] {
+                search.typeText(query)
+                XCTAssertEqual(search.value as? String, query)
+                let clear = search.buttons["Clear text"]
+                XCTAssertTrue(clear.waitForExistence(timeout: 2))
+                clear.click()
 
-            // The editor can report an empty AX value while stale glyphs remain
-            // on screen. Read the rendered placeholder, not just that value.
-            let screenshot = search.screenshot()
-            let attachment = XCTAttachment(screenshot: screenshot)
-            attachment.name = "Contacts search after clearing"
-            attachment.lifetime = .keepAlways
-            add(attachment)
-            let request = VNRecognizeTextRequest()
-            request.recognitionLevel = .accurate
-            request.recognitionLanguages = ["en-US"]
-            request.usesLanguageCorrection = false
-            try VNImageRequestHandler(data: screenshot.pngRepresentation).perform([request])
-            let renderedText = request.results?.compactMap { $0.topCandidates(1).first?.string } ?? []
-            XCTAssertTrue(renderedText.contains { $0.contains(placeholderText) }, "Rendered text: \(renderedText)")
+                // The editor can report an empty AX value while stale glyphs remain
+                // on screen. Read the rendered placeholder, not just that value.
+                let screenshot = search.screenshot()
+                let attachment = XCTAttachment(screenshot: screenshot)
+                attachment.name = "Contacts search after clearing"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                let request = VNRecognizeTextRequest()
+                request.recognitionLevel = .accurate
+                request.recognitionLanguages = ["en-US"]
+                request.usesLanguageCorrection = false
+                try VNImageRequestHandler(data: screenshot.pngRepresentation).perform([request])
+                let renderedText =
+                    request.results?.compactMap { $0.topCandidates(1).first?.string } ?? []
+                XCTAssertTrue(
+                    renderedText.contains { $0.contains(placeholderText) },
+                    "Rendered text: \(renderedText)")
+            }
+            search.typeText("fresh query")
+            XCTAssertEqual(search.value as? String, "fresh query")
         }
-        search.typeText("fresh query")
-        XCTAssertEqual(search.value as? String, "fresh query")
-    }
 
-    func testRepeatedHistoryScrollingRemainsResponsive() {
-        app.launchEnvironment["DINO_UI_TEST_COMPOSER"] = "1"
-        app.launch()
-        let newest = app.staticTexts["Newest fixture message"]
-        XCTAssertTrue(newest.waitForExistence(timeout: 5))
-        let messageList = app.descendants(matching: .any)["chat.messageList"]
-        let scrollDown = app.buttons["Scroll to latest messages"]
-        for distance in [500.0, 1_500, 3_000, 750, 2_000, 4_000] {
-            messageList.scroll(byDeltaX: 0, deltaY: distance)
-            XCTAssertTrue(scrollDown.waitForExistence(timeout: 3))
-            messageList.scroll(byDeltaX: 0, deltaY: -distance * 2)
-            let returnedToNewest = XCTNSPredicateExpectation(
-                predicate: NSPredicate { _, _ in
-                    guard newest.exists, newest.isHittable else { return false }
-                    let gap = self.app.textViews.firstMatch.frame.minY - newest.frame.maxY
-                    return gap.isFinite && gap >= 0 && gap < 44
-                }, object: nil)
-            XCTAssertEqual(XCTWaiter.wait(for: [returnedToNewest], timeout: 5), .completed)
-            assertNewestMessage(newest, remainsAbove: app.textViews.firstMatch)
-        }
-        let editor = app.textViews.firstMatch
-        editor.click()
-        editor.typeText("Still responsive")
-        XCTAssertEqual(editor.value as? String, "Still responsive")
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Responsive chat after repeated history scrolling"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
-    }
-
-    func testAudioShareMenuAnchorsToClickedButton() {
-        app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"
-        app.launch()
-        for name in ["first.wav", "second.wav"] {
-            let share = app.buttons["Share \(name)"]
-            XCTAssertTrue(share.waitForExistence(timeout: 5))
-            let anchor = share.frame
+        func testRepeatedHistoryScrollingRemainsResponsive() {
+            app.launchEnvironment["DINO_UI_TEST_COMPOSER"] = "1"
+            app.launch()
+            let newest = app.staticTexts["Newest fixture message"]
+            XCTAssertTrue(newest.waitForExistence(timeout: 5))
+            let messageList = app.descendants(matching: .any)["chat.messageList"]
+            let scrollDown = app.buttons["Scroll to latest messages"]
+            for distance in [500.0, 1_500, 3_000, 750, 2_000, 4_000] {
+                messageList.scroll(byDeltaX: 0, deltaY: distance)
+                XCTAssertTrue(scrollDown.waitForExistence(timeout: 3))
+                messageList.scroll(byDeltaX: 0, deltaY: -distance * 2)
+                let returnedToNewest = XCTNSPredicateExpectation(
+                    predicate: NSPredicate { _, _ in
+                        guard newest.exists, newest.isHittable else { return false }
+                        let gap = self.app.textViews.firstMatch.frame.minY - newest.frame.maxY
+                        return gap.isFinite && gap >= 0 && gap < 44
+                    }, object: nil)
+                XCTAssertEqual(XCTWaiter.wait(for: [returnedToNewest], timeout: 5), .completed)
+                assertNewestMessage(newest, remainsAbove: app.textViews.firstMatch)
+            }
+            let editor = app.textViews.firstMatch
+            editor.click()
+            editor.typeText("Still responsive")
+            XCTAssertEqual(editor.value as? String, "Still responsive")
             let screenshot = XCTAttachment(screenshot: app.screenshot())
-            screenshot.name = "Audio actions before sharing — \(name)"
+            screenshot.name = "Responsive chat after repeated history scrolling"
             screenshot.lifetime = .keepAlways
             add(screenshot)
-            share.click()
-            let menu = app.popovers.firstMatch
-            XCTAssertTrue(menu.waitForExistence(timeout: 5), "Share menu did not present")
-            XCTAssertTrue(menu.buttons["Copy"].waitForExistence(timeout: 5), "Share menu did not finish presenting")
-            let frame = menu.frame
-            XCTAssertFalse(frame.isEmpty, "Share menu has no visible frame")
-            let horizontalGap = max(0, max(frame.minX - anchor.maxX, anchor.minX - frame.maxX))
-            let verticalGap = max(0, max(frame.minY - anchor.maxY, anchor.minY - frame.maxY))
-            XCTAssertLessThanOrEqual(horizontalGap, 32, "Share menu is horizontally detached from its button")
-            XCTAssertLessThanOrEqual(verticalGap, 32, "Share menu is vertically detached from its button")
-            app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
-            XCTAssertTrue(menu.waitForNonExistence(timeout: 3))
         }
-    }
-#else
-    func testAudioShareCanBeCompletedAndReopened() {
-        app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"
-        app.launch()
-        let share = app.buttons["Share first.wav"]
-        XCTAssertTrue(share.waitForExistence(timeout: 5))
-        for _ in 0..<2 {
-            share.tap()
-            let copy = app.cells["Copy"]
-            XCTAssertTrue(copy.waitForExistence(timeout: 5), "Share sheet did not offer file actions")
-            copy.tap()
-            XCTAssertTrue(copy.waitForNonExistence(timeout: 3))
+
+        func testAudioShareMenuAnchorsToClickedButton() {
+            app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"
+            app.launch()
+            for name in ["first.wav", "second.wav"] {
+                let share = app.buttons["Share \(name)"]
+                XCTAssertTrue(share.waitForExistence(timeout: 5))
+                let anchor = share.frame
+                let screenshot = XCTAttachment(screenshot: app.screenshot())
+                screenshot.name = "Audio actions before sharing — \(name)"
+                screenshot.lifetime = .keepAlways
+                add(screenshot)
+                share.click()
+                let menu = app.popovers.firstMatch
+                XCTAssertTrue(menu.waitForExistence(timeout: 5), "Share menu did not present")
+                XCTAssertTrue(
+                    menu.buttons["Copy"].waitForExistence(timeout: 5),
+                    "Share menu did not finish presenting")
+                let frame = menu.frame
+                XCTAssertFalse(frame.isEmpty, "Share menu has no visible frame")
+                let horizontalGap = max(0, max(frame.minX - anchor.maxX, anchor.minX - frame.maxX))
+                let verticalGap = max(0, max(frame.minY - anchor.maxY, anchor.minY - frame.maxY))
+                XCTAssertLessThanOrEqual(
+                    horizontalGap, 32, "Share menu is horizontally detached from its button")
+                XCTAssertLessThanOrEqual(
+                    verticalGap, 32, "Share menu is vertically detached from its button")
+                app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+                XCTAssertTrue(menu.waitForNonExistence(timeout: 3))
+            }
         }
-    }
-#endif
+    #else
+        func testAudioShareCanBeCompletedAndReopened() {
+            app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"
+            app.launch()
+            let share = app.buttons["Share first.wav"]
+            XCTAssertTrue(share.waitForExistence(timeout: 5))
+            for _ in 0..<2 {
+                share.tap()
+                let copy = app.cells["Copy"]
+                XCTAssertTrue(
+                    copy.waitForExistence(timeout: 5), "Share sheet did not offer file actions")
+                copy.tap()
+                XCTAssertTrue(copy.waitForNonExistence(timeout: 3))
+            }
+        }
+    #endif
 
     func testAudioSwitchingPausesPreviousAttachmentAndCanReplayAfterEnd() {
         app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"
@@ -340,7 +364,8 @@ final class ChatVisibilityUITests: XCTestCase {
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: slider)
         waitForExpectations(timeout: 5)
         slider.adjust(toNormalizedSliderPosition: 1)
-        XCTAssertTrue(second.waitForExistence(timeout: 5), "Seeking to the end did not stop playback")
+        XCTAssertTrue(
+            second.waitForExistence(timeout: 5), "Seeking to the end did not stop playback")
         second.tap()
         XCTAssertTrue(app.buttons["Pause second.wav"].waitForExistence(timeout: 3))
         let screenshot = XCTAttachment(screenshot: app.screenshot())
@@ -363,13 +388,15 @@ final class ChatVisibilityUITests: XCTestCase {
 
     func testAudioSaveUsesNativePickerAndPreservesFilename() throws {
         app.launchEnvironment["DINO_UI_TEST_AUDIO"] = "1"
-#if targetEnvironment(macCatalyst)
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("GeckoAudioSaveUITest-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        app.launchEnvironment["DINO_UI_TEST_EXPORT_DIRECTORY"] = directory.path
-#endif
+        #if targetEnvironment(macCatalyst)
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "GeckoAudioSaveUITest-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: false)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            app.launchEnvironment["DINO_UI_TEST_EXPORT_DIRECTORY"] = directory.path
+        #endif
         app.launch()
         let save = app.buttons["Save first.wav"]
         XCTAssertTrue(save.waitForExistence(timeout: 5))
@@ -377,41 +404,50 @@ final class ChatVisibilityUITests: XCTestCase {
         XCTAssertTrue(share.exists)
         XCTAssertLessThanOrEqual(save.frame.maxX, share.frame.minX)
         save.tap()
-#if targetEnvironment(macCatalyst)
-        let panel = app.sheets["save-panel"]
-        XCTAssertTrue(panel.waitForExistence(timeout: 3))
-        XCTAssertEqual(panel.textFields.firstMatch.value as? String, "first")
-        panel.buttons["Save"].click()
-        XCTAssertTrue(panel.waitForNonExistence(timeout: 3))
-        let url = directory.appendingPathComponent("first.wav")
-        let exported = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in FileManager.default.fileExists(atPath: url.path) }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [exported], timeout: 3), .completed)
-        let data = try Data(contentsOf: url)
-        XCTAssertEqual(data.count, 384_044)
-        XCTAssertEqual(data.prefix(4), Data("RIFF".utf8))
-        XCTAssertTrue(data.dropFirst(44).allSatisfy { $0 == 0 }, "Export changed the PCM samples")
-#else
-        let picker = app.otherElements["Browse View (Picker)"]
-        XCTAssertTrue(picker.waitForExistence(timeout: 5), "Save did not open the native Files picker")
-        XCTAssertTrue(app.buttons["Save"].isEnabled)
-        app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].swipeDown()
-        XCTAssertTrue(picker.waitForNonExistence(timeout: 3), "Dismissing Files did not return to the chat")
-#endif
+        #if targetEnvironment(macCatalyst)
+            let panel = app.sheets["save-panel"]
+            XCTAssertTrue(panel.waitForExistence(timeout: 3))
+            XCTAssertEqual(panel.textFields.firstMatch.value as? String, "first")
+            panel.buttons["Save"].click()
+            XCTAssertTrue(panel.waitForNonExistence(timeout: 3))
+            let url = directory.appendingPathComponent("first.wav")
+            let exported = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in FileManager.default.fileExists(atPath: url.path) },
+                object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [exported], timeout: 3), .completed)
+            let data = try Data(contentsOf: url)
+            XCTAssertEqual(data.count, 384_044)
+            XCTAssertEqual(data.prefix(4), Data("RIFF".utf8))
+            XCTAssertTrue(
+                data.dropFirst(44).allSatisfy { $0 == 0 }, "Export changed the PCM samples")
+        #else
+            let picker = app.otherElements["Browse View (Picker)"]
+            XCTAssertTrue(
+                picker.waitForExistence(timeout: 5), "Save did not open the native Files picker")
+            XCTAssertTrue(app.buttons["Save"].isEnabled)
+            app.navigationBars["FullDocumentManagerViewControllerNavigationBar"].swipeDown()
+            XCTAssertTrue(
+                picker.waitForNonExistence(timeout: 3),
+                "Dismissing Files did not return to the chat")
+        #endif
         let play = app.buttons["Play first.wav"]
         XCTAssertTrue(play.waitForExistence(timeout: 3))
         play.tap()
-        XCTAssertTrue(app.buttons["Pause first.wav"].waitForExistence(timeout: 5), "Export removed the source audio")
+        XCTAssertTrue(
+            app.buttons["Pause first.wav"].waitForExistence(timeout: 5),
+            "Export removed the source audio")
     }
 
     func testDelayedMessagesRevealAndRemainVisibleAfterImageHeightChange() {
         app.launch()
 
         let download = app.buttons["Download fixture.png"]
-        XCTAssertTrue(download.waitForExistence(timeout: 2), "Delayed attachment never became accessible")
+        XCTAssertTrue(
+            download.waitForExistence(timeout: 2), "Delayed attachment never became accessible")
         let compactHeight = download.frame.height
         let preview = app.buttons["Open image"]
-        XCTAssertTrue(preview.waitForExistence(timeout: 5), "The attachment never became an image preview")
+        XCTAssertTrue(
+            preview.waitForExistence(timeout: 5), "The attachment never became an image preview")
         let frame = preview.frame
         XCTAssertGreaterThan(frame.height, compactHeight, "The image preview did not expand")
         XCTAssertGreaterThan(frame.width, 100, "Expected the image preview, not a descendant icon")
@@ -446,7 +482,8 @@ final class ChatVisibilityUITests: XCTestCase {
             assertNewestMessage(newest, remainsAbove: composer, gap: baselineGap)
         }
         XCTAssertEqual(editor.value as? String, "")
-        XCTAssertLessThan(composer.frame.height, expandedHeight, "Deletion never shrank the composer")
+        XCTAssertLessThan(
+            composer.frame.height, expandedHeight, "Deletion never shrank the composer")
     }
 
     func testShrinkingDraftDoesNotLeaveOlderMessages() throws {
@@ -464,20 +501,20 @@ final class ChatVisibilityUITests: XCTestCase {
 
         let messageList = app.descendants(matching: .any)["chat.messageList"]
         XCTAssertTrue(messageList.waitForExistence(timeout: 3), "The message list never appeared")
-#if targetEnvironment(macCatalyst)
-        messageList.scroll(byDeltaX: 0, deltaY: 500)
-#else
-        let appFrame = app.frame
-        let listFrame = messageList.frame
-        XCTAssertFalse(listFrame.isEmpty, "The message list has no scrollable viewport")
-        let appOrigin = app.coordinate(withNormalizedOffset: .zero)
-        let x = listFrame.midX - appFrame.minX
-        let dragStart = appOrigin.withOffset(
-            CGVector(dx: x, dy: listFrame.minY + listFrame.height * 0.2 - appFrame.minY))
-        let dragEnd = appOrigin.withOffset(
-            CGVector(dx: x, dy: listFrame.minY + listFrame.height * 0.4 - appFrame.minY))
-        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
-#endif
+        #if targetEnvironment(macCatalyst)
+            messageList.scroll(byDeltaX: 0, deltaY: 500)
+        #else
+            let appFrame = app.frame
+            let listFrame = messageList.frame
+            XCTAssertFalse(listFrame.isEmpty, "The message list has no scrollable viewport")
+            let appOrigin = app.coordinate(withNormalizedOffset: .zero)
+            let x = listFrame.midX - appFrame.minX
+            let dragStart = appOrigin.withOffset(
+                CGVector(dx: x, dy: listFrame.minY + listFrame.height * 0.2 - appFrame.minY))
+            let dragEnd = appOrigin.withOffset(
+                CGVector(dx: x, dy: listFrame.minY + listFrame.height * 0.4 - appFrame.minY))
+            dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+        #endif
         let scrollDown = app.buttons["Scroll to latest messages"]
         XCTAssertTrue(scrollDown.waitForExistence(timeout: 3))
         editor.tap()
@@ -489,8 +526,10 @@ final class ChatVisibilityUITests: XCTestCase {
         let y = marker.frame.minY
         for _ in 0..<10 {
             editor.typeText(XCUIKeyboardKey.delete.rawValue)
-            XCTAssertEqual(marker.frame.minY, y, accuracy: 2, "Shrinking a draft moved the history being read")
-            XCTAssertTrue(scrollDown.exists, "Shrinking a draft unexpectedly resumed bottom following")
+            XCTAssertEqual(
+                marker.frame.minY, y, accuracy: 2, "Shrinking a draft moved the history being read")
+            XCTAssertTrue(
+                scrollDown.exists, "Shrinking a draft unexpectedly resumed bottom following")
         }
     }
 
@@ -499,7 +538,8 @@ final class ChatVisibilityUITests: XCTestCase {
         app.launch()
 
         let progress = app.descendants(matching: .any)["Uploading upload-fixture.bin"]
-        XCTAssertTrue(progress.waitForExistence(timeout: 5), "The upload progress row never appeared")
+        XCTAssertTrue(
+            progress.waitForExistence(timeout: 5), "The upload progress row never appeared")
         XCTAssertTrue(
             (progress.value as? String)?.hasPrefix("50 percent,") == true,
             "The upload progress row did not expose its determinate progress")
@@ -510,21 +550,30 @@ final class ChatVisibilityUITests: XCTestCase {
         app.launch()
 
         let progress = app.descendants(matching: .any)["Uploading upload-fixture.png"]
-        XCTAssertTrue(progress.waitForExistence(timeout: 5), "The image upload progress row never appeared")
+        XCTAssertTrue(
+            progress.waitForExistence(timeout: 5), "The image upload progress row never appeared")
         XCTAssertTrue(
             (progress.value as? String)?.hasPrefix("50 percent,") == true,
             "The image upload did not remain visibly in progress")
 
         let preview = app.buttons["Open image"]
-        XCTAssertTrue(preview.waitForExistence(timeout: 5), "The image thumbnail was hidden during upload")
-        XCTAssertGreaterThan(preview.frame.width, 100, "Expected an image thumbnail, not only file progress")
-        XCTAssertGreaterThan(preview.frame.height, 100, "Expected an image thumbnail, not only file progress")
-        XCTAssertTrue(progress.exists, "The upload progress row disappeared before the thumbnail was checked")
+        XCTAssertTrue(
+            preview.waitForExistence(timeout: 5), "The image thumbnail was hidden during upload")
+        XCTAssertGreaterThan(
+            preview.frame.width, 100, "Expected an image thumbnail, not only file progress")
+        XCTAssertGreaterThan(
+            preview.frame.height, 100, "Expected an image thumbnail, not only file progress")
+        XCTAssertTrue(
+            progress.exists, "The upload progress row disappeared before the thumbnail was checked")
 
         let rgb = try screenshotCenterRGB(in: preview.screenshot())
-        XCTAssertGreaterThan(rgb.green - rgb.red, 60, "The reserved preview frame still showed its placeholder: \(rgb)")
-        XCTAssertGreaterThan(rgb.blue - rgb.red, 80, "The decoded fixture was not visibly teal: \(rgb)")
-        XCTAssertLessThan(abs(rgb.green - rgb.blue), 60, "The decoded fixture was not visibly teal: \(rgb)")
+        XCTAssertGreaterThan(
+            rgb.green - rgb.red, 60,
+            "The reserved preview frame still showed its placeholder: \(rgb)")
+        XCTAssertGreaterThan(
+            rgb.blue - rgb.red, 80, "The decoded fixture was not visibly teal: \(rgb)")
+        XCTAssertLessThan(
+            abs(rgb.green - rgb.blue), 60, "The decoded fixture was not visibly teal: \(rgb)")
     }
 
     func testViewingConversationClearsUnreadBadge() {
@@ -535,11 +584,11 @@ final class ChatVisibilityUITests: XCTestCase {
         XCTAssertTrue(unread.waitForExistence(timeout: 3), "The unread badge never appeared")
         app.staticTexts["Visibility Regression"].tap()
 
-#if !targetEnvironment(macCatalyst)
-        let back = app.navigationBars.buttons.firstMatch
-        XCTAssertTrue(back.waitForExistence(timeout: 3), "The conversation never opened")
-        back.tap()
-#endif
+        #if !targetEnvironment(macCatalyst)
+            let back = app.navigationBars.buttons.firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 3), "The conversation never opened")
+            back.tap()
+        #endif
 
         let cleared = NSPredicate(format: "exists == false")
         expectation(for: cleared, evaluatedWith: unread)
@@ -562,11 +611,13 @@ final class ChatVisibilityUITests: XCTestCase {
             app.staticTexts["Newest fixture message"].waitForExistence(timeout: 5),
             "The pending notification route never opened its conversation")
 
-#if !targetEnvironment(macCatalyst)
-        let back = app.navigationBars.buttons.firstMatch
-        XCTAssertTrue(back.waitForExistence(timeout: 3), "The conversation did not expose back navigation")
-        back.tap()
-#endif
+        #if !targetEnvironment(macCatalyst)
+            let back = app.navigationBars.buttons.firstMatch
+            XCTAssertTrue(
+                back.waitForExistence(timeout: 3), "The conversation did not expose back navigation"
+            )
+            back.tap()
+        #endif
 
         let cleared = NSPredicate(format: "exists == false")
         expectation(for: cleared, evaluatedWith: unread)
@@ -604,70 +655,70 @@ final class ChatVisibilityUITests: XCTestCase {
         return (Int(rgba[0]), Int(rgba[1]), Int(rgba[2]))
     }
 
-#if !targetEnvironment(macCatalyst)
-    func testAccountAvatarUsesUnpaddedArtworkSize() throws {
-        app.launchEnvironment["DINO_UI_TEST_FIXTURE"] = "account-avatar"
-        app.launch()
+    #if !targetEnvironment(macCatalyst)
+        func testAccountAvatarUsesUnpaddedArtworkSize() throws {
+            app.launchEnvironment["DINO_UI_TEST_FIXTURE"] = "account-avatar"
+            app.launch()
 
-        let avatar = app.buttons["Account"]
-        XCTAssertTrue(avatar.waitForExistence(timeout: 3), "The account avatar never appeared")
-        XCTAssertEqual(avatar.frame.width, 34, accuracy: 1)
-        XCTAssertEqual(avatar.frame.height, 34, accuracy: 1)
+            let avatar = app.buttons["Account"]
+            XCTAssertTrue(avatar.waitForExistence(timeout: 3), "The account avatar never appeared")
+            XCTAssertEqual(avatar.frame.width, 34, accuracy: 1)
+            XCTAssertEqual(avatar.frame.height, 34, accuracy: 1)
 
-        let screenshot = app.screenshot()
-        let haloDelta = try maximumHorizontalPixelDelta(
-            in: screenshot,
-            first: CGPoint(x: avatar.frame.minX - 3, y: avatar.frame.midY),
-            second: CGPoint(x: avatar.frame.minX - 12, y: avatar.frame.midY))
-        XCTAssertLessThanOrEqual(
-            haloDelta,
-            5,
-            "The toolbar added a visible glass margin outside the avatar artwork")
-    }
+            let screenshot = app.screenshot()
+            let haloDelta = try maximumHorizontalPixelDelta(
+                in: screenshot,
+                first: CGPoint(x: avatar.frame.minX - 3, y: avatar.frame.midY),
+                second: CGPoint(x: avatar.frame.minX - 12, y: avatar.frame.midY))
+            XCTAssertLessThanOrEqual(
+                haloDelta,
+                5,
+                "The toolbar added a visible glass margin outside the avatar artwork")
+        }
 
-    private func maximumHorizontalPixelDelta(
-        in screenshot: XCUIScreenshot,
-        first: CGPoint,
-        second: CGPoint
-    ) throws -> Int {
-        let image = screenshot.image
-        let cgImage = try XCTUnwrap(image.cgImage)
-        let data = try XCTUnwrap(cgImage.dataProvider?.data)
-        let bytes = try XCTUnwrap(CFDataGetBytePtr(data))
-        let bytesPerPixel = cgImage.bitsPerPixel / 8
-        XCTAssertGreaterThanOrEqual(bytesPerPixel, 3)
+        private func maximumHorizontalPixelDelta(
+            in screenshot: XCUIScreenshot,
+            first: CGPoint,
+            second: CGPoint
+        ) throws -> Int {
+            let image = screenshot.image
+            let cgImage = try XCTUnwrap(image.cgImage)
+            let data = try XCTUnwrap(cgImage.dataProvider?.data)
+            let bytes = try XCTUnwrap(CFDataGetBytePtr(data))
+            let bytesPerPixel = cgImage.bitsPerPixel / 8
+            XCTAssertGreaterThanOrEqual(bytesPerPixel, 3)
 
-        let scaleX = CGFloat(cgImage.width) / image.size.width
-        let scaleY = CGFloat(cgImage.height) / image.size.height
-        let firstX = min(cgImage.width - 1, max(0, Int((first.x * scaleX).rounded())))
-        let secondX = min(cgImage.width - 1, max(0, Int((second.x * scaleX).rounded())))
-        let topY = min(cgImage.height - 1, max(0, Int((first.y * scaleY).rounded())))
-        let rows = [topY, cgImage.height - 1 - topY]
+            let scaleX = CGFloat(cgImage.width) / image.size.width
+            let scaleY = CGFloat(cgImage.height) / image.size.height
+            let firstX = min(cgImage.width - 1, max(0, Int((first.x * scaleX).rounded())))
+            let secondX = min(cgImage.width - 1, max(0, Int((second.x * scaleX).rounded())))
+            let topY = min(cgImage.height - 1, max(0, Int((first.y * scaleY).rounded())))
+            let rows = [topY, cgImage.height - 1 - topY]
 
-        return rows.map { y in
-            let firstOffset = y * cgImage.bytesPerRow + firstX * bytesPerPixel
-            let secondOffset = y * cgImage.bytesPerRow + secondX * bytesPerPixel
-            return (0..<bytesPerPixel).map {
-                abs(Int(bytes[firstOffset + $0]) - Int(bytes[secondOffset + $0]))
+            return rows.map { y in
+                let firstOffset = y * cgImage.bytesPerRow + firstX * bytesPerPixel
+                let secondOffset = y * cgImage.bytesPerRow + secondX * bytesPerPixel
+                return (0..<bytesPerPixel).map {
+                    abs(Int(bytes[firstOffset + $0]) - Int(bytes[secondOffset + $0]))
+                }.max() ?? 0
             }.max() ?? 0
-        }.max() ?? 0
-    }
-#endif
+        }
+    #endif
     private func insertLineBreak(in editor: XCUIElement) {
-#if targetEnvironment(macCatalyst)
-        editor.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: .shift)
-#else
-        editor.typeText("\n")
-#endif
+        #if targetEnvironment(macCatalyst)
+            editor.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: .shift)
+        #else
+            editor.typeText("\n")
+        #endif
     }
 
     private func focusComposer(_ editor: XCUIElement, above newest: XCUIElement) {
         editor.tap()
-#if !targetEnvironment(macCatalyst)
-        let keyboard = app.keyboards.firstMatch
-        XCTAssertTrue(keyboard.waitForExistence(timeout: 3), "The keyboard never appeared")
-        XCTAssertLessThanOrEqual(editor.frame.maxY, keyboard.frame.minY + 2)
-#endif
+        #if !targetEnvironment(macCatalyst)
+            let keyboard = app.keyboards.firstMatch
+            XCTAssertTrue(keyboard.waitForExistence(timeout: 3), "The keyboard never appeared")
+            XCTAssertLessThanOrEqual(editor.frame.maxY, keyboard.frame.minY + 2)
+        #endif
         // Establish a stable post-keyboard baseline before entering any text.
         let frame = newest.frame
         let editorFrame = editor.frame
@@ -685,104 +736,119 @@ final class ChatVisibilityUITests: XCTestCase {
         line: UInt = #line
     ) {
         let gap = boundary.frame.minY - newest.frame.maxY
-        XCTAssertGreaterThanOrEqual(gap, 0, "Newest message is covered by the composer", file: file, line: line)
-        XCTAssertLessThan(gap, 44, "Resizing the draft scrolled away from the newest message", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(
+            gap, 0, "Newest message is covered by the composer", file: file, line: line)
+        XCTAssertLessThan(
+            gap, 44, "Resizing the draft scrolled away from the newest message", file: file,
+            line: line)
         if let expectedGap {
             let accuracy: CGFloat = 2
-            XCTAssertEqual(gap, expectedGap, accuracy: accuracy,
-                           "A keystroke displaced the message relative to the composer",
-                           file: file, line: line)
+            XCTAssertEqual(
+                gap, expectedGap, accuracy: accuracy,
+                "A keystroke displaced the message relative to the composer",
+                file: file, line: line)
         }
     }
 
-#if targetEnvironment(macCatalyst)
-    func testImageContextMenuShareAnchorsToAttachment() {
-        app.launch()
-        let image = app.buttons["Open image"]
-        XCTAssertTrue(image.waitForExistence(timeout: 8))
-        for _ in 0..<2 {
-            let anchor = image.frame
-            image.rightClick()
-            let share = app.windows.firstMatch.menus.firstMatch.menuItems["Share…"]
-            XCTAssertTrue(share.waitForExistence(timeout: 3))
-            share.click()
-            let popover = app.popovers.firstMatch
-            XCTAssertTrue(popover.waitForExistence(timeout: 5))
-            XCTAssertTrue(popover.buttons["Copy"].waitForExistence(timeout: 5))
-            let frame = popover.frame
-            XCTAssertFalse(frame.isEmpty)
-            let horizontalGap = max(0, max(frame.minX - anchor.maxX, anchor.minX - frame.maxX))
-            let verticalGap = max(0, max(frame.minY - anchor.maxY, anchor.minY - frame.maxY))
-            XCTAssertLessThanOrEqual(horizontalGap, 32, "Share popover is detached from the attachment")
-            XCTAssertLessThanOrEqual(verticalGap, 32, "Share popover is detached from the attachment")
-            app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
-            XCTAssertTrue(popover.waitForNonExistence(timeout: 3))
+    #if targetEnvironment(macCatalyst)
+        func testImageContextMenuShareAnchorsToAttachment() {
+            app.launch()
+            let image = app.buttons["Open image"]
+            XCTAssertTrue(image.waitForExistence(timeout: 8))
+            for _ in 0..<2 {
+                let anchor = image.frame
+                image.rightClick()
+                let share = app.windows.firstMatch.menus.firstMatch.menuItems["Share…"]
+                XCTAssertTrue(share.waitForExistence(timeout: 3))
+                share.click()
+                let popover = app.popovers.firstMatch
+                XCTAssertTrue(popover.waitForExistence(timeout: 5))
+                XCTAssertTrue(popover.buttons["Copy"].waitForExistence(timeout: 5))
+                let frame = popover.frame
+                XCTAssertFalse(frame.isEmpty)
+                let horizontalGap = max(0, max(frame.minX - anchor.maxX, anchor.minX - frame.maxX))
+                let verticalGap = max(0, max(frame.minY - anchor.maxY, anchor.minY - frame.maxY))
+                XCTAssertLessThanOrEqual(
+                    horizontalGap, 32, "Share popover is detached from the attachment")
+                XCTAssertLessThanOrEqual(
+                    verticalGap, 32, "Share popover is detached from the attachment")
+                app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+                XCTAssertTrue(popover.waitForNonExistence(timeout: 3))
+            }
         }
-    }
 
-    func testCompletedImageContextMenuCopiesAndSavesImage() throws {
-        let exportDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("GeckoSaveUITest-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: exportDirectory) }
-        app.launchEnvironment["DINO_UI_TEST_EXPORT_DIRECTORY"] = exportDirectory.path
-        UIPasteboard.general.items = []
-        app.launch()
+        func testCompletedImageContextMenuCopiesAndSavesImage() throws {
+            let exportDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("GeckoSaveUITest-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: exportDirectory, withIntermediateDirectories: false)
+            defer { try? FileManager.default.removeItem(at: exportDirectory) }
+            app.launchEnvironment["DINO_UI_TEST_EXPORT_DIRECTORY"] = exportDirectory.path
+            UIPasteboard.general.items = []
+            app.launch()
 
-        let preview = app.buttons["Open image"]
-        XCTAssertTrue(preview.waitForExistence(timeout: 8), "The image preview never appeared")
-        preview.rightClick()
+            let preview = app.buttons["Open image"]
+            XCTAssertTrue(preview.waitForExistence(timeout: 8), "The image preview never appeared")
+            preview.rightClick()
 
-        let copy = app.windows.firstMatch.menus.firstMatch.menuItems["Copy"]
-        XCTAssertTrue(copy.waitForExistence(timeout: 2), "Completed image context menu has no Copy action")
-        copy.click()
-        let imageCopied = NSPredicate { _, _ in
-            UIPasteboard.general.hasImages
+            let copy = app.windows.firstMatch.menus.firstMatch.menuItems["Copy"]
+            XCTAssertTrue(
+                copy.waitForExistence(timeout: 2), "Completed image context menu has no Copy action"
+            )
+            copy.click()
+            let imageCopied = NSPredicate { _, _ in
+                UIPasteboard.general.hasImages
+            }
+            let copied = XCTNSPredicateExpectation(predicate: imageCopied, object: nil)
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [copied], timeout: 5),
+                .completed,
+                "Copy did not place the rendered image on the pasteboard")
+
+            preview.rightClick()
+            let save = app.windows.firstMatch.menus.firstMatch.menuItems["Save As…"]
+            XCTAssertTrue(
+                save.waitForExistence(timeout: 2),
+                "Completed image context menu has no Save As action")
+            save.click()
+            let savePanel = app.sheets["save-panel"]
+            let saveButton = savePanel.buttons["Save"]
+            XCTAssertTrue(
+                saveButton.waitForExistence(timeout: 3),
+                "Save As did not open the system save dialog")
+            let filename = savePanel.textFields.firstMatch
+            XCTAssertTrue(
+                filename.waitForExistence(timeout: 2), "Save dialog has no filename field")
+            XCTAssertEqual(filename.value as? String, "fixture")
+            saveButton.click()
+            XCTAssertTrue(savePanel.waitForNonExistence(timeout: 3), "Save dialog did not dismiss")
+
+            let savedURL = exportDirectory.appendingPathComponent("fixture.png")
+            let saved = NSPredicate { _, _ in
+                FileManager.default.fileExists(atPath: savedURL.path)
+            }
+            let exported = XCTNSPredicateExpectation(predicate: saved, object: nil)
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [exported], timeout: 3),
+                .completed,
+                "Save As did not export fixture.png")
+            let image = try XCTUnwrap(UIImage(contentsOfFile: savedURL.path))
+            let pixels = try XCTUnwrap(image.cgImage)
+            XCTAssertGreaterThan(pixels.width, 0)
+            XCTAssertEqual(pixels.width * 3, pixels.height * 4)
         }
-        let copied = XCTNSPredicateExpectation(predicate: imageCopied, object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [copied], timeout: 5),
-            .completed,
-            "Copy did not place the rendered image on the pasteboard")
 
-        preview.rightClick()
-        let save = app.windows.firstMatch.menus.firstMatch.menuItems["Save As…"]
-        XCTAssertTrue(save.waitForExistence(timeout: 2), "Completed image context menu has no Save As action")
-        save.click()
-        let savePanel = app.sheets["save-panel"]
-        let saveButton = savePanel.buttons["Save"]
-        XCTAssertTrue(saveButton.waitForExistence(timeout: 3), "Save As did not open the system save dialog")
-        let filename = savePanel.textFields.firstMatch
-        XCTAssertTrue(filename.waitForExistence(timeout: 2), "Save dialog has no filename field")
-        XCTAssertEqual(filename.value as? String, "fixture")
-        saveButton.click()
-        XCTAssertTrue(savePanel.waitForNonExistence(timeout: 3), "Save dialog did not dismiss")
-
-        let savedURL = exportDirectory.appendingPathComponent("fixture.png")
-        let saved = NSPredicate { _, _ in
-            FileManager.default.fileExists(atPath: savedURL.path)
+        func testRapidMediaActivationCreatesOnlyOnePreviewWindow() {
+            app.launchEnvironment["DINO_UI_TEST_RAPID_MEDIA"] = "1"
+            app.launch()
+            let previews = app.descendants(matching: .any)
+                .matching(identifier: "media.preview")
+            XCTAssertTrue(
+                previews.firstMatch.waitForExistence(timeout: 5), "Media preview did not open")
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            XCTAssertEqual(previews.count, 1)
         }
-        let exported = XCTNSPredicateExpectation(predicate: saved, object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [exported], timeout: 3),
-            .completed,
-            "Save As did not export fixture.png")
-        let image = try XCTUnwrap(UIImage(contentsOfFile: savedURL.path))
-        let pixels = try XCTUnwrap(image.cgImage)
-        XCTAssertGreaterThan(pixels.width, 0)
-        XCTAssertEqual(pixels.width * 3, pixels.height * 4)
-    }
-
-    func testRapidMediaActivationCreatesOnlyOnePreviewWindow() {
-        app.launchEnvironment["DINO_UI_TEST_RAPID_MEDIA"] = "1"
-        app.launch()
-        let previews = app.descendants(matching: .any)
-            .matching(identifier: "media.preview")
-        XCTAssertTrue(previews.firstMatch.waitForExistence(timeout: 5), "Media preview did not open")
-        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
-        XCTAssertEqual(previews.count, 1)
-    }
-#endif
+    #endif
 }
 
 final class LoginUITests: XCTestCase {
@@ -812,9 +878,11 @@ final class LoginUITests: XCTestCase {
         XCTAssertLessThan(abs(form.frame.midY - viewport.frame.midY), viewport.frame.height * 0.05)
         XCTAssertGreaterThan(form.frame.minX, viewport.frame.minX)
         XCTAssertLessThan(form.frame.maxX, viewport.frame.maxX)
-#if targetEnvironment(macCatalyst)
-        XCTAssertLessThan(form.frame.width, viewport.frame.width * 0.6, "Login should not stretch across a desktop window")
-#endif
+        #if targetEnvironment(macCatalyst)
+            XCTAssertLessThan(
+                form.frame.width, viewport.frame.width * 0.6,
+                "Login should not stretch across a desktop window")
+        #endif
         XCTAssertTrue(app.textFields["login.address"].isHittable)
         XCTAssertTrue(app.secureTextFields["login.password"].isHittable)
         XCTAssertTrue(app.buttons["login.submit"].exists)
@@ -835,38 +903,47 @@ final class LoginUITests: XCTestCase {
         XCTAssertFalse(submit.isEnabled, "An address alone must not allow sign-in")
         address.typeText("\n")
         app.typeText("not-a-real-password")
-        XCTAssertEqual(address.value as? String, "fixture@example.invalid", "Return did not leave the address field")
-        XCTAssertTrue(submit.isEnabled, "Return should focus Password so typing completes the credentials")
+        XCTAssertEqual(
+            address.value as? String, "fixture@example.invalid",
+            "Return did not leave the address field")
+        XCTAssertTrue(
+            submit.isEnabled, "Return should focus Password so typing completes the credentials")
         let password = app.secureTextFields["login.password"]
-        password.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "not-a-real-password".count))
+        password.typeText(
+            String(repeating: XCUIKeyboardKey.delete.rawValue, count: "not-a-real-password".count))
         XCTAssertFalse(submit.isEnabled, "Clearing the password must disable sign-in")
     }
 
-#if !targetEnvironment(macCatalyst)
-    func testLargeTextLoginRemainsScrollable() {
-        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-        app.launch()
-        let viewport = app.scrollViews["login.viewport"]
-        XCTAssertTrue(viewport.waitForExistence(timeout: 5))
-        XCTAssertGreaterThan(app.otherElements["login.form"].frame.height, viewport.frame.height)
-        let address = app.textFields["login.address"]
-        for _ in 0..<5 {
-            if address.isHittable { break }
-            viewport.swipeUp()
+    #if !targetEnvironment(macCatalyst)
+        func testLargeTextLoginRemainsScrollable() {
+            app.launchArguments += [
+                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+            ]
+            app.launch()
+            let viewport = app.scrollViews["login.viewport"]
+            XCTAssertTrue(viewport.waitForExistence(timeout: 5))
+            XCTAssertGreaterThan(
+                app.otherElements["login.form"].frame.height, viewport.frame.height)
+            let address = app.textFields["login.address"]
+            for _ in 0..<5 {
+                if address.isHittable { break }
+                viewport.swipeUp()
+            }
+            XCTAssertTrue(
+                address.isHittable, "The address field must remain reachable at large text sizes")
+            let submit = app.buttons["login.submit"]
+            for _ in 0..<5 {
+                if submit.isHittable { break }
+                viewport.swipeUp()
+            }
+            XCTAssertTrue(
+                submit.isHittable, "The sign-in action must remain reachable at large text sizes")
+            XCTAssertGreaterThanOrEqual(submit.frame.minX, viewport.frame.minX)
+            XCTAssertLessThanOrEqual(submit.frame.maxX, viewport.frame.maxX)
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Large-text login after scrolling"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
         }
-        XCTAssertTrue(address.isHittable, "The address field must remain reachable at large text sizes")
-        let submit = app.buttons["login.submit"]
-        for _ in 0..<5 {
-            if submit.isHittable { break }
-            viewport.swipeUp()
-        }
-        XCTAssertTrue(submit.isHittable, "The sign-in action must remain reachable at large text sizes")
-        XCTAssertGreaterThanOrEqual(submit.frame.minX, viewport.frame.minX)
-        XCTAssertLessThanOrEqual(submit.frame.maxX, viewport.frame.maxX)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Large-text login after scrolling"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
-    }
-#endif
+    #endif
 }
