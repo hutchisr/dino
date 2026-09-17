@@ -141,6 +141,7 @@ struct ChatMessage: Identifiable, Equatable {
     var mime: String = ""
     var size: Int = 0
     var fileState: String = ""
+    var downloadFailureUntil: Date?
     var path: String = ""
     var editable: Bool = false
     var reactions: [Reaction] = []
@@ -735,6 +736,16 @@ final class AppModel: ObservableObject {
     }
 
     func downloadFile(_ id: Int32, item: Int32) {
+        guard var message = messages[id]?.first(where: { $0.id == item }),
+              message.isFile, message.direction == "in",
+              message.fileState == "failed" || message.fileState == "not_started" else { return }
+        // Acknowledge the click before the GLib queue services the request.
+        // The bridge always re-emits the authoritative state on completion,
+        // including failures that happen before download_started is emitted.
+        message.fileState = "in_progress"
+        message.downloadFailureUntil = nil
+        reconcileFileTransferProgress(for: message, conversation: id)
+        mergeMessages([message], for: id, synced: true)
         GeckoCore.shared.downloadFile(id, item: item)
     }
 
@@ -1372,6 +1383,13 @@ final class AppModel: ObservableObject {
             // its way out; log it instead of arming a modal for the next launch.
             geckoDebugLog("Gecko: background disconnect failed (%@)",
                           e["msg"] as? String ?? "?")
+        case "download_failed":
+            if let cid = e["conversation"] as? Int32,
+               let item = e["item"] as? Int32,
+               var message = messages[cid]?.first(where: { $0.id == item }) {
+                message.downloadFailureUntil = Date().addingTimeInterval(4)
+                mergeMessages([message], for: cid, synced: true)
+            }
         case "error", "fatal":
             lastError = e["message"] as? String
         default:

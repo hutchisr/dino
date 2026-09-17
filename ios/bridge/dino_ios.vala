@@ -2265,11 +2265,20 @@ public void download_file(int conversation_id, int item_id) {
         if (c == null) return Source.REMOVE;
         var item = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).get_item_by_id(c, iid);
         var fi = item as Dino.FileItem;
-        if (fi == null || fi.file_transfer.state == FileTransfer.State.IN_PROGRESS
+        if (fi == null) return Source.REMOVE;
+        if (fi.file_transfer.state == FileTransfer.State.IN_PROGRESS
                 || fi.file_transfer.state == FileTransfer.State.COMPLETE) {
+            emit(content_item_json("message", fi, c));
             return Source.REMOVE;
         }
-        app.stream_interactor.get_module(Dino.FileManager.IDENTITY).download_file.begin(fi.file_transfer);
+        var manager = app.stream_interactor.get_module(Dino.FileManager.IDENTITY);
+        manager.download_file.begin(fi.file_transfer, (_, res) => {
+            manager.download_file.end(res);
+            emit(content_item_json("message", fi, c));
+            if (fi.file_transfer.state != FileTransfer.State.COMPLETE) {
+                emit("{\"type\":\"download_failed\",\"conversation\":%d,\"item\":%d}".printf(cid, iid));
+            }
+        });
         return Source.REMOVE;
     });
 }

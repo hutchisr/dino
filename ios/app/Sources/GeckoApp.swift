@@ -3378,7 +3378,9 @@ struct FileContent: View {
                 fileRow
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Download \(msg.fileName.isEmpty ? "File" : msg.fileName)")
+            .accessibilityLabel(
+                "\(msg.fileState == "failed" ? "Retry download" : "Download") "
+                    + "\(msg.fileName.isEmpty ? "File" : msg.fileName)")
         } else {
             fileRow
         }
@@ -3418,7 +3420,17 @@ struct FileContent: View {
                 Text(msg.fileName.isEmpty ? "File" : msg.fileName).lineLimit(1)
                 HStack(spacing: 4) {
                     if !sizeLabel.isEmpty { Text(sizeLabel) }
-                    if msg.fileState == "failed" { Text("failed") }
+                    if msg.direction == "in", msg.fileState == "failed" || msg.fileState == "not_started" {
+                        if let until = msg.downloadFailureUntil {
+                            TimelineView(.explicit([.now, until])) { context in
+                                Text(context.date < until ? "Download failed" : "Click to retry")
+                            }
+                        } else if msg.fileState == "failed" {
+                            Text("Click to retry")
+                        }
+                    } else if msg.fileState == "failed" {
+                        Text("failed")
+                    }
                     if msg.fileState == "in_progress" { Text(msg.direction == "out" ? "uploading…" : "downloading…") }
                 }
                 .font(.caption2).foregroundStyle(.secondary)
