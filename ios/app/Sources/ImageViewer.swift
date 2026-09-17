@@ -96,7 +96,8 @@ struct ImageViewer: View {
                             image: image,
                             reduceMotion: accessibilityReduceMotion,
                             onSwipeDismiss: closeViewer)
-                            .ignoresSafeArea()
+                            // Keep the zoom viewport below the navigation toolbar.
+                            .clipped()
                             .background(Color.black)
                     } else if failed {
                         Text("Could not load image").foregroundStyle(.white)

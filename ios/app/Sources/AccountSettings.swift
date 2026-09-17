@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct AccountSettingsView: View {
     @EnvironmentObject var model: AppModel
@@ -7,6 +8,7 @@ struct AccountSettingsView: View {
     @State private var newPassword = ""
     @State private var confirmPassword = ""
     @State private var showPhotoPicker = false
+    @State private var showImageImporter = false
     @StateObject private var avatarSelection = AttachmentSelectionPipeline()
     @State private var aliasSaved = false
     @State private var presenceShow = "online"
@@ -42,8 +44,13 @@ struct AccountSettingsView: View {
                     HStack {
                         Spacer()
                         VStack(spacing: 10) {
-                            Button {
-                                showPhotoPicker = true
+                            Menu {
+                                Button("Photo Library…", systemImage: "photo.on.rectangle") {
+                                    showPhotoPicker = true
+                                }
+                                Button("Choose Image File…", systemImage: "folder") {
+                                    showImageImporter = true
+                                }
                             } label: {
                                 AvatarView(
                                     jid: jid,
@@ -203,6 +210,20 @@ struct AccountSettingsView: View {
                         model.lastError = AttachmentStaging.tooLargeMessage(noun: "image")
                     },
                     onError: { model.lastError = $0 })
+            }
+            .fileImporter(isPresented: $showImageImporter, allowedContentTypes: [.image]) { result in
+                switch result {
+                case .success(let url):
+                    avatarSelection.stageImportedFile(
+                        url,
+                        onPicked: { model.setAvatar(path: $0.path) },
+                        onTooLarge: {
+                            model.lastError = AttachmentStaging.tooLargeMessage(noun: "image")
+                        },
+                        onError: { model.lastError = $0 })
+                case .failure(let error):
+                    model.lastError = error.localizedDescription
+                }
             }
             .onAppear {
                 model.requestAccountDetails()

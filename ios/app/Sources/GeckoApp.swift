@@ -983,15 +983,17 @@ struct ConversationListView: View {
         } label: {
 #if targetEnvironment(macCatalyst)
             AvatarView(
-                jid: account.id, name: model.accountAlias, isGroup: false, size: 24,
+                jid: account.id, name: model.accountAlias, isGroup: false, size: 32,
                 avatarPath: model.avatars[account.id],
                 requestAvatar: { model.ensureAvatar(for: account.id) })
                 .overlay(alignment: .bottomTrailing) {
                     Circle()
                         .fill(accountStatusColor(account.state))
-                        .frame(width: 7, height: 7)
+                        .frame(width: 8, height: 8)
+                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
                 }
-                .frame(width: 28, height: 28)
+                .frame(width: 36, height: 36)
+                .fixedSize()
                 .contentShape(Circle())
 #else
             AvatarView(
@@ -1025,11 +1027,12 @@ struct ConversationListView: View {
             ToolbarItem(placement: .topBarLeading) {
                 if let account = model.accounts.first {
                     accountButton(for: account)
+                        // Catalyst can retain the native toolbar item's rendered
+                        // label. Replace it when the avatar file changes.
+                        .id("\(account.id):\(model.avatars[account.id] ?? "")")
                 }
             }
-#if !targetEnvironment(macCatalyst)
             .sharedBackgroundVisibility(.hidden)
-#endif
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button("New Message", systemImage: "square.and.pencil", action: model.presentNewMessage)
                     .labelStyle(.iconOnly)

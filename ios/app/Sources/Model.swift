@@ -622,11 +622,13 @@ final class AppModel: ObservableObject {
 
     func setAvatar(path: String) {
         Task {
-            GeckoCore.shared.setAvatar(path: await Self.avatarUploadPath(for: path))
-            // re-request our own avatar once published
+            let uploadPath = await Self.avatarUploadPath(for: path)
+            GeckoCore.shared.setAvatar(path: uploadPath)
+            // Preview the chosen image while publication and the server's
+            // avatar event catch up; clearing it shows the initials fallback.
             if let jid = accounts.first?.id {
                 requestedAvatars.remove(jid)
-                setAvatarPath(nil, for: jid)
+                setAvatarPath(uploadPath, for: jid)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                     GeckoCore.shared.requestAvatar(jid: jid)
                 }
