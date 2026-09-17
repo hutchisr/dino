@@ -117,7 +117,7 @@ xcrun -sdk "$SDK" swiftc \
   -sdk "$SDKPATH" \
   -import-objc-header "$HERE/bridge.h" \
   "${SWIFT_CFLAGS[@]}" -Xcc -I"$PREFIX/include" \
-  "${SIM_ENTS[@]}" \
+  ${SIM_ENTS[@]+"${SIM_ENTS[@]}"} \
   "$HERE"/Sources/*.swift \
   "$HERE"/GeckoKit/Sources/GeckoKit/*.swift \
   -L "$PREFIX/lib" -L "$PREFIX/lib/gio/modules" -L "$PREFIX/lib/dino/plugins" \
@@ -201,7 +201,7 @@ xcrun -sdk "$SDK" swiftc \
   -import-objc-header "$HERE/bridge.h" \
   "${SWIFT_CFLAGS[@]}" -Xcc -I"$PREFIX/include" \
   -Xlinker -e -Xlinker _NSExtensionMain \
-  "${NSE_ENTS[@]}" \
+  ${NSE_ENTS[@]+"${NSE_ENTS[@]}"} \
   "$ROOT"/nse/*.swift \
   -L "$PREFIX/lib" -L "$PREFIX/lib/gio/modules" -L "$PREFIX/lib/dino/plugins" \
   -ldinoios -ldino -lxmpp-vala -lqlite -lcrypto-vala \

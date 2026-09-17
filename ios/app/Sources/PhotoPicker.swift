@@ -11,7 +11,10 @@ final class AttachmentSelectionPipeline: ObservableObject {
     @Published private(set) var isStaging = false
     // Catalyst's Finder bridge advertises file content plus this marker, not
     // public.file-url. The marker distinguishes text files from dragged text.
-    static let fileDropTypeIdentifiers = [UTType.fileURL.identifier, "com.apple.finder.node"]
+    // Screenshot previews can supply an image without either file marker.
+    static let fileDropTypeIdentifiers = [
+        UTType.fileURL.identifier, "com.apple.finder.node", UTType.image.identifier,
+    ]
 
     private final class CancellationToken: @unchecked Sendable {
         private let lock = NSLock()
@@ -107,6 +110,10 @@ final class AttachmentSelectionPipeline: ObservableObject {
         onError: @escaping (String) -> Void
     ) {
         let operation = begin(onPicked: onPicked, onTooLarge: onTooLarge, onError: onError)
+        let contentType = provider.registeredTypeIdentifiers.first {
+            UTType($0)?.conforms(to: .data) == true
+        }
+        let preferredFilenameExtension = contentType.flatMap { UTType($0)?.preferredFilenameExtension }
         let stage: @Sendable (URL?, Error?) -> Void = { [weak self] url, error in
             guard let self else { return }
             // Provider file representations expire when their callback returns.
@@ -118,7 +125,9 @@ final class AttachmentSelectionPipeline: ObservableObject {
                     let scoped = url.startAccessingSecurityScopedResource()
                     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                     return try AttachmentStaging.stageCopyCancellable(
-                        of: url, isCancelled: { operation.token.isCancelled })
+                        of: url,
+                        preferredFilenameExtension: preferredFilenameExtension,
+                        isCancelled: { operation.token.isCancelled })
                 }
             }
             Task { @MainActor in
@@ -129,9 +138,7 @@ final class AttachmentSelectionPipeline: ObservableObject {
             providerProgress = provider.loadObject(ofClass: NSURL.self) { item, error in
                 stage(item as? URL, error)
             }
-        } else if let type = provider.registeredTypeIdentifiers.first(where: {
-            UTType($0)?.conforms(to: .data) == true
-        }) {
+        } else if let type = contentType {
             providerProgress = provider.loadFileRepresentation(forTypeIdentifier: type, completionHandler: stage)
         } else {
             finish(generation: operation.generation, result: .failure(AttachmentStagingError.notAFile))

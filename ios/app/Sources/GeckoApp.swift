@@ -2580,7 +2580,7 @@ struct ChatView: View {
         }
         .contentShape(Rectangle())
         .onDrop(
-            of: [.fileURL, .data],
+            of: [.fileURL, .image, .data],
             isTargeted: $isFileDropTargeted,
             perform: dropFiles)
         .overlay {
