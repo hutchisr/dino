@@ -1,3 +1,18 @@
+/// Retains user provenance while geometry callbacks are coalesced. An idle
+/// callback must not erase movement queued before the gesture ended.
+struct HistoryScrollActivity {
+    private var pending = false
+
+    mutating func record(isUserScroll: Bool) {
+        pending = pending || isUserScroll
+    }
+
+    mutating func consume() -> Bool {
+        defer { pending = false }
+        return pending
+    }
+}
+
 /// Geometry-driven gate for loading older chat history. The initial page waits
 /// for a real scroll so opening a conversation cannot page by itself. After a
 /// prepend it waits for the preserved viewport's geometry before rearming, so

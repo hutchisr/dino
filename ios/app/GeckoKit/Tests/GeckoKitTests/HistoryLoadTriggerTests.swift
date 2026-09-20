@@ -2,6 +2,27 @@ import XCTest
 @testable import GeckoKit
 
 final class HistoryLoadTriggerTests: XCTestCase {
+    func testDeferredTopSampleLoadsAfterGestureBecomesIdle() {
+        var activity = HistoryScrollActivity()
+        var trigger = HistoryLoadTrigger()
+        trigger.setCanLoadOlder(true)
+        trigger.beginUserScroll()
+        activity.record(isUserScroll: true)
+        activity.record(isUserScroll: false)
+
+        XCTAssertTrue(activity.consume())
+        XCTAssertTrue(trigger.observe(distanceFromTop: 20))
+        XCTAssertFalse(activity.consume())
+    }
+
+    func testLayoutSamplesDoNotInheritConsumedUserMovement() {
+        var activity = HistoryScrollActivity()
+        activity.record(isUserScroll: true)
+        XCTAssertTrue(activity.consume())
+        activity.record(isUserScroll: false)
+        XCTAssertFalse(activity.consume())
+    }
+
     func testInitialTopGeometryIsIgnoredUntilPagingIsEnabled() {
         var trigger = HistoryLoadTrigger()
 

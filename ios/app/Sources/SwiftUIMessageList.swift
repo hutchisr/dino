@@ -103,6 +103,7 @@ struct SwiftUIMessageList: View {
         var historyRestoreGeneration = 0
         var historyRequest: HistoryRequestContext?
         var historyLoadTrigger = HistoryLoadTrigger()
+        var historyScrollActivity = HistoryScrollActivity()
         weak var scrollView: UIScrollView?
         private let bottomScrollAnimator = ScrollToBottomAnimator()
         private var pendingBottomScrollTask: Task<Void, Never>?
@@ -258,6 +259,7 @@ struct SwiftUIMessageList: View {
             latestScrollSample = nil
             pendingScrollSampleAction = nil
             pendingScrollSampleTask = nil
+            historyScrollActivity = HistoryScrollActivity()
         }
 
         /// Takes ownership from pending proxy work and active deceleration, then
@@ -418,6 +420,7 @@ struct SwiftUIMessageList: View {
                     isUnderfilled: geo.contentSize.height <= geo.containerSize.height + 1,
                     historyPageRevision: historyPageRevision)
             } action: { _, sample in
+                metrics.historyScrollActivity.record(isUserScroll: userInteracting)
                 metrics.scheduleScrollSample(
                     sample,
                     delay: Self.scrollSampleSettleDelay
@@ -519,7 +522,7 @@ struct SwiftUIMessageList: View {
                     lastSettledNewestID = newestMessageID
                     animateBottomGrowthForNewestID = nil
                 }
-                if phase == .tracking || (phase == .interacting && previous == .idle) {
+                if userInteracting {
                     metrics.historyLoadTrigger.beginUserScroll()
                 }
                 let beganInteraction = previous == .tracking || previous == .idle
@@ -538,6 +541,7 @@ struct SwiftUIMessageList: View {
         _ sample: ScrollSample,
         proxy: ScrollViewProxy
     ) {
+        let sampleWasUserScroll = metrics.historyScrollActivity.consume()
         let previousContentHeight = metrics.contentHeight
         let previousContainerHeight = metrics.containerHeight
         metrics.distanceFromTop = sample.distanceFromTop
@@ -570,6 +574,9 @@ struct SwiftUIMessageList: View {
             measuredRevision: sample.historyPageRevision)
         let settledViewport = completePendingHistoryViewportRestoreIfNeeded(sample)
         enableOlderLoadingIfReady()
+        if sampleWasUserScroll {
+            metrics.historyLoadTrigger.beginUserScroll()
+        }
         let completedPage = processCompletedHistoryPageIfNeeded(
             sample,
             proxy: proxy)
@@ -578,7 +585,8 @@ struct SwiftUIMessageList: View {
         }
         // Do not treat the layout sample produced by the prepend as another
         // scroll. The restored viewport's first sample only rearms the gate.
-        if !settledViewport, !completedPage, userInteracting,
+        let shouldCheckHistory = userInteracting || sampleWasUserScroll
+        if !settledViewport, !completedPage, shouldCheckHistory,
            metrics.historyLoadTrigger.state == .armed {
             requestOlderIfNeeded(distanceFromTop: sample.distanceFromTop)
         }
