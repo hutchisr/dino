@@ -164,6 +164,18 @@ struct ChatMessage: Identifiable, Equatable {
     }
 }
 
+struct FileTransportPreview: Equatable {
+    enum Transport: String {
+        case http, jingle, none
+    }
+
+    let requestID: String
+    let path: String
+    var transport: Transport?
+    var message: String?
+    var isChecking: Bool { transport == nil }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var ready = false
@@ -178,7 +190,13 @@ final class AppModel: ObservableObject {
     @Published var messages: [Int32: [ChatMessage]] = [:]
     @Published var lastError: String?
     @Published var navigation: [Int32] = [] {
-        didSet { reconcileConversationFocus() }
+        didSet {
+            if navigation.last != oldValue.last {
+                fileTransportPreviews = [:]
+                fileTransportCompletions = [:]
+            }
+            reconcileConversationFocus()
+        }
     }
     @Published var roster: [RosterContact] = []
     @Published var subscriptionRequests: [String] = []
@@ -208,6 +226,8 @@ final class AppModel: ObservableObject {
     @Published var accountSettingsPresented = false
     @Published private(set) var isUITestFixture = false
     @Published private(set) var uiTestImageSettled = false
+    @Published private(set) var fileTransportPreviews: [Int32: FileTransportPreview] = [:]
+    private var fileTransportCompletions: [Int32: (FileTransportPreview) -> Void] = [:]
 
     private var directChatRoute = DirectChatRouteState()
     private var queuedMucInvites: [MucInvitation] = []
@@ -216,6 +236,7 @@ final class AppModel: ObservableObject {
     private var requestedAvatars = Set<String>()
 #if DEBUG
     private var uiTestRoomMembersFixture = false
+    private var uiTestFileTransportRequestCount = 0
 #endif
     private let messagePageSize: Int32 = 50
     @Published private var historyPagination: [Int32: HistoryPagination] = [:]
@@ -731,7 +752,71 @@ final class AppModel: ObservableObject {
         GeckoCore.shared.setTyping(id, typing)
     }
 
+    /// Provisional only: the core selects again when the file is actually sent.
+    func previewFileTransport(
+        _ id: Int32,
+        path: String,
+        completion: ((FileTransportPreview) -> Void)? = nil
+    ) {
+        let requestID = UUID().uuidString
+        fileTransportPreviews[id] = FileTransportPreview(requestID: requestID, path: path)
+        fileTransportCompletions[id] = completion
+#if DEBUG
+        if isUITestFixture {
+            let env = ProcessInfo.processInfo.environment
+            let sequence = (env["DINO_UI_TEST_FILE_TRANSPORT"] ?? "http").split(separator: ",")
+            let transport = sequence.isEmpty ? "none"
+                : String(sequence[min(uiTestFileTransportRequestCount, sequence.count - 1)])
+            uiTestFileTransportRequestCount += 1
+            let delay = Double(env["DINO_UI_TEST_FILE_TRANSPORT_DELAY"] ?? "") ?? 0.8
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.handle([
+                    "type": "file_transport", "conversation": Int(id),
+                    "request_id": requestID, "transport": transport,
+                    "message": "No compatible transfer method is currently available."
+                ])
+            }
+            return
+        }
+#endif
+        GeckoCore.shared.previewFileTransport(id, path: path, requestID: requestID)
+    }
+
+    func cancelFileTransportPreview(_ id: Int32) {
+        fileTransportPreviews[id] = nil
+        fileTransportCompletions[id] = nil
+    }
+
+    private func receiveFileTransportPreview(_ event: [String: Any]) {
+        guard let rawID = event["conversation"] as? Int,
+              let id = Int32(exactly: rawID),
+              let requestID = event["request_id"] as? String,
+              var preview = fileTransportPreviews[id],
+              preview.requestID == requestID, preview.isChecking else { return }
+        preview.transport = FileTransportPreview.Transport(
+            rawValue: event["transport"] as? String ?? "") ?? FileTransportPreview.Transport.none
+        if preview.transport == FileTransportPreview.Transport.none {
+            preview.message = event["message"] as? String
+                ?? "Unable to determine a transfer method. Try sending again."
+        }
+        fileTransportPreviews[id] = preview
+        let completion = fileTransportCompletions.removeValue(forKey: id)
+        completion?(preview)
+    }
+
     func sendFile(_ id: Int32, path: String) {
+#if DEBUG
+        if isUITestFixture {
+            let url = URL(fileURLWithPath: path)
+            messages[id, default: []].append(ChatMessage(
+                id: (messages[id]?.map(\.id).max() ?? 0) + 1,
+                content: "file", direction: "out", from: "fixture@example.invalid",
+                body: "", time: Date(), encryption: "NONE",
+                fileName: url.lastPathComponent, fileState: "complete", path: path))
+            messageRevisions[id, default: 0] += 1
+            return
+        }
+#endif
         GeckoCore.shared.sendFile(id, path: path)
     }
 
@@ -1016,6 +1101,16 @@ final class AppModel: ObservableObject {
     }
 
     func send(_ id: Int32, _ body: String, replyTo: Int32 = 0) {
+#if DEBUG
+        if isUITestFixture {
+            messages[id, default: []].append(ChatMessage(
+                id: (messages[id]?.map(\.id).max() ?? 0) + 1,
+                content: "text", direction: "out", from: "fixture@example.invalid",
+                body: body, time: Date(), encryption: "NONE"))
+            messageRevisions[id, default: 0] += 1
+            return
+        }
+#endif
         GeckoCore.shared.sendText(conversation: id, body: body, replyTo: replyTo)
     }
 
@@ -1029,6 +1124,8 @@ final class AppModel: ObservableObject {
 
     private func handle(_ e: [String: Any]) {
         switch e["type"] as? String {
+        case "file_transport":
+            receiveFileTransportPreview(e)
         case "ready":
             ready = true
             GeckoCore.shared.requestState()
@@ -1049,6 +1146,8 @@ final class AppModel: ObservableObject {
         case "password_changed":
             passwordChanged = true
         case "signed_out":
+            fileTransportPreviews = [:]
+            fileTransportCompletions = [:]
             accounts = []
             directChatRoute = DirectChatRouteState()
             conversations = []

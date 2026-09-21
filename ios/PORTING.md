@@ -302,6 +302,24 @@ All desktop-neutral (defaults unchanged; GTK Dino still builds):
   memory. After `build-core.sh catalyst-arm64`, run
   `ios/build-catalyst-arm64/libdino/libdino-test -p /FileMetadata` for valid,
   oversized, corrupt-image, and unreadable-hash regression coverage.
+* **Direct-transfer reactions**: incoming Jingle files are IQ-based transfers,
+  not chat messages; their provider `info` is a locally generated lookup key,
+  not a message ID. XEP-0444 cannot address these attachments. Reaction
+  commands propagate missing-message errors to the app's error alert rather
+  than silently discarding the attempt. HTTP-upload message attachments can
+  be reaction targets. Run `libdino-test -p /Reactions` for regression coverage.
+* **Attachment transport preview**: the composer uses one glass panel for the
+  staged file and a provisional “Direct transfer (Jingle)” notice. The read-only
+  `preview_file_transport` bridge command shares `FileManager`'s sender selection
+  with sending (priority, size, availability, and encryption); it does not upload,
+  hash, or persist the file. HTTP-only external encryption cannot select Jingle.
+  Preview replies are request-correlated and discarded after cancellation or
+  navigation. Send checks again; a newly selected Jingle route retains the
+  attachment and draft until another Send tap. Actual transmission selects again,
+  so the preview is not a reservation. Ordinary HTTP uploads have no extra label.
+  `/FileTransport` core tests cover selection and read-only behavior. The
+  `DINO_UI_TEST_FILE_TRANSPORT=http,jingle,jingle` chat fixture exercises the
+  change-of-transport confirmation without a network connection.
 
 ## Notification Service Extension (in progress)
 

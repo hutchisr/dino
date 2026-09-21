@@ -106,6 +106,9 @@ final class GeckoCore {
     func setTyping(_ id: Int32, _ typing: Bool) { dino_ios_set_typing(id, typing ? 1 : 0) }
     func requestAvatar(jid: String) { dino_ios_request_avatar(jid) }
     func sendFile(_ id: Int32, path: String) { dino_ios_send_file(id, path) }
+    func previewFileTransport(_ id: Int32, path: String, requestID: String) {
+        dino_ios_preview_file_transport(id, path, requestID)
+    }
     func downloadFile(_ id: Int32, item: Int32) { dino_ios_download_file(id, item) }
     func joinMuc(jid: String, nick: String?) { dino_ios_join_muc(jid, nick) }
     func acceptMucInvite(account: String, room: String, password: String?) {

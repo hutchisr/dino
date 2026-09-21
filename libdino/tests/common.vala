@@ -3,9 +3,22 @@ namespace Dino.Test {
 int main(string[] args) {
     GLib.Test.init(ref args);
     GLib.Test.set_nonfatal_assertions();
+    string data_dir;
+    try {
+        data_dir = DirUtils.make_tmp("dino-tests-XXXXXX");
+    } catch (Error e) {
+        error("Could not create test data directory: %s", e.message);
+    }
+    Environment.set_variable("XDG_DATA_HOME", data_dir, true);
     TestSuite.get_root().add_suite(new WeakMapTest().get_suite());
     TestSuite.get_root().add_suite(new FileMetadataTest().get_suite());
-    return GLib.Test.run();
+    TestSuite.get_root().add_suite(new FileTransportTest().get_suite());
+    TestSuite.get_root().add_suite(new ReactionsTest().get_suite());
+    int result = GLib.Test.run();
+    DirUtils.remove(Path.build_filename(data_dir, "dino", "files"));
+    DirUtils.remove(Path.build_filename(data_dir, "dino"));
+    DirUtils.remove(data_dir);
+    return result;
 }
 
 bool fail_if(bool exp, string? reason = null) {

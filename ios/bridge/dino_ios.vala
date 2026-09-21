@@ -1665,9 +1665,13 @@ public void set_reaction(int conversation_id, int item_id, string emoji, bool ad
         var item = app.stream_interactor.get_module(Dino.ContentItemStore.IDENTITY).get_item_by_id(c, iid);
         if (item == null) return Source.REMOVE;
         var reactions = app.stream_interactor.get_module(Dino.Reactions.IDENTITY);
-        if (a) reactions.add_reaction(c, item, e);
-        else reactions.remove_reaction(c, item, e);
-        re_emit_item_delayed(iid);
+        try {
+            if (a) reactions.add_reaction(c, item, e);
+            else reactions.remove_reaction(c, item, e);
+            re_emit_item_delayed(iid);
+        } catch (IOError error) {
+            emit(@"{\"type\":\"error\",\"message\":\"$(esc(error.message))\"}");
+        }
         return Source.REMOVE;
     });
 }
@@ -2224,6 +2228,36 @@ public void start_room_member_dm(int conversation_id, string jid) {
         } catch (Error e) {
             emit(@"{\"type\":\"error\",\"message\":\"$(esc(e.message))\"}");
         }
+        return Source.REMOVE;
+    });
+}
+
+// This prediction does not reserve a transport; send_file selects again.
+public void preview_file_transport(int conversation_id, string path, string request_id) {
+    int cid = conversation_id;
+    string p = path;
+    string rid = request_id;
+    Idle.add(() => {
+        Conversation? c = conversation_by_id(cid);
+        if (c == null) {
+            emit("{\"type\":\"file_transport\",\"conversation\":%d,\"request_id\":\"%s\",\"transport\":\"none\",\"message\":\"Unknown conversation\"}".printf(cid, esc(rid)));
+            return Source.REMOVE;
+        }
+        var fm = app.stream_interactor.get_module(Dino.FileManager.IDENTITY);
+        fm.preview_file_transport.begin(File.new_for_path(p), c, (_, res) => {
+            string transport = "none";
+            string? failure = null;
+            try {
+                int sender = fm.preview_file_transport.end(res);
+                if (sender == 0) transport = "http";
+                else if (sender == 1) transport = "jingle";
+                else failure = "Unsupported file transfer method";
+            } catch (Error e) {
+                failure = e.message;
+            }
+            string detail = failure != null ? ",\"message\":\"%s\"".printf(esc(failure)) : "";
+            emit("{\"type\":\"file_transport\",\"conversation\":%d,\"request_id\":\"%s\",\"transport\":\"%s\"%s}".printf(cid, esc(rid), transport, detail));
+        });
         return Source.REMOVE;
     });
 }

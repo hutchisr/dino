@@ -102,6 +102,8 @@ test_sources = files(
     'tests/testcase.vala',
     'tests/weak_map.vala',
     'tests/file_metadata.vala',
+    'tests/file_transport.vala',
+    'tests/reactions.vala',
 )
 exe_dino_test = executable('libdino-test', test_sources, c_args: c_args, dependencies: dependencies + dep_dino, install: false)
 test('Tests for libdino', exe_dino_test)

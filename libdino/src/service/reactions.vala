@@ -29,24 +29,20 @@ public class Dino.Reactions : StreamInteractionModule, Object {
         stream_interactor.get_module(ContentItemStore.IDENTITY).new_item.connect(on_new_item);
     }
 
-    public void add_reaction(Conversation conversation, ContentItem content_item, string reaction) {
+    public void add_reaction(Conversation conversation, ContentItem content_item, string reaction) throws IOError {
         Gee.List<string> reactions = get_own_reactions(conversation, content_item);
         if (!reactions.contains(reaction)) {
             reactions.add(reaction);
         }
-        try {
-            send_reactions(conversation, content_item, reactions);
-            reaction_added(conversation.account, content_item.id, conversation.account.bare_jid, reaction);
-        } catch (IOError e) {}
+        send_reactions(conversation, content_item, reactions);
+        reaction_added(conversation.account, content_item.id, conversation.account.bare_jid, reaction);
     }
 
-    public void remove_reaction(Conversation conversation, ContentItem content_item, string reaction) {
+    public void remove_reaction(Conversation conversation, ContentItem content_item, string reaction) throws IOError {
         Gee.List<string> reactions = get_own_reactions(conversation, content_item);
         reactions.remove(reaction);
-        try {
-            send_reactions(conversation, content_item, reactions);
-            reaction_removed(conversation.account, content_item.id, conversation.account.bare_jid, reaction);
-        } catch (IOError e) {}
+        send_reactions(conversation, content_item, reactions);
+        reaction_removed(conversation.account, content_item.id, conversation.account.bare_jid, reaction);
     }
 
     public Gee.List<ReactionUsers> get_item_reactions(Conversation conversation, ContentItem content_item) {
@@ -75,7 +71,7 @@ public class Dino.Reactions : StreamInteractionModule, Object {
 
     private void send_reactions(Conversation conversation, ContentItem content_item, Gee.List<string> reactions) throws IOError {
         string? message_id = stream_interactor.get_module(ContentItemStore.IDENTITY).get_message_id_for_content_item(conversation, content_item);
-        if (message_id == null) throw new IOError.FAILED("No message for content_item");
+        if (message_id == null) throw new IOError.FAILED("This item has no chat message ID and cannot receive reactions. Direct file transfers do not support message reactions.");
 
         XmppStream? stream = stream_interactor.get_stream(conversation.account);
         if (stream == null) throw new IOError.NOT_CONNECTED("No stream");

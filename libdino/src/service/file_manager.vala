@@ -72,7 +72,7 @@ public class FileManager : StreamInteractionModule, Object {
         return ret;
     }
 
-    public async string? send_file(File file, Conversation conversation) {
+    private FileTransfer create_outgoing_transfer(Conversation conversation) {
         FileTransfer file_transfer = new FileTransfer();
         file_transfer.account = conversation.account;
         file_transfer.counterpart = conversation.counterpart;
@@ -85,6 +85,52 @@ public class FileManager : StreamInteractionModule, Object {
         file_transfer.time = new DateTime.now_utc();
         file_transfer.local_time = new DateTime.now_utc();
         file_transfer.encryption = conversation.encryption;
+        return file_transfer;
+    }
+
+    private async FileSender select_sender(Conversation conversation, FileTransfer file_transfer, out FileEncryptor? file_encryptor) throws FileSendError {
+        file_encryptor = null;
+        foreach (FileSender sender in file_senders) {
+            if (!yield sender.can_send(conversation, file_transfer)) continue;
+            if (file_transfer.encryption == Encryption.NONE || yield sender.can_encrypt(conversation, file_transfer)) {
+                return sender;
+            }
+            // External encryptors produce HttpFileMeta; Jingle requires native encryption.
+            if (sender.get_id() != HTTP_PROVIDER_ID) continue;
+            foreach (FileEncryptor encryptor in file_encryptors) {
+                if (encryptor.can_encrypt_file(conversation, file_transfer)) {
+                    file_encryptor = encryptor;
+                    return sender;
+                }
+            }
+        }
+        throw new FileSendError.UPLOAD_FAILED(
+            "File exceeds the server upload limit or no compatible upload method is available");
+    }
+
+    // Provisional sender ID: actual sending selects again after preparing the file.
+    // Eligibility only needs basic file metadata, not hashes, thumbnails or a stored copy.
+    public async int preview_file_transport(File file, Conversation conversation) throws Error {
+        FileInfo info = yield file.query_info_async(
+            "standard::type,standard::display-name,standard::content-type,standard::size",
+            FileQueryInfoFlags.NONE);
+        if (info.get_file_type() != FileType.REGULAR) {
+            throw new IOError.NOT_SUPPORTED("The selected attachment is not a regular file");
+        }
+        // Opening read-only also catches unreadable staging files without reading their contents.
+        var input = yield file.read_async();
+        yield input.close_async();
+        FileTransfer file_transfer = create_outgoing_transfer(conversation);
+        file_transfer.file_name = info.get_display_name();
+        file_transfer.mime_type = info.get_content_type();
+        file_transfer.size = info.get_size();
+        FileEncryptor? file_encryptor;
+        FileSender sender = yield select_sender(conversation, file_transfer, out file_encryptor);
+        return sender.get_id();
+    }
+
+    public async string? send_file(File file, Conversation conversation) {
+        FileTransfer file_transfer = create_outgoing_transfer(conversation);
 
         try {
             Xep.FileMetadataElement.FileMetadata metadata = new Xep.FileMetadataElement.FileMetadata();
@@ -117,32 +163,8 @@ public class FileManager : StreamInteractionModule, Object {
             file_meta.size = file_transfer.size;
             file_meta.mime_type = file_transfer.mime_type;
 
-            FileSender file_sender = null;
-            FileEncryptor file_encryptor = null;
-            foreach (FileSender sender in file_senders) {
-                if (yield sender.can_send(conversation, file_transfer)) {
-                    if (file_transfer.encryption == Encryption.NONE || yield sender.can_encrypt(conversation, file_transfer)) {
-                        file_sender = sender;
-                        break;
-                    } else {
-                        foreach (FileEncryptor encryptor in file_encryptors) {
-                            if (encryptor.can_encrypt_file(conversation, file_transfer)) {
-                                file_encryptor = encryptor;
-                                break;
-                            }
-                        }
-                        if (file_encryptor != null) {
-                            file_sender = sender;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (file_sender == null) {
-                throw new FileSendError.UPLOAD_FAILED(
-                    "File exceeds the server upload limit or no compatible upload method is available");
-            }
+            FileEncryptor? file_encryptor;
+            FileSender file_sender = yield select_sender(conversation, file_transfer, out file_encryptor);
 
             if (file_encryptor != null) {
                 file_meta = file_encryptor.encrypt_file(conversation, file_transfer);

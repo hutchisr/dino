@@ -14,6 +14,44 @@ final class ChatVisibilityUITests: XCTestCase {
         app.launchEnvironment["DINO_UI_TEST_FIXTURE"] = "chat-visibility"
     }
 
+    func testAttachmentTransportChangeRequiresConfirmation() {
+        app.launchEnvironment["DINO_UI_TEST_COMPOSER"] = "1"
+        app.launchEnvironment["DINO_UI_TEST_FILE_TRANSPORT"] = "http,jingle,jingle"
+        app.launch()
+        let preview = app.descendants(matching: .any)["chat.attachment.preview"].firstMatch
+        let send = app.buttons["chat.attachment.send"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertTrue(send.waitForExistence(timeout: 5))
+        let enabled = NSPredicate(format: "enabled == true")
+        expectation(for: enabled, evaluatedWith: send)
+        waitForExpectations(timeout: 5)
+        send.tap()
+        let notice = app.descendants(matching: .any)["chat.attachment.jingle"].firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 5))
+        XCTAssertTrue(preview.exists, "A newly selected direct transfer must wait for confirmation")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Glass attachment preview with Jingle warning"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        send.tap()
+        XCTAssertTrue(preview.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Transfer preview.txt"].waitForExistence(timeout: 5))
+    }
+
+    func testCancelAttachmentIgnoresPendingTransportResult() {
+        app.launchEnvironment["DINO_UI_TEST_COMPOSER"] = "1"
+        app.launchEnvironment["DINO_UI_TEST_FILE_TRANSPORT"] = "jingle"
+        app.launchEnvironment["DINO_UI_TEST_FILE_TRANSPORT_DELAY"] = "2"
+        app.launch()
+        let cancel = app.buttons["chat.attachment.cancel"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        cancel.tap()
+        let notice = app.descendants(matching: .any)["chat.attachment.jingle"].firstMatch
+        XCTAssertFalse(notice.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["chat.attachment.send"].exists)
+        XCTAssertFalse(app.staticTexts["Transfer preview.txt"].exists)
+    }
+
     func testRoomDetailsSeparatesOnlineAndOfflineMembers() {
         openRoomParticipants()
         scrollRoomElementIntoView(app.staticTexts["Online (2)"])

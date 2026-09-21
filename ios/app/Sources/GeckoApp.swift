@@ -1691,6 +1691,10 @@ struct ChatView: View {
     @State private var composerHeight: CGFloat = 0
     @State private var keyboardOverlap: CGFloat = 0
     @State private var pendingFileSend: PendingFileSend?
+    @State private var fileTransportChangedToJingle = false
+#if DEBUG
+    @State private var didStageFileTransportFixture = false
+#endif
     @StateObject private var attachmentPipeline = AttachmentSelectionPipeline()
     @State private var isFileDropTargeted = false
     @State private var attachmentExport: AttachmentExport?
@@ -1824,83 +1828,145 @@ struct ChatView: View {
         }
     }
 
-    @ViewBuilder
+    private var pendingFileTransport: FileTransportPreview? {
+        guard let pendingFileSend,
+              let preview = model.fileTransportPreviews[conversationId],
+              preview.path == pendingFileSend.url.path else { return nil }
+        return preview
+    }
+
+    private var isCheckingFileTransport: Bool {
+        pendingFileTransport?.isChecking == true
+    }
+
     private func pendingFileSendPanel(_ file: PendingFileSend) -> some View {
-        HStack(spacing: 10) {
-            if file.isImage {
-                CachedDiskImage(path: file.url.path, maxPixel: 360, contentMode: .fill) {
-                    Image(systemName: "photo")
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                if file.isImage {
+                    CachedDiskImage(path: file.url.path, maxPixel: 360, contentMode: .fill) {
+                        Image(systemName: "photo")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(Color(.secondarySystemBackground))
+                    }
+                    .frame(width: 60, height: 60)
+                    .clipShape(.rect(cornerRadius: 16))
+                    .accessibilityHidden(true)
+                } else if file.isVideo {
+                    CachedVideoThumbnail(path: file.url.path,
+                                         box: CGSize(width: 60, height: 60),
+                                         maxPixel: 360,
+                                         playSize: 34)
+                        .frame(width: 60, height: 60)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(.rect(cornerRadius: 16))
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: "doc.fill")
                         .font(.title2)
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color(.secondarySystemBackground))
+                        .frame(width: 60, height: 60)
+                        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 16))
+                        .accessibilityHidden(true)
                 }
-                .frame(width: 76, height: 76)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            } else if file.isVideo {
-                CachedVideoThumbnail(path: file.url.path,
-                                     box: CGSize(width: 76, height: 76),
-                                     maxPixel: 360,
-                                     playSize: 34)
-                    .frame(width: 76, height: 76)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            } else {
-                Image(systemName: "doc.fill")
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 76, height: 76)
-                    .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 16))
-            }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(file.name)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                if !file.sizeLabel.isEmpty {
-                    Text(file.sizeLabel)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(file.name)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(2)
+                    if !file.sizeLabel.isEmpty {
+                        Text(file.sizeLabel)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button {
-                cancelPendingFileSend()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.title3)
-                    .foregroundStyle(.primary)
-                    .frame(width: 44, height: 44)
-                    .glassEffect(.regular.interactive(), in: Circle())
-                    .contentShape(.circle)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Cancel \(file.name)")
+                Button(action: cancelPendingFileSend) {
+                    Image(systemName: "xmark")
+                        .font(.title3)
+                        .foregroundStyle(.primary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.circle)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Cancel \(file.name)")
+                .accessibilityIdentifier("chat.attachment.cancel")
 
-            pendingFileSendButton(file)
+                pendingFileSendButton(file)
+            }
+            fileTransportNotice
         }
+        .padding(12)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("chat.attachment.preview")
         .padding(.horizontal, composerHorizontalPadding)
         .padding(.top, 8)
         .padding(.bottom, 4)
     }
+
+    @ViewBuilder
+    private var fileTransportNotice: some View {
+        if isCheckingFileTransport {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .accessibilityHidden(true)
+                Text("Checking transfer method…")
+                    .font(.caption)
+            }
+            .accessibilityIdentifier("chat.attachment.checking")
+        } else if let preview = pendingFileTransport {
+            switch preview.transport {
+            case .jingle:
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Direct transfer (Jingle)", systemImage: "arrow.left.arrow.right")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Recipient must be online. Message reactions aren’t supported for Jingle.")
+                    Text("Provisional — the transfer method is checked again when sending.")
+                        .foregroundStyle(.secondary)
+                    if fileTransportChangedToJingle {
+                        Text("The transfer method changed. Select Send again to continue.")
+                            .fontWeight(.medium)
+                    }
+                }
+                .font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("chat.attachment.jingle")
+            case .some(.none):
+                Text(preview.message ?? "No compatible transfer method is currently available.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("chat.attachment.error")
+            default:
+                EmptyView()
+            }
+        }
+    }
+
     @ViewBuilder
     private func pendingFileSendButton(_ file: PendingFileSend) -> some View {
 #if targetEnvironment(macCatalyst)
         let action: () -> Void = submitComposer
 #else
-        let action: () -> Void = confirmPendingFileSend
+        let action: () -> Void = { confirmPendingFileSend() }
 #endif
         let button = Button(action: action) {
             Image(systemName: "paperplane.fill")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .glassEffect(.regular.tint(.blue).interactive(), in: Circle())
+                .background(Color.accentColor, in: Circle())
                 .contentShape(.circle)
         }
         .buttonStyle(.plain)
+        .disabled(isCheckingFileTransport)
+        .opacity(isCheckingFileTransport ? 0.45 : 1)
         .accessibilityLabel("Send \(file.name)")
+        .accessibilityIdentifier("chat.attachment.send")
 #if targetEnvironment(macCatalyst)
         button.keyboardShortcut(.return, modifiers: [])
 #else
@@ -2134,9 +2200,11 @@ struct ChatView: View {
         }
         guard acceptAttachmentForStaging(url) else { return }
         let old = pendingFileSend
+        fileTransportChangedToJingle = false
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             pendingFileSend = PendingFileSend(url: url)
         }
+        model.previewFileTransport(conversationId, path: url.path)
         if old?.url != url {
             cleanupTemporaryAttachment(old)
         }
@@ -2144,6 +2212,8 @@ struct ChatView: View {
 
     private func cancelPendingFileSend() {
         attachmentPipeline.cancel()
+        model.cancelFileTransportPreview(conversationId)
+        fileTransportChangedToJingle = false
         let old = pendingFileSend
         withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
             pendingFileSend = nil
@@ -2151,12 +2221,24 @@ struct ChatView: View {
         cleanupTemporaryAttachment(old)
     }
 
-    private func confirmPendingFileSend() {
-        guard let pendingFileSend else { return }
-        outgoingMessageFollowTrigger.begin(latestItemID: latestMessageItemID)
-        model.sendFile(conversationId, path: pendingFileSend.url.path)
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-            self.pendingFileSend = nil
+    private func confirmPendingFileSend(includingDraft: Bool = false) {
+        guard let file = pendingFileSend, !isCheckingFileTransport else { return }
+        let alreadyShowedJingle = pendingFileTransport?.transport == .jingle
+        model.previewFileTransport(conversationId, path: file.url.path) { preview in
+            guard pendingFileSend?.url == file.url,
+                  model.navigation.last == conversationId else { return }
+            if preview.transport == .jingle && !alreadyShowedJingle {
+                fileTransportChangedToJingle = true
+                return
+            }
+            guard preview.transport == .http || preview.transport == .jingle else { return }
+            if includingDraft && !draft.isEmpty { sendCurrentDraft() }
+            outgoingMessageFollowTrigger.begin(latestItemID: latestMessageItemID)
+            model.sendFile(conversationId, path: file.url.path)
+            model.cancelFileTransportPreview(conversationId)
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                pendingFileSend = nil
+            }
         }
     }
 
@@ -2198,12 +2280,10 @@ struct ChatView: View {
     }
 
     private func submitComposer() {
-        let sendsFile = pendingFileSend != nil
-        if !draft.isEmpty {
+        if pendingFileSend != nil {
+            confirmPendingFileSend(includingDraft: true)
+        } else if !draft.isEmpty {
             sendCurrentDraft()
-        }
-        if sendsFile {
-            confirmPendingFileSend()
         }
     }
 
@@ -2241,7 +2321,7 @@ struct ChatView: View {
             },
             onEdit: m.editable ? {
                 replyingTo = nil
-                pendingFileSend = nil
+                cancelPendingFileSend()
                 editing = m
                 draft = m.body
             } : nil,
@@ -2660,6 +2740,23 @@ struct ChatView: View {
             }
         }
         .onAppear {
+#if DEBUG
+            if model.isUITestFixture, !didStageFileTransportFixture,
+               ProcessInfo.processInfo.environment["DINO_UI_TEST_FILE_TRANSPORT"] != nil {
+                didStageFileTransportFixture = true
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("Transfer preview.txt")
+                do {
+                    try Data("Attachment preview fixture".utf8).write(to: url)
+                    stageImportedFile(url)
+                } catch {
+                    model.lastError = error.localizedDescription
+                }
+            }
+#endif
+            if let pendingFileSend {
+                model.previewFileTransport(conversationId, path: pendingFileSend.url.path)
+            }
             guard talksToCore else { return }
             model.openConversation(conversationId)
             model.focusConversation(conversationId)
@@ -2668,6 +2765,7 @@ struct ChatView: View {
         }
         .onDisappear {
             attachmentPipeline.cancel()
+            model.cancelFileTransportPreview(conversationId)
             guard talksToCore else { return }
             model.blurConversation(conversationId)
         }
