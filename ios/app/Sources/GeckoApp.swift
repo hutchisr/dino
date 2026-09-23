@@ -986,6 +986,8 @@ struct ConversationListView: View {
                 jid: account.id, name: model.accountAlias, isGroup: false, size: 32,
                 avatarPath: model.avatars[account.id],
                 requestAvatar: { model.ensureAvatar(for: account.id) })
+                // Refresh the artwork without replacing Catalyst's toolbar button.
+                .id("\(account.id):\(model.avatars[account.id] ?? "")")
                 .overlay(alignment: .bottomTrailing) {
                     Circle()
                         .fill(accountStatusColor(account.state))
@@ -1000,6 +1002,7 @@ struct ConversationListView: View {
                 jid: account.id, name: model.accountAlias, isGroup: false, size: 34,
                 avatarPath: model.avatars[account.id],
                 requestAvatar: { model.ensureAvatar(for: account.id) })
+                .id("\(account.id):\(model.avatars[account.id] ?? "")")
                 .glassEffect(.regular.tint(accountStatusColor(account.state)).interactive(), in: Circle())
                 .clipShape(Circle())
                 .contentShape(Circle())
@@ -1024,12 +1027,9 @@ struct ConversationListView: View {
                 .environmentObject(model)
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(id: "account", placement: .topBarLeading) {
                 if let account = model.accounts.first {
                     accountButton(for: account)
-                        // Catalyst can retain the native toolbar item's rendered
-                        // label. Replace it when the avatar file changes.
-                        .id("\(account.id):\(model.avatars[account.id] ?? "")")
                 }
             }
             .sharedBackgroundVisibility(.hidden)
