@@ -149,6 +149,13 @@ struct ChatMessage: Identifiable, Equatable {
     var quote: QuoteRef? = nil
 
     var isFile: Bool { content == "file" }
+    var canDownloadFile: Bool {
+        isFile && path.isEmpty && (fileState == "not_started" || fileState == "failed")
+    }
+
+    var fileTransferOperation: FileTransferOperation {
+        direction == "out" && !path.isEmpty ? .upload : .download
+    }
     var isImage: Bool {
         // iOS has no shared-mime-info database, so GIO often reports
         // application/octet-stream; MediaFileKind falls back to the extension.
@@ -367,6 +374,19 @@ final class AppModel: ObservableObject {
             accountAlias = "Fixture Account"
             if let data = image.pngData(), (try? data.write(to: url)) != nil {
                 avatars[account.id] = url.path
+                if env["DINO_UI_TEST_AVATAR_UPDATE"] == "1" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                        let updated = renderer.image { context in
+                            UIColor.cyan.setFill()
+                            context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+                        }
+                        let updatedURL = url.deletingLastPathComponent()
+                            .appendingPathComponent("gecko-account-avatar-updated.png")
+                        if let data = updated.pngData(), (try? data.write(to: updatedURL)) != nil {
+                            self?.avatars[account.id] = updatedURL.path
+                        }
+                    }
+                }
             }
             return true
         }
@@ -378,6 +398,7 @@ final class AppModel: ObservableObject {
         let delayedRouteFixture = env["DINO_UI_TEST_DELAYED_ROUTE"] == "1"
         let roomMembersFixture = env["DINO_UI_TEST_ROOM_MEMBERS"] == "1"
         let switchConversationsFixture = env["DINO_UI_TEST_SWITCH_CONVERSATIONS"] == "1"
+        let sentDownloadFixture = env["DINO_UI_TEST_SENT_DOWNLOAD"] == "1"
         let conversation: Int32 = 9001
         let secondaryConversation: Int32 = 9002
         isUITestFixture = true
@@ -545,8 +566,8 @@ final class AppModel: ObservableObject {
                 ChatMessage(
                     id: 9_199,
                     content: composerFixture ? "text" : "file",
-                    direction: progressFixture ? "out" : "in",
-                    from: progressFixture
+                    direction: progressFixture || sentDownloadFixture ? "out" : "in",
+                    from: progressFixture || sentDownloadFixture
                         ? "fixture@example.invalid"
                         : "visibility@example.invalid",
                     body: composerFixture ? "Newest fixture message" : "",
@@ -822,8 +843,7 @@ final class AppModel: ObservableObject {
 
     func downloadFile(_ id: Int32, item: Int32) {
         guard var message = messages[id]?.first(where: { $0.id == item }),
-              message.isFile, message.direction == "in",
-              message.fileState == "failed" || message.fileState == "not_started" else { return }
+              message.canDownloadFile else { return }
         // Acknowledge the click before the GLib queue services the request.
         // The bridge always re-emits the authoritative state on completion,
         // including failures that happen before download_started is emitted.
@@ -1789,9 +1809,7 @@ final class AppModel: ObservableObject {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                     guard self.navigation.last == conv.id,
                           let file = self.messages[conv.id]?.last(where: {
-                              $0.isFile
-                                  && $0.direction == "in"
-                                  && ($0.fileState == "not_started" || $0.fileState == "failed")
+                              $0.canDownloadFile
                                   && (requestedItem == nil || $0.id == requestedItem)
                           })
                     else {

@@ -33,7 +33,7 @@ PROTOBUF_C_VER=1.5.2
 SRTP_VER=2.7.0
 PSL_VER=0.21.5
 SOUP_VER=3.6
-SOUP_PATCH=5
+SOUP_PATCH=6
 
 case "$TARGET" in
   sim-arm64)
@@ -288,9 +288,13 @@ build_psl() {
 }
 
 build_soup() {
-  fetch "https://download.gnome.org/sources/libsoup/$SOUP_VER/libsoup-$SOUP_VER.$SOUP_PATCH.tar.xz" "libsoup"
-  (cd "$DEPS/libsoup" && "$MESON" wrap install nghttp2 2>/dev/null || true)
-  meson_build "$DEPS/libsoup" \
+  # Version the source cache: fetch() otherwise silently reuses an older
+  # extracted tree when SOUP_PATCH changes. 3.6.6 fixes double-finishing an
+  # async request, which could free queue/session state still in use.
+  local source_dir="libsoup-$SOUP_VER.$SOUP_PATCH"
+  fetch "https://download.gnome.org/sources/libsoup/$SOUP_VER/$source_dir.tar.xz" "$source_dir"
+  (cd "$DEPS/$source_dir" && "$MESON" wrap install nghttp2 2>/dev/null || true)
+  meson_build "$DEPS/$source_dir" \
     -Dtests=false -Ddocs=disabled -Dintrospection=disabled -Dvapi=disabled \
     -Dgssapi=disabled -Dbrotli=disabled -Dntlm=disabled -Dtls_check=false \
     -Dsysprof=disabled -Dautobahn=disabled -Dpkcs11_tests=disabled

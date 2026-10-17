@@ -49,6 +49,27 @@ final class CatalystInteractionUITests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
     }
 
+    func testAccountControlSurvivesConversationSwitching() {
+        app.launchEnvironment["DINO_UI_TEST_SWITCH_CONVERSATIONS"] = "1"
+        launchChat()
+        let account = app.buttons["account.toolbar"]
+        XCTAssertTrue(account.waitForExistence(timeout: 5))
+        XCTAssertTrue(account.isHittable)
+
+        for name in ["Focus Target", "Visibility Regression"] {
+            app.staticTexts[name].click()
+            XCTAssertTrue(account.isHittable, "Selecting a chat removed the Account control")
+            account.click()
+            XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 3))
+            app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+            XCTAssertTrue(account.isHittable, "Dismissing settings removed the Account control")
+        }
+        let screenshot = XCTAttachment(screenshot: account.screenshot())
+        screenshot.name = "Account control after conversation switching"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testComposerGlassFieldRoutesPaddingClicksToEditor() {
         launchChat()
         let original = String(repeating: "0123456789", count: 6)

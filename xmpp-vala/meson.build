@@ -161,6 +161,7 @@ test_sources = [
     'tests/jid.vala',
     'tests/stanza.vala',
     'tests/muc.vala',
+    'tests/jingle_file_transfer.vala',
     'tests/color.vala',
     'tests/util.vala',
 ]

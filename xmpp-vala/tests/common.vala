@@ -8,6 +8,7 @@ int main(string[] args) {
     TestSuite.get_root().add_suite(new Xmpp.Test.JidTest().get_suite());
     TestSuite.get_root().add_suite(new Xmpp.Test.ColorTest().get_suite());
     TestSuite.get_root().add_suite(new Xmpp.Test.MucTest().get_suite());
+    TestSuite.get_root().add_suite(new Xmpp.Test.JingleFileTransferTest().get_suite());
     return GLib.Test.run();
 }
 

@@ -145,11 +145,9 @@ public class FileManager : StreamInteractionModule, Object {
 
             yield save_file(file_transfer);
 
-            stream_interactor.get_module(FileTransferStorage.IDENTITY).add_file(file_transfer);
-            // The local copy is complete, but the outgoing transfer remains
-            // pending until its remote send finishes. Publish that state from
-            // the first content-item event so clients never present it as sent.
+            // The local copy is complete, but the remote send is not.
             file_transfer.state = FileTransfer.State.IN_PROGRESS;
+            stream_interactor.get_module(FileTransferStorage.IDENTITY).add_file(file_transfer);
             conversation.last_active = file_transfer.time;
             received_file(file_transfer, conversation);
         } catch (Error e) {
@@ -287,6 +285,7 @@ public class FileManager : StreamInteractionModule, Object {
     }
 
     private async void download_file_internal(FileProvider file_provider, FileTransfer file_transfer, Conversation conversation) {
+        File? file = null;
         try {
             // Get meta info
             FileReceiveData? receive_data = file_provider.get_file_receive_data(file_transfer);
@@ -330,7 +329,7 @@ public class FileManager : StreamInteractionModule, Object {
 
             // Save file
             string filename = Random.next_int().to_string("%x") + "_" + file_transfer.file_name;
-            File file = File.new_for_path(Path.build_filename(get_storage_dir(), filename));
+            file = File.new_for_path(Path.build_filename(get_storage_dir(), filename));
 
             // libsoup doesn't properly support splicing
             OutputStream os = file.create(FileCreateFlags.REPLACE_DESTINATION);
@@ -338,11 +337,16 @@ public class FileManager : StreamInteractionModule, Object {
             ssize_t read;
             while ((read = yield input_stream.read_async(buffer, Priority.LOW, file_transfer.cancellable)) > 0) {
                 buffer.length = (int) read;
-                yield os.write_async(buffer, Priority.LOW, file_transfer.cancellable);
+                size_t written;
+                yield os.write_all_async(buffer, Priority.LOW, file_transfer.cancellable, out written);
                 buffer.length = 1024;
             }
             yield input_stream.close_async(Priority.LOW, file_transfer.cancellable);
             yield os.close_async(Priority.LOW, file_transfer.cancellable);
+            if (limit_stream != null && limit_stream.remaining_bytes > 0) {
+                throw new IOError.PARTIAL_INPUT(
+                    "Download ended with %lld bytes remaining".printf(limit_stream.remaining_bytes));
+            }
 
             // Verify the hash of the downloaded file, if it is known
             var supported_hashes = Xep.CryptographicHashes.get_supported_hashes(file_transfer.hashes);
@@ -377,9 +381,18 @@ public class FileManager : StreamInteractionModule, Object {
 
             file_transfer.state = FileTransfer.State.COMPLETE;
         } catch (IOError.CANCELLED e) {
-            print("cancelled\n");
+            if (file != null) {
+                FileUtils.remove(file.get_path());
+            }
+            file_transfer.state = file_transfer.provider == 0 ||
+                file_transfer.provider == FileManager.SFS_PROVIDER_ID
+                ? FileTransfer.State.NOT_STARTED
+                : FileTransfer.State.FAILED;
         } catch (Error e) {
             warning("Error downloading file: %s", e.message);
+            if (file != null) {
+                FileUtils.remove(file.get_path());
+            }
             if (file_transfer.provider == 0 || file_transfer.provider == FileManager.SFS_PROVIDER_ID) {
                 file_transfer.state = FileTransfer.State.NOT_STARTED;
             } else {
@@ -394,7 +407,6 @@ public class FileManager : StreamInteractionModule, Object {
         file_transfer.is_mam_message =
             http_file_meta != null && http_file_meta.message.is_mam_message;
         file_transfer.account = conversation.account;
-        file_transfer.counterpart = file_transfer.direction == FileTransfer.DIRECTION_RECEIVED ? from : conversation.counterpart;
         if (conversation.type_.is_muc_semantic()) {
             file_transfer.ourpart = stream_interactor.get_module(MucManager.IDENTITY).get_own_jid(conversation.counterpart, conversation.account) ?? conversation.account.bare_jid;
             file_transfer.direction = from.equals(file_transfer.ourpart) ? FileTransfer.DIRECTION_SENT : FileTransfer.DIRECTION_RECEIVED;
@@ -407,6 +419,7 @@ public class FileManager : StreamInteractionModule, Object {
                 file_transfer.direction = FileTransfer.DIRECTION_RECEIVED;
             }
         }
+        file_transfer.counterpart = file_transfer.direction == FileTransfer.DIRECTION_RECEIVED ? from : conversation.counterpart;
         file_transfer.time = time;
         file_transfer.local_time = local_time;
         file_transfer.provider = file_provider.get_id();
@@ -454,7 +467,6 @@ public class FileManager : StreamInteractionModule, Object {
             File file = File.new_for_path(Path.build_filename(get_storage_dir(), filename));
             OutputStream os = file.create(FileCreateFlags.REPLACE_DESTINATION);
             yield os.splice_async(file_transfer.input_stream, OutputStreamSpliceFlags.CLOSE_SOURCE | OutputStreamSpliceFlags.CLOSE_TARGET);
-            file_transfer.state = FileTransfer.State.COMPLETE;
             file_transfer.path = filename;
             file_transfer.input_stream = new LimitInputStream(yield file.read_async(), file_transfer.size);
         } catch (Error e) {

@@ -307,7 +307,8 @@ public class MessageProcessor : StreamInteractionModule, Object {
 
         public override async bool run(Entities.Message message, Xmpp.MessageStanza stanza, Conversation conversation) {
             return message.body == null &&
-                    Xep.StatelessFileSharing.get_file_shares(stanza) == null;
+                    Xep.StatelessFileSharing.get_file_shares(stanza) == null &&
+                    Xep.StatelessFileSharing.get_source_attachments(stanza) == null;
         }
     }
 

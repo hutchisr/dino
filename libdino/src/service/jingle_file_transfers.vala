@@ -96,13 +96,18 @@ public class JingleFileProvider : FileProvider, Object {
     }
 
     public async InputStream download(FileTransfer file_transfer, FileReceiveData receive_data, FileMeta file_meta) throws IOError {
-        // TODO(hrxi) What should happen if `stream == null`?
         XmppStream? stream = stream_interactor.get_stream(file_transfer.account);
+        if (stream == null) {
+            throw new IOError.FAILED("No stream available");
+        }
         Xmpp.Xep.JingleFileTransfer.FileTransfer? jingle_file_transfer = file_transfers[file_transfer.info];
         if (jingle_file_transfer == null) {
             throw new IOError.FAILED("Transfer data not available anymore");
         }
         yield jingle_file_transfer.accept(stream);
+        if (jingle_file_transfer.stream == null) {
+            throw new IOError.FAILED("Jingle transfer stream is unavailable");
+        }
         return new LimitInputStream(jingle_file_transfer.stream, file_meta.size);
     }
 

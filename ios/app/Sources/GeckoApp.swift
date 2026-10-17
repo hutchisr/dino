@@ -752,7 +752,7 @@ struct RootView: View {
                 } else {
                     NavigationSplitView {
                         ConversationListView()
-                                .toolbar(removing: .sidebarToggle)
+                            .toolbar(removing: .sidebarToggle)
                             .navigationSplitViewColumnWidth(min: 320, ideal: 340, max: 420)
                     } detail: {
                         if let id = model.navigation.last,
@@ -907,6 +907,43 @@ struct AccountSetupView: View {
     }
 }
 
+#if targetEnvironment(macCatalyst)
+    // Host live artwork, but let a native control own toolbar hit testing.
+    private struct AccountToolbarButton<Content: View>: UIViewRepresentable {
+        let content: Content
+        let action: () -> Void
+
+        final class Coordinator {
+            var action: () -> Void
+            var artwork: (UIView & UIContentView)?
+            init(action: @escaping () -> Void) { self.action = action }
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+        func makeUIView(context: Context) -> UIButton {
+            let button = UIButton(type: .custom)
+            let artwork = UIHostingConfiguration { content }.margins(.all, 0).makeContentView()
+            artwork.isUserInteractionEnabled = false
+            artwork.accessibilityElementsHidden = true
+            artwork.frame = button.bounds
+            artwork.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            button.addSubview(artwork)
+            context.coordinator.artwork = artwork
+            button.accessibilityLabel = "Account"
+            button.accessibilityIdentifier = "account.toolbar"
+            button.addAction(UIAction { _ in context.coordinator.action() }, for: .primaryActionTriggered)
+            return button
+        }
+
+        func updateUIView(_ button: UIButton, context: Context) {
+            context.coordinator.action = action
+            context.coordinator.artwork?.configuration =
+                UIHostingConfiguration { content }.margins(.all, 0)
+        }
+    }
+#endif
+
 struct ConversationListView: View {
     @EnvironmentObject var model: AppModel
     @State private var showJoinMuc = false
@@ -977,39 +1014,44 @@ struct ConversationListView: View {
         }
     }
 
+#if !targetEnvironment(macCatalyst)
     private func accountButton(for account: XmppAccount) -> some View {
         Button {
             model.accountSettingsPresented = true
         } label: {
-#if targetEnvironment(macCatalyst)
-            AvatarView(
-                jid: account.id, name: model.accountAlias, isGroup: false, size: 32,
-                avatarPath: model.avatars[account.id],
-                requestAvatar: { model.ensureAvatar(for: account.id) })
-                // Refresh the artwork without replacing Catalyst's toolbar button.
-                .id("\(account.id):\(model.avatars[account.id] ?? "")")
-                .overlay(alignment: .bottomTrailing) {
-                    Circle()
-                        .fill(accountStatusColor(account.state))
-                        .frame(width: 8, height: 8)
-                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
-                }
-                .frame(width: 36, height: 36)
-                .fixedSize()
-                .contentShape(Circle())
-#else
-            AvatarView(
-                jid: account.id, name: model.accountAlias, isGroup: false, size: 34,
-                avatarPath: model.avatars[account.id],
-                requestAvatar: { model.ensureAvatar(for: account.id) })
-                .id("\(account.id):\(model.avatars[account.id] ?? "")")
-                .glassEffect(.regular.tint(accountStatusColor(account.state)).interactive(), in: Circle())
-                .clipShape(Circle())
-                .contentShape(Circle())
-#endif
+            accountArtwork(for: account)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Account")
+        .accessibilityIdentifier("account.toolbar")
+    }
+#endif
+
+    private func accountArtwork(for account: XmppAccount) -> some View {
+#if targetEnvironment(macCatalyst)
+        AvatarView(
+            jid: account.id, name: model.accountAlias, isGroup: false, size: 32,
+            avatarPath: model.avatars[account.id],
+            requestAvatar: { model.ensureAvatar(for: account.id) })
+            .overlay(alignment: .bottomTrailing) {
+                Circle()
+                    .fill(accountStatusColor(account.state))
+                    .frame(width: 8, height: 8)
+                    .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
+            }
+            .frame(width: 36, height: 36)
+            .fixedSize()
+            .contentShape(Circle())
+#else
+        AvatarView(
+            jid: account.id, name: model.accountAlias, isGroup: false, size: 34,
+            avatarPath: model.avatars[account.id],
+            requestAvatar: { model.ensureAvatar(for: account.id) })
+            .id("\(account.id):\(model.avatars[account.id] ?? "")")
+            .glassEffect(.regular.tint(accountStatusColor(account.state)).interactive(), in: Circle())
+            .clipShape(Circle())
+            .contentShape(Circle())
+#endif
     }
 
     private var platformList: some View {
@@ -1029,7 +1071,14 @@ struct ConversationListView: View {
         .toolbar {
             ToolbarItem(id: "account", placement: .topBarLeading) {
                 if let account = model.accounts.first {
+#if targetEnvironment(macCatalyst)
+                    AccountToolbarButton(content: accountArtwork(for: account)) {
+                        model.accountSettingsPresented = true
+                    }
+                    .frame(width: 36, height: 36)
+#else
                     accountButton(for: account)
+#endif
                 }
             }
             .sharedBackgroundVisibility(.hidden)
@@ -2379,7 +2428,7 @@ struct ChatView: View {
     /// Shared "begin editing this message" action for both list backends.
     private func editFromList(_ m: ChatMessage) {
         replyingTo = nil
-        pendingFileSend = nil
+        cancelPendingFileSend()
         editing = m
         draft = m.body
     }
@@ -2764,8 +2813,7 @@ struct ChatView: View {
             if isGroupChat { model.requestRoomInfo(conversationId) }
         }
         .onDisappear {
-            attachmentPipeline.cancel()
-            model.cancelFileTransportPreview(conversationId)
+            cancelPendingFileSend()
             guard talksToCore else { return }
             model.blurConversation(conversationId)
         }
@@ -3467,9 +3515,8 @@ struct FileContent: View {
             FileTransferProgressRow(
                 state: transferProgress,
                 fileName: msg.fileName.isEmpty ? "File" : msg.fileName,
-                operation: msg.direction == "out" ? .upload : .download)
-        } else if msg.direction == "in",
-                  msg.fileState == "not_started" || msg.fileState == "failed" {
+                operation: msg.fileTransferOperation)
+        } else if msg.canDownloadFile {
             Button {
                 onDownloadFile?(msg.id)
             } label: {
@@ -3518,7 +3565,7 @@ struct FileContent: View {
                 Text(msg.fileName.isEmpty ? "File" : msg.fileName).lineLimit(1)
                 HStack(spacing: 4) {
                     if !sizeLabel.isEmpty { Text(sizeLabel) }
-                    if msg.direction == "in", msg.fileState == "failed" || msg.fileState == "not_started" {
+                    if msg.canDownloadFile {
                         if let until = msg.downloadFailureUntil {
                             TimelineView(.explicit([.now, until])) { context in
                                 Text(context.date < until ? "Download failed" : "Click to retry")
@@ -3529,7 +3576,9 @@ struct FileContent: View {
                     } else if msg.fileState == "failed" {
                         Text("failed")
                     }
-                    if msg.fileState == "in_progress" { Text(msg.direction == "out" ? "uploading…" : "downloading…") }
+                    if msg.fileState == "in_progress" {
+                        Text(msg.fileTransferOperation == .upload ? "uploading…" : "downloading…")
+                    }
                 }
                 .font(.caption2).foregroundStyle(.secondary)
             }

@@ -1,6 +1,6 @@
 advisors:
   - name: Reviewer
-    model: openai-codex/gpt-5.6-luna
+    model: openai-codex/gpt-6-luna
     tools:
       - read
       - grep

@@ -87,6 +87,17 @@ Or open `Gecko.xcodeproj` in Xcode and build the shared `Gecko` scheme. The
 scheme selects `ios/prefix/sim-arm64`, `ios/prefix/device-arm64`, or
 `ios/prefix/catalyst-arm64` from the destination SDK.
 
+The dependency build pins libsoup 3.6.6 and uses a versioned source directory
+so an existing 3.6.5 checkout cannot mask the upgrade. This includes upstream's
+fix for double-finishing asynchronous requests (commit `794e089abe8a`), which
+could release request/session state twice. After changing the dependency
+version, run `ios/build-deps.sh <target> soup` and rebuild the app for each
+target; changing the script alone does not update the statically linked app.
+The September 27 Catalyst crash was symbolized to libsoup's queue-item context
+assertion. This update addresses a known lifetime defect, but that particular
+startup/chat-opening crash has not been reproduced or conclusively attributed
+to it.
+
 Both app targets require OS 26 and use the system's Liquid Glass toolbar and
 sheet treatments. Keep toolbar actions as native `ToolbarItem` /
 `ToolbarItemGroup` controls rather than fixed-size stacks with custom hover
@@ -106,6 +117,13 @@ Catalyst's standalone sheet Close and Add buttons use `.buttonStyle(.glass)`
 with the toolbar's shared background hidden, so the visible circle is the
 interactive control rather than a larger decorative toolbar background.
 Four-point label padding restores the roughly 36-point toolbar height.
+The Catalyst Account toolbar item uses a native `UIButton` with live SwiftUI
+artwork via `UIHostingConfiguration`: toolbar label extraction otherwise reduces
+the avatar to its initial or drops asynchronously loaded artwork and the status
+dot. The native button owns hit testing, while `CachedDiskImage` updates the
+artwork by path without replacing the control. The account-avatar
+fixture's `DINO_UI_TEST_AVATAR_UPDATE=1` checks a pink-to-cyan image change;
+the Catalyst interaction regression checks chat switching and Account dismissal.
 
 Mac Catalyst uses a persistent desktop lifecycle: it keeps XMPP connected when
 the window is hidden, enables GLib network monitoring and XEP-0198 resumption,
@@ -302,6 +320,16 @@ All desktop-neutral (defaults unchanged; GTK Dino still builds):
   memory. After `build-core.sh catalyst-arm64`, run
   `ios/build-catalyst-arm64/libdino/libdino-test -p /FileMetadata` for valid,
   oversized, corrupt-image, and unreadable-hash regression coverage.
+* **File-transfer completion**: HTTP downloads reject non-2xx responses and
+  short bodies before publishing a completed path; partial files are removed.
+  Incoming Jingle IBB closes its unused output half asynchronously, reports
+  failed transport setup, and carries an explicit size for zero-byte files.
+  Bodyless SFS source attachments pass message filtering, and every attachment in a
+  multi-file source update is applied. In-flight rows persist honestly and are
+  reconciled after restart; synchronized sent attachments with remote sources
+  remain downloadable. `/FileTransport` covers transfer state, short reads, and
+  synchronized counterpart selection.
+
 * **Direct-transfer reactions**: incoming Jingle files are IQ-based transfers,
   not chat messages; their provider `info` is a locally generated lookup key,
   not a message ID. XEP-0444 cannot address these attachments. Reaction

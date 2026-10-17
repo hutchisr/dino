@@ -476,6 +476,15 @@ final class ChatVisibilityUITests: XCTestCase {
             "Export removed the source audio")
     }
 
+    func testSynchronizedSentAttachmentCanDownload() {
+        app.launchEnvironment["DINO_UI_TEST_SENT_DOWNLOAD"] = "1"
+        app.launch()
+
+        XCTAssertTrue(
+            app.buttons["Download fixture.png"].waitForExistence(timeout: 2),
+            "A synchronized sent attachment with no local copy was not downloadable")
+    }
+
     func testDelayedMessagesRevealAndRemainVisibleAfterImageHeightChange() {
         app.launch()
 
@@ -691,6 +700,38 @@ final class ChatVisibilityUITests: XCTestCase {
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
         return (Int(rgba[0]), Int(rgba[1]), Int(rgba[2]))
+    }
+
+    func testAccountAvatarUpdatesArtworkWithoutLosingControl() throws {
+        app.launchEnvironment["DINO_UI_TEST_FIXTURE"] = "account-avatar"
+        app.launchEnvironment["DINO_UI_TEST_AVATAR_UPDATE"] = "1"
+        app.launch()
+        let avatar = app.buttons["account.toolbar"]
+        XCTAssertTrue(avatar.waitForExistence(timeout: 3))
+        let initial = NSPredicate { _, _ in
+            guard let rgb = try? self.screenshotCenterRGB(in: avatar.screenshot()) else { return false }
+            return rgb.red - rgb.green > 100
+        }
+        expectation(for: initial, evaluatedWith: avatar)
+        waitForExpectations(timeout: 5)
+
+        let updated = NSPredicate { _, _ in
+            guard avatar.exists,
+                  let rgb = try? self.screenshotCenterRGB(in: avatar.screenshot()) else { return false }
+            return rgb.green - rgb.red > 100 && rgb.blue - rgb.red > 100
+        }
+        expectation(for: updated, evaluatedWith: avatar)
+        waitForExpectations(timeout: 12)
+        let screenshot = XCTAttachment(screenshot: avatar.screenshot())
+        screenshot.name = "Updated account avatar"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        #if targetEnvironment(macCatalyst)
+            avatar.click()
+        #else
+            avatar.tap()
+        #endif
+        XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 3))
     }
 
     #if !targetEnvironment(macCatalyst)

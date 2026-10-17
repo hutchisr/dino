@@ -50,11 +50,12 @@ public class Module : Jingle.ContentType, XmppStreamModule {
                 .put_node(new StanzaNode.build("name", NS_URI).put_node(new StanzaNode.text(basename))));
                 // TODO(hrxi): Add the mandatory hash field
 
-        if (size > 0) {
-            file_node.put_node(new StanzaNode.build("size", NS_URI).put_node(new StanzaNode.text(size.to_string())));
-        } else {
-            warning("Sending file %s without size, likely going to cause problems down the road...", basename);
+        if (size < 0) {
+            throw new Jingle.Error.GENERAL("File size is unknown");
         }
+        file_node.put_node(
+            new StanzaNode.build("size", NS_URI)
+                .put_node(new StanzaNode.text(size.to_string())));
 
         Parameters parameters = Parameters.parse(this, description);
 
@@ -101,9 +102,8 @@ public class Module : Jingle.ContentType, XmppStreamModule {
 
             // Send the file data
             Jingle.StreamingConnection connection = content.component_connections[1] as Jingle.StreamingConnection;
-            if (connection == null || connection.stream == null) {
-                warning("Connection or stream not null");
-                return;
+            if (connection == null) {
+                throw new Jingle.Error.GENERAL("Jingle transport connection is unavailable");
             }
             IOStream io_stream = yield connection.stream.wait_async();
             yield io_stream.input_stream.close_async();
@@ -273,19 +273,28 @@ public class FileTransfer : Object {
     public async void accept(XmppStream stream) throws IOError {
         content.accept();
 
-        Jingle.StreamingConnection connection = content.component_connections.values.to_array()[0] as Jingle.StreamingConnection;
+        Jingle.ComponentConnection[] connections = content.component_connections.values.to_array();
+        if (connections.length == 0) {
+            throw new IOError.FAILED("Jingle transport connection is unavailable");
+        }
+        Jingle.StreamingConnection? connection = connections[0] as Jingle.StreamingConnection;
+        if (connection == null) {
+            throw new IOError.FAILED("Jingle transport is not stream-based");
+        }
         try {
             IOStream io_stream = yield connection.stream.wait_async();
             FileTransferInputStream ft_stream = new FileTransferInputStream(io_stream.input_stream, size);
-            io_stream.output_stream.close();
+            yield io_stream.output_stream.close_async();
             ft_stream.closed.connect(() => {
                 session.terminate(Jingle.ReasonElement.SUCCESS, null, null);
             });
             this.stream = ft_stream;
         } catch (FutureError.EXCEPTION e) {
-            warning("Error accepting Jingle file-transfer: %s", connection.stream.exception.message);
+            throw new IOError.FAILED(
+                "Error accepting Jingle file-transfer: %s".printf(connection.stream.exception.message));
         } catch (FutureError e) {
-            warning("FutureError accepting Jingle file-transfer: %s", e.message);
+            throw new IOError.FAILED(
+                "FutureError accepting Jingle file-transfer: %s".printf(e.message));
         }
     }
 

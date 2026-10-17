@@ -146,6 +146,15 @@ public class FileTransfer : Object {
         state = (State) row[db.file_transfer.state];
         provider = row[db.file_transfer.provider];
         info = row[db.file_transfer.info];
+        // Transfers do not survive a process restart. Reconcile stale
+        // in-flight rows before exposing them to the UI.
+        if (state == State.IN_PROGRESS) {
+            state = direction == DIRECTION_SENT || provider == 1 ? State.FAILED : State.NOT_STARTED;
+            db.file_transfer.update()
+                .with(db.file_transfer.id, "=", id)
+                .set(db.file_transfer.state, state)
+                .perform();
+        }
         modification_date = new DateTime.from_unix_utc(row[db.file_transfer.modification_date]);
         width = row[db.file_transfer.width];
         height = row[db.file_transfer.height];
@@ -286,7 +295,6 @@ public class FileTransfer : Object {
             case "size":
                 update_builder.set(db.file_transfer.size, (long) size); break;
             case "state":
-                if (state == State.IN_PROGRESS) return;
                 update_builder.set(db.file_transfer.state, state); break;
             case "provider":
                 update_builder.set(db.file_transfer.provider, provider); break;

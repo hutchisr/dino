@@ -4,7 +4,9 @@ namespace Dino.Test {
 
 class FileTransportTest : Gee.TestCase {
     private Database db;
+    private StreamInteractor stream_interactor;
     private FileManager manager;
+    private Account account;
     private Conversation conversation;
     private PreviewSender http;
     private PreviewSender jingle;
@@ -17,22 +19,36 @@ class FileTransportTest : Gee.TestCase {
         add_test("encryption_required_and_native_fallback", test_encryption_required_and_native_fallback);
         add_test("external_encryption_preserves_priority", test_external_encryption_preserves_priority);
         add_test("preview_is_read_only_and_reports_file_errors", test_preview_is_read_only_and_reports_file_errors);
+        add_test("outgoing_state_is_persisted", test_outgoing_state_is_persisted);
+        add_test("stale_transfer_state_is_reconciled", test_stale_transfer_state_is_reconciled);
+        add_test("sent_sync_uses_conversation_counterpart", test_sent_sync_uses_conversation_counterpart);
+        add_test("short_download_is_rejected", test_short_download_is_rejected);
     }
 
     public override void set_up() {
         db = new Database(":memory:");
-        var si = new StreamInteractor(db);
-        FileManager.start(si, db);
-        manager = si.get_module(FileManager.IDENTITY);
+        stream_interactor = new StreamInteractor(db);
+        MessageProcessor.start(stream_interactor, db);
+        Calls.start(stream_interactor, db);
+        ConversationManager.start(stream_interactor, db);
+        FileManager.start(stream_interactor, db);
+        FileTransferStorage.start(stream_interactor, db);
+        manager = stream_interactor.get_module(FileManager.IDENTITY);
         // Register in reverse priority order to exercise FileManager's ordering.
         jingle = new PreviewSender(1, 75, int64.MAX);
         http = new PreviewSender(0, 100, 5);
         manager.add_sender(jingle);
         manager.add_sender(http);
         try {
-            var account = new Account(new Xmpp.Jid("me@example.org"), "");
+            account = new Account(new Xmpp.Jid("me@example.org"), "");
+            account.persist(db);
             conversation = new Conversation(new Xmpp.Jid("peer@example.org"), account, Conversation.Type.CHAT);
             conversation.encryption = Encryption.NONE;
+            conversation.persist(db);
+            stream_interactor.module_manager.initialize(account);
+            stream_interactor.account_added(account);
+            conversation = stream_interactor.get_module(ConversationManager.IDENTITY)
+                .get_conversation(conversation.counterpart, account);
             directory = DirUtils.make_tmp("dino-file-transport-XXXXXX");
             file = File.new_for_path(Path.build_filename(directory, "attachment"));
             FileUtils.set_contents(file.get_path(), "data");
@@ -144,6 +160,148 @@ class FileTransportTest : Gee.TestCase {
             fail_if_reached(e.message);
         }
     }
+    private string? send() {
+        var loop = new MainLoop();
+        string? failure = null;
+        manager.send_file.begin(file, conversation, (_, result) => {
+            failure = manager.send_file.end(result);
+            loop.quit();
+        });
+        loop.run();
+        return failure;
+    }
+
+    private void download(FileTransfer transfer) {
+        var loop = new MainLoop();
+        manager.download_file.begin(transfer, (_, result) => {
+            manager.download_file.end(result);
+            loop.quit();
+        });
+        loop.run();
+    }
+
+    private void test_outgoing_state_is_persisted() {
+        manager.add_sender(new CompletingSender());
+        FileTransfer? published = null;
+        FileTransfer.State persisted_at_publish = FileTransfer.State.COMPLETE;
+        manager.received_file.connect((transfer, _) => {
+            published = transfer;
+            var row = db.file_transfer.select()
+                .with(db.file_transfer.id, "=", transfer.id)
+                .row().inner;
+            persisted_at_publish = (FileTransfer.State) row[db.file_transfer.state];
+        });
+
+        fail_if(send() != null, "The fixture sender should complete");
+        fail_if(published == null, "Outgoing transfer was not published");
+        fail_if_not_eq_int(persisted_at_publish, FileTransfer.State.IN_PROGRESS);
+        fail_if_not_eq_int(published.state, FileTransfer.State.COMPLETE);
+        var row = db.file_transfer.select()
+            .with(db.file_transfer.id, "=", published.id)
+            .row().inner;
+        fail_if_not_eq_int((FileTransfer.State) row[db.file_transfer.state], FileTransfer.State.COMPLETE);
+        FileUtils.remove(published.get_file().get_path());
+    }
+
+    private void test_stale_transfer_state_is_reconciled() {
+        var transfer = new FileTransfer() {
+            account = account,
+            counterpart = conversation.counterpart,
+            ourpart = account.full_jid,
+            direction = FileTransfer.DIRECTION_SENT,
+            time = new DateTime.now_utc(),
+            local_time = new DateTime.now_utc(),
+            file_name = "stale.bin",
+            size = 4,
+            state = FileTransfer.State.IN_PROGRESS,
+            provider = 0,
+            info = ""
+        };
+        transfer.persist(db);
+        var row = db.file_transfer.select()
+            .with(db.file_transfer.id, "=", transfer.id)
+            .row().inner;
+        try {
+            var restored = new FileTransfer.from_row(db, row, FileManager.get_storage_dir());
+            fail_if_not_eq_int(restored.state, FileTransfer.State.FAILED);
+            row = db.file_transfer.select()
+                .with(db.file_transfer.id, "=", transfer.id)
+                .row().inner;
+            fail_if_not_eq_int((FileTransfer.State) row[db.file_transfer.state], FileTransfer.State.FAILED);
+        } catch (Error e) {
+            fail_if_reached(e.message);
+        }
+    }
+
+    private void test_sent_sync_uses_conversation_counterpart() {
+        var provider = new ShortFileProvider();
+        var meta = new FileMeta() { file_name = "sent.bin", size = 3 };
+        var transfer = manager.create_file_transfer_from_provider_incoming(
+            provider, "1", account.full_jid, new DateTime.now_utc(),
+            new DateTime.now_utc(), conversation, new FileReceiveData(), meta);
+        fail_if_not(transfer.direction == FileTransfer.DIRECTION_SENT);
+        fail_if_not_eq_str(transfer.counterpart.to_string(), conversation.counterpart.to_string());
+    }
+
+    private void test_short_download_is_rejected() {
+        var provider = new ShortFileProvider();
+        manager.add_provider(provider);
+        var meta = new FileMeta() { file_name = "short.bin", size = 10 };
+        var transfer = manager.create_file_transfer_from_provider_incoming(
+            provider, "short", conversation.counterpart, new DateTime.now_utc(),
+            new DateTime.now_utc(), conversation, new FileReceiveData(), meta);
+        stream_interactor.get_module(FileTransferStorage.IDENTITY).add_file(transfer);
+        GLib.Test.expect_message("libdino", LogLevelFlags.LEVEL_WARNING, "*7 bytes remaining*");
+        download(transfer);
+        GLib.Test.assert_expected_messages();
+        fail_if_not_eq_int(transfer.state, FileTransfer.State.NOT_STARTED);
+        fail_if_not(transfer.path == null, "Partial download retained a path");
+    }
+}
+
+private class ShortFileProvider : Object, FileProvider {
+    public Encryption get_encryption(FileTransfer transfer, FileReceiveData data, FileMeta meta) {
+        return Encryption.NONE;
+    }
+    public FileMeta get_file_meta(FileTransfer transfer) throws FileReceiveError {
+        return new FileMeta() {
+            file_name = transfer.file_name,
+            size = transfer.size,
+            mime_type = "application/octet-stream"
+        };
+    }
+    public FileReceiveData? get_file_receive_data(FileTransfer transfer) {
+        return new FileReceiveData();
+    }
+    public async FileMeta get_meta_info(FileTransfer transfer, FileReceiveData data, FileMeta meta) throws FileReceiveError {
+        return meta;
+    }
+    public async InputStream download(FileTransfer transfer, FileReceiveData data, FileMeta meta) throws IOError {
+        return new LimitInputStream(new MemoryInputStream.from_data("abc".data), meta.size);
+    }
+    public int get_id() { return 0; }
+}
+
+private class CompletingSender : Object, FileSender {
+    public async bool is_upload_available(Conversation conversation) { return true; }
+    public async long get_file_size_limit(Conversation conversation) { return (long) int64.MAX; }
+    public async bool can_send(Conversation conversation, FileTransfer transfer) { return true; }
+    public async bool can_encrypt(Conversation conversation, FileTransfer transfer) { return true; }
+    public async FileSendData? prepare_send_file(
+        Conversation conversation,
+        FileTransfer transfer,
+        FileMeta meta
+    ) throws FileSendError {
+        return new FileSendData();
+    }
+    public async void send_file(
+        Conversation conversation,
+        FileTransfer transfer,
+        FileSendData data,
+        FileMeta meta
+    ) throws FileSendError {}
+    public int get_id() { return 9; }
+    public float get_priority() { return 200; }
 }
 
 // Capability fixtures: all actual preparation/transmission is forbidden in preview.
