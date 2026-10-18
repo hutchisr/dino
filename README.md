@@ -35,6 +35,8 @@ iOS and Mac Catalyst. Playback uses the system's native codecs (no bundled
 decoders); unsupported or damaged files show an error and remain shareable.
 Starting another audio attachment pauses the previous one. Leaving the
 attachment stops playback; iOS also pauses when the app enters the background.
+On iOS, audio and video use media volume rather than Ringer and Alerts volume,
+and remain audible with Silent mode enabled.
 
 Outgoing attachments preserve their filenames. Temporary copies live in unique
 staging directories, so selecting same-named files does not add UUID prefixes to

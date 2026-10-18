@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import UserNotifications
+import AVFAudio
 
 /// APNs registration: ask for notification permission, register with APNs,
 /// and enable XEP-0357 push on the XMPP server with the device token as the
@@ -30,6 +31,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // Must be set before launch finishes to receive notification responses.
         UNUserNotificationCenter.current().delegate = self
+#if !targetEnvironment(macCatalyst)
+        // Set the app-wide media policy before either audio or video can play.
+        // Leave activation to playback so launch does not interrupt other audio.
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        } catch {
+            NSLog("gecko-media: audio session configuration failed: %@", error.localizedDescription)
+        }
+#endif
 #if DEBUG
         let env = ProcessInfo.processInfo.environment
         if env["DINO_UI_TEST_FIXTURE"] != nil,

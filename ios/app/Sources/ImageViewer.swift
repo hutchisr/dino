@@ -259,9 +259,7 @@ final class AudioAttachmentPlayback: ObservableObject {
         error = nil
         do {
 #if !targetEnvironment(macCatalyst)
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default)
-            try session.setActive(true)
+            try AVAudioSession.sharedInstance().setActive(true)
 #endif
             if player == nil { prepare(url: url) }
             if duration > 0, position >= duration {

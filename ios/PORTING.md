@@ -182,6 +182,15 @@ test measures the actual preview button, not an inherited row identifier.
 XCTest still waits for idle around input, so inspect recorded frames when
 checking transient jumps that could disappear before an assertion runs.
 
+On iOS, `AppDelegate` configures the shared `AVAudioSession` category as
+`.playback` at launch, before either attachment player can run. This keeps audio
+and video on media volume and allows playback in Silent mode. Activation remains
+deferred until playback, so opening Gecko alone does not interrupt other audio.
+Mac Catalyst's audio policy and the existing background-playback behavior are
+unchanged. Verify the volume buttons and Silent mode on a physical iPhone; the
+Simulator can check the session category and playback lifecycle, not those
+hardware behaviors.
+
 Audio attachment regressions use `DINO_UI_TEST_AUDIO=1` with the
 `chat-visibility` fixture: locally generated PCM audio plus a corrupt file,
 without an account or network access. The audio cases in
