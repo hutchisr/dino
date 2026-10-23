@@ -1,0 +1,49 @@
+{
+  "cli_version": "0.12.0",
+  "checkpoint_id": "01M5MZ79GA20BM58SW4FHPH3FR",
+  "session_id": "01a169f1-af0c-75e2-b5fa-17914e439b1b",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-23T18:08:58.182878Z",
+  "branch": "libdino",
+  "checkpoints_count": 5,
+  "files_touched": [],
+  "agent": "Pi",
+  "model": "gpt-6-astra",
+  "turn_id": "6e7a15afab63",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 62757,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 396416,
+    "output_tokens": 1143,
+    "api_call_count": 15
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "prompt-skill-pi-hooks-2026-10-23T18:07:24.369808Z",
+      "event_type": "prompt_invocation",
+      "skill": {
+        "name": "hooks"
+      },
+      "source": {
+        "agent": "pi",
+        "signal": "prompt_slash_command",
+        "confidence": "explicit"
+      },
+      "turn_id": "13f8f4c64dc6",
+      "timestamp": "2026-10-23T18:07:24.369808Z",
+      "native": {
+        "command": "/hooks"
+      },
+      "collapse": {
+        "target": "user_message",
+        "label": "/hooks",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 5
+  }
+}
