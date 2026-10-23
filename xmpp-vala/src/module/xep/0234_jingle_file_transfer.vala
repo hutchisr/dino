@@ -90,15 +90,7 @@ public class Module : Jingle.ContentType, XmppStreamModule {
         try {
             session = yield jingle_module.create_session(stream, contents, receiver_full_jid);
 
-            // Wait for the counterpart to accept our offer
-            ulong content_notify_id = 0;
-            content_notify_id = content.notify["state"].connect(() => {
-                if (content.state == Jingle.Content.State.ACCEPTED) {
-                    Idle.add(offer_file_stream.callback);
-                    content.disconnect(content_notify_id);
-                }
-            });
-            yield;
+            yield wait_for_connection(content);
 
             // Send the file data
             Jingle.StreamingConnection connection = content.component_connections[1] as Jingle.StreamingConnection;
@@ -106,7 +98,7 @@ public class Module : Jingle.ContentType, XmppStreamModule {
                 throw new Jingle.Error.GENERAL("Jingle transport connection is unavailable");
             }
             IOStream io_stream = yield connection.stream.wait_async();
-            yield io_stream.input_stream.close_async();
+            if (content.security_params == null) yield io_stream.input_stream.close_async();
             yield io_stream.output_stream.splice_async(input_stream, OutputStreamSpliceFlags.CLOSE_SOURCE|OutputStreamSpliceFlags.CLOSE_TARGET);
             yield connection.terminate(true);
         } catch (Error e) {
@@ -119,6 +111,30 @@ public class Module : Jingle.ContentType, XmppStreamModule {
 
     public override string get_ns() { return NS_URI; }
     public override string get_id() { return IDENTITY.id; }
+}
+
+private async void wait_for_connection(Jingle.Content content) throws IOError {
+    while (content.state != Jingle.Content.State.ACCEPTED && content.session.state != Jingle.Session.State.ENDED) {
+        bool resuming = false;
+        ulong content_id = content.notify["state"].connect(() => {
+            if (!resuming) {
+                resuming = true;
+                Idle.add(wait_for_connection.callback);
+            }
+        });
+        ulong session_id = content.session.notify["state"].connect(() => {
+            if (!resuming) {
+                resuming = true;
+                Idle.add(wait_for_connection.callback);
+            }
+        });
+        yield;
+        content.disconnect(content_id);
+        content.session.disconnect(session_id);
+    }
+    if (content.session.state == Jingle.Session.State.ENDED) {
+        throw new IOError.FAILED("Jingle session ended before the file transfer connected");
+    }
 }
 
 public class SessionInfoType : Jingle.SessionInfoNs, Object {
@@ -200,18 +216,20 @@ public class Parameters : Jingle.ContentParameters, Object {
     public void terminate(bool we_terminated, string? reason_name, string? reason_text) { }
 }
 
-// Does nothing except wrapping an input stream to signal EOF after reading
-// `max_size` bytes.
+// Bound plaintext to the offered size; encrypted streams must also reach EOF
+// so the converter verifies its trailing authentication tag.
 private class FileTransferInputStream : InputStream {
 
     public signal void closed();
 
     InputStream inner;
     int64 remaining_size;
+    bool verify_eof;
 
-    public FileTransferInputStream(InputStream inner, int64 max_size) {
+    public FileTransferInputStream(InputStream inner, int64 max_size, bool verify_eof) {
         this.inner = inner;
         this.remaining_size = max_size;
+        this.verify_eof = verify_eof;
     }
 
     private ssize_t update_remaining(ssize_t read) {
@@ -221,7 +239,11 @@ private class FileTransferInputStream : InputStream {
 
     public override ssize_t read(uint8[] buffer_, Cancellable? cancellable = null) throws IOError {
         unowned uint8[] buffer = buffer_;
+        if (buffer.length == 0) return 0;
         if (remaining_size <= 0) {
+            if (verify_eof && inner.read(buffer[0:1], cancellable) != 0) {
+                throw new IOError.INVALID_DATA("Jingle file exceeds its advertised size");
+            }
             return 0;
         }
         if (buffer.length > remaining_size) {
@@ -232,7 +254,11 @@ private class FileTransferInputStream : InputStream {
 
     public override async ssize_t read_async(uint8[]? buffer_, int io_priority = GLib.Priority.DEFAULT, Cancellable? cancellable = null) throws IOError {
         unowned uint8[] buffer = buffer_;
+        if (buffer.length == 0) return 0;
         if (remaining_size <= 0) {
+            if (verify_eof && (yield inner.read_async(buffer[0:1], io_priority, cancellable)) != 0) {
+                throw new IOError.INVALID_DATA("Jingle file exceeds its advertised size");
+            }
             return 0;
         }
         if (buffer.length > remaining_size) {
@@ -242,13 +268,15 @@ private class FileTransferInputStream : InputStream {
     }
 
     public override bool close(Cancellable? cancellable = null) throws IOError {
+        bool result = inner.close(cancellable);
         closed();
-        return inner.close(cancellable);
+        return result;
     }
 
     public override async bool close_async(int io_priority = GLib.Priority.DEFAULT, Cancellable? cancellable = null) throws IOError {
+        bool result = yield inner.close_async(io_priority, cancellable);
         closed();
-        return yield inner.close_async(io_priority, cancellable);
+        return result;
     }
 }
 
@@ -272,6 +300,7 @@ public class FileTransfer : Object {
 
     public async void accept(XmppStream stream) throws IOError {
         content.accept();
+        yield wait_for_connection(content);
 
         Jingle.ComponentConnection[] connections = content.component_connections.values.to_array();
         if (connections.length == 0) {
@@ -283,8 +312,8 @@ public class FileTransfer : Object {
         }
         try {
             IOStream io_stream = yield connection.stream.wait_async();
-            FileTransferInputStream ft_stream = new FileTransferInputStream(io_stream.input_stream, size);
-            yield io_stream.output_stream.close_async();
+            FileTransferInputStream ft_stream = new FileTransferInputStream(io_stream.input_stream, size, content.security_params != null);
+            if (content.security_params == null) yield io_stream.output_stream.close_async();
             ft_stream.closed.connect(() => {
                 session.terminate(Jingle.ReasonElement.SUCCESS, null, null);
             });

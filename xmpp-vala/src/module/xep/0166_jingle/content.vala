@@ -112,10 +112,6 @@ public class Xmpp.Xep.Jingle.Content : Object {
     }
 
     public void terminate(bool we_terminated, string? reason_name, string? reason_text) {
-        if (state == State.PENDING) {
-            warning("terminating a pending call");
-            return;
-        }
         content_params.terminate(we_terminated, reason_name, reason_text);
         transport_params.dispose();
 
@@ -157,10 +153,11 @@ public class Xmpp.Xep.Jingle.Content : Object {
             return;
         }
         tried_transport_methods.add(new_transport.ns_uri);
+        transport = new_transport;
         transport_params = new_transport.create_transport_parameters(stream, transport_params.components, local_full_jid, peer_full_jid);
         set_transport_params(transport_params);
-        session.send_transport_replace(this, transport_params);
         state = State.REPLACING_TRANSPORT;
+        session.send_transport_replace(this, transport_params);
     }
 
     public void handle_transport_accept(XmppStream stream, StanzaNode transport_node, StanzaNode jingle, Iq.Stanza iq) throws IqError {
@@ -195,6 +192,7 @@ public class Xmpp.Xep.Jingle.Content : Object {
             session.send_transport_reject(this, transport_node);
             return;
         }
+        this.transport = transport;
         set_transport_params(parameters);
         session.send_transport_accept(this, parameters);
 

@@ -68,13 +68,26 @@ public class Connection : IOStream {
             this.connection = connection;
         }
         public override ssize_t read(uint8[] buffer, Cancellable? cancellable = null) throws IOError {
-            throw new IOError.NOT_SUPPORTED("can't do non-async reads on in-band bytestreams");
+            unowned uint8[] data = buffer;
+            return connection.run_sync((done) => {
+                connection.read_async.begin(data, Priority.DEFAULT, cancellable, (_, res) => {
+                    try { done(connection.read_async.end(res), null); }
+                    catch (IOError e) { done(-1, e); }
+                });
+            });
         }
         public override async ssize_t read_async(uint8[]? buffer, int io_priority = GLib.Priority.DEFAULT, Cancellable? cancellable = null) throws IOError {
             return yield connection.read_async(buffer, io_priority, cancellable);
         }
         public override bool close(Cancellable? cancellable = null) throws IOError {
-            throw new IOError.NOT_SUPPORTED("can't do non-async closes on in-band bytestreams");
+            if (connection == null || connection.is_closed()) return true;
+            connection.run_sync((done) => {
+                connection.close_read_async.begin(Priority.DEFAULT, cancellable, (_, res) => {
+                    try { connection.close_read_async.end(res); done(0, null); }
+                    catch (IOError e) { done(-1, e); }
+                });
+            });
+            return true;
         }
         public override async bool close_async(int io_priority = GLib.Priority.DEFAULT, Cancellable? cancellable = null) throws IOError {
             return yield connection.close_read_async(io_priority, cancellable);
@@ -86,13 +99,26 @@ public class Connection : IOStream {
             this.connection = connection;
         }
         public override ssize_t write(uint8[] buffer, Cancellable? cancellable = null) throws IOError {
-            throw new IOError.NOT_SUPPORTED("can't do non-async writes on in-band bytestreams");
+            unowned uint8[] data = buffer;
+            return connection.run_sync((done) => {
+                connection.write_async.begin(data, Priority.DEFAULT, cancellable, (_, res) => {
+                    try { done(connection.write_async.end(res), null); }
+                    catch (IOError e) { done(-1, e); }
+                });
+            });
         }
         public override async ssize_t write_async(uint8[]? buffer, int io_priority = GLib.Priority.DEFAULT, Cancellable? cancellable = null) throws IOError {
             return yield connection.write_async(buffer, io_priority, cancellable);
         }
         public override bool close(Cancellable? cancellable = null) throws IOError {
-            throw new IOError.NOT_SUPPORTED("can't do non-async closes on in-band bytestreams");
+            if (connection == null || connection.is_closed()) return true;
+            connection.run_sync((done) => {
+                connection.close_write_async.begin(Priority.DEFAULT, cancellable, (_, res) => {
+                    try { connection.close_write_async.end(res); done(0, null); }
+                    catch (IOError e) { done(-1, e); }
+                });
+            });
+            return true;
         }
         public override async bool close_async(int io_priority = GLib.Priority.DEFAULT, Cancellable? cancellable = null) throws IOError {
             return yield connection.close_write_async(io_priority, cancellable);
@@ -127,6 +153,42 @@ public class Connection : IOStream {
     string? error = null;
 
     XmppStream stream;
+    private MainContext context = MainContext.ref_thread_default();
+    private unowned Thread<void*> owner_thread = Thread.self<void*>();
+
+    private delegate void SyncResult(ssize_t value, IOError? error);
+    private delegate void SyncOperation(owned SyncResult done);
+
+    // GConverter streams call synchronous I/O from GIO workers. Keep all IBB
+    // state and IQ callbacks on the connection's context, never on that worker.
+    private ssize_t run_sync(SyncOperation operation) throws IOError {
+        if (context.is_owner() || Thread.self<void*>() == owner_thread) {
+            throw new IOError.NOT_SUPPORTED("Use asynchronous IBB I/O on its main context");
+        }
+        Mutex mutex = Mutex();
+        Cond condition = Cond();
+        bool finished = false;
+        ssize_t result = -1;
+        IOError? failure = null;
+        var source = new IdleSource();
+        source.set_callback(() => {
+            operation((value, error) => {
+                mutex.lock();
+                result = value;
+                failure = error;
+                finished = true;
+                condition.signal();
+                mutex.unlock();
+            });
+            return Source.REMOVE;
+        });
+        source.attach(context);
+        mutex.lock();
+        while (!finished) condition.wait(mutex);
+        mutex.unlock();
+        if (failure != null) throw failure;
+        return result;
+    }
 
     int read_callback_priority;
     Cancellable? read_callback_cancellable = null;
@@ -199,9 +261,7 @@ public class Connection : IOStream {
             if (cancellable != null) {
                 cancellable.set_error_if_cancelled();
             }
-            if (input_closed) {
-                return 0;
-            }
+            throw_if_error();
             Bytes? chunk = received.poll();
             if (chunk != null) {
                 int read = int.min(buffer.length, chunk.length);
@@ -213,7 +273,8 @@ public class Connection : IOStream {
                 }
                 return read;
             }
-            if (state == Connection.State.DISCONNECTED) {
+            // A peer's close follows its final data IQ; drain queued bytes first.
+            if (input_closed || state == Connection.State.DISCONNECTED) {
                 return 0;
             }
             set_read_callback(read_async.callback, cancellable, io_priority);
@@ -276,6 +337,12 @@ public class Connection : IOStream {
         if (!input_closed) {
             return true;
         }
+        return yield close_async_impl(io_priority, cancellable);
+    }
+
+    public override async bool close_async(int io_priority = GLib.Priority.DEFAULT, Cancellable? cancellable = null) throws IOError {
+        input_closed = true;
+        output_closed = true;
         return yield close_async_impl(io_priority, cancellable);
     }
     delegate void OnClose(bool success);
@@ -365,6 +432,8 @@ public class Connection : IOStream {
         state = State.ERROR;
         this.error = error;
         stream.get_flag(Flag.IDENTITY).remove_connection(this);
+        trigger_read_callback();
+        trigger_write_callback();
     }
 
     public void handle_open(XmppStream stream, StanzaNode open, Iq.Stanza iq) {

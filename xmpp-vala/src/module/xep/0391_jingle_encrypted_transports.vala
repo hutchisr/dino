@@ -112,15 +112,30 @@ public interface Cipher : Object {
 
 private class EncryptedStream : IOStream {
     private IOStream stream;
-    private InputStream input;
-    private OutputStream output;
-    public override InputStream input_stream { get { return input; } }
-    public override OutputStream output_stream { get { return output; } }
+    private Cipher cipher;
+    private TransportSecret secret;
+    private InputStream? input;
+    private OutputStream? output;
+    public override InputStream input_stream { get {
+        if (input == null) input = cipher.wrap_input_stream(stream.input_stream, secret);
+        return input;
+    } }
+    public override OutputStream output_stream { get {
+        if (output == null) output = cipher.wrap_output_stream(stream.output_stream, secret);
+        return output;
+    } }
 
     public EncryptedStream(Cipher cipher, TransportSecret secret, IOStream stream) {
         this.stream = stream;
-        input = cipher.wrap_input_stream(stream.input_stream, secret);
-        output = cipher.wrap_output_stream(stream.output_stream, secret);
+        this.cipher = cipher;
+        this.secret = secret;
+    }
+
+    public override async bool close_async(int io_priority = Priority.DEFAULT, Cancellable? cancellable = null) throws IOError {
+        // Do not finalize an unused encryption direction (which would send a tag).
+        if (output != null && !output.is_closed()) yield output.close_async(io_priority, cancellable);
+        if (input != null && !input.is_closed()) yield input.close_async(io_priority, cancellable);
+        return yield stream.close_async(io_priority, cancellable);
     }
 }
 

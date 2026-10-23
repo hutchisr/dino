@@ -756,14 +756,15 @@ class Parameters : Jingle.TransportParameters, Object {
             iostream = strong_content.security_params.wrap_stream(iostream);
         }
         connection.set_stream.begin(iostream);
+        strong_content.set_transport_connection(connection, 1);
     }
 
     private void content_set_transport_connection_error(Error e) {
         Jingle.Content? strong_content = content;
         if (strong_content == null) return;
 
-        strong_content.select_new_transport.begin();
-        connection.set_error(e);
+        debug("SOCKS5 transport failed: %s", e.message);
+        strong_content.set_transport_connection(null, 1);
     }
 
     public void create_transport_connection(XmppStream stream, Jingle.Content content) {
@@ -771,7 +772,6 @@ class Parameters : Jingle.TransportParameters, Object {
         this.content = content;
         this.hack = stream;
         try_connecting_to_candidates.begin(stream, session);
-        this.content.set_transport_connection(connection, 1);
     }
 }
 

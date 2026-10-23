@@ -331,13 +331,26 @@ All desktop-neutral (defaults unchanged; GTK Dino still builds):
   oversized, corrupt-image, and unreadable-hash regression coverage.
 * **File-transfer completion**: HTTP downloads reject non-2xx responses and
   short bodies before publishing a completed path; partial files are removed.
-  Incoming Jingle IBB closes its unused output half asynchronously, reports
-  failed transport setup, and carries an explicit size for zero-byte files.
+  Jingle waits for a connected transport, falls back from SOCKS5 to IBB when
+  candidates fail, and carries an explicit size for zero-byte files.
   Bodyless SFS source attachments pass message filtering, and every attachment in a
   multi-file source update is applied. In-flight rows persist honestly and are
   reconciled after restart; synchronized sent attachments with remote sources
   remain downloadable. `/FileTransport` covers transfer state, short reads, and
   synchronized counterpart selection.
+
+* **Jingle file sending**: transport replacement updates the negotiated transport
+  on both peers; a failed SOCKS5 attempt no longer aborts the file before IBB can
+  connect. IBB drains queued data before EOF, including the final AES-GCM tag.
+  Native GIO converter workers marshal IBB operations onto its owning context;
+  synchronous calls on that context/thread are rejected rather than blocking it.
+  Encrypted streams finalize only the used direction and verify authentication
+  before reporting receive completion. `/JingleFileTransfer` covers queued-close,
+  fallback, empty files, and tampered/truncated tags with fixed test keys.
+  Host smoke verification transferred 1,048,613-byte encrypted files over real
+  loopback SOCKS5 sockets and SOCKS5-to-IBB fallback, with matching SHA-256 hashes.
+  The Simulator core build also passes; live OMEMO key exchange and a remote
+  peer/network were not exercised by these local checks.
 
 * **Direct-transfer reactions**: incoming Jingle files are IQ-based transfers,
   not chat messages; their provider `info` is a locally generated lookup key,

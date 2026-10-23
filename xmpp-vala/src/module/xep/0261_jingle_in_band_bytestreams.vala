@@ -93,7 +93,25 @@ class Parameters : Jingle.TransportParameters, Object {
     }
 
     public void create_transport_connection(XmppStream stream, Jingle.Content content) {
-        IOStream iostream = InBandBytestreams.Connection.create(stream, peer_full_jid, sid, block_size, role == Jingle.Role.INITIATOR);
+        open_connection.begin(stream, content);
+    }
+
+    private async void open_connection(XmppStream stream, Jingle.Content content) {
+        var ibb = InBandBytestreams.Connection.create(stream, peer_full_jid, sid, block_size, role == Jingle.Role.INITIATOR);
+        ulong terminated_id = content.session.terminated.connect(() => { ibb.close_async.begin(); });
+        while (ibb.state == InBandBytestreams.Connection.State.CONNECTING ||
+               ibb.state == InBandBytestreams.Connection.State.WAITING_FOR_CONNECT) {
+            ulong id = ibb.notify["state"].connect(() => { Idle.add(open_connection.callback); });
+            yield;
+            ibb.disconnect(id);
+        }
+        content.session.disconnect(terminated_id);
+        if (content.session.state == Jingle.Session.State.ENDED) return;
+        if (ibb.state != InBandBytestreams.Connection.State.CONNECTED) {
+            content.set_transport_connection(null, 1);
+            return;
+        }
+        IOStream iostream = ibb;
         Jingle.StreamingConnection connection = new Jingle.StreamingConnection();
         if (content.security_params != null) {
             iostream = content.security_params.wrap_stream(iostream);
