@@ -1,0 +1,23 @@
+{
+  "cli_version": "0.12.0",
+  "checkpoint_id": "01M5N31MQASB7P8MZ99HAXJJ19",
+  "session_id": "01a16a30-504a-74eb-9aa3-9e80684cef6d",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-23T19:15:47.212388Z",
+  "branch": "libdino",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "xd://hindsight_search_knowledge_pages"
+  ],
+  "agent": "Pi",
+  "model": "gpt-6-astra",
+  "turn_id": "9027bbbc0ae0",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 26466,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 73984,
+    "output_tokens": 210,
+    "api_call_count": 4
+  }
+}
